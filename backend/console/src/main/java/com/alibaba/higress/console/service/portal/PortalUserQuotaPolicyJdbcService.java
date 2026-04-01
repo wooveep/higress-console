@@ -6,12 +6,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 
 import javax.annotation.PostConstruct;
 
@@ -20,6 +14,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.higress.console.model.aiquota.AiQuotaUserPolicy;
+import com.alibaba.higress.console.util.ConsoleDateTimeUtil;
 import com.alibaba.higress.sdk.exception.BusinessException;
 import com.alibaba.higress.sdk.exception.ValidationException;
 
@@ -31,9 +26,6 @@ public class PortalUserQuotaPolicyJdbcService {
 
     private static final String DAILY_RESET_MODE_FIXED = "fixed";
     private static final String DEFAULT_DAILY_RESET_TIME = "00:00";
-    private static final DateTimeFormatter LOCAL_DATE_TIME_MINUTE_FORMATTER =
-        DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm");
-
     @Value("${higress.portal.db.url:}")
     private String dbUrl;
 
@@ -223,26 +215,10 @@ public class PortalUserQuotaPolicyJdbcService {
     }
 
     private Timestamp parseTimestamp(String value) {
-        String normalized = StringUtils.trimToEmpty(value);
-        try {
-            return Timestamp.from(Instant.parse(normalized));
-        } catch (DateTimeParseException ignored) {
-        }
-        try {
-            return Timestamp.from(OffsetDateTime.parse(normalized).toInstant());
-        } catch (DateTimeParseException ignored) {
-        }
-        try {
-            return Timestamp.from(LocalDateTime.parse(normalized, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-                .atZone(ZoneId.systemDefault()).toInstant());
-        } catch (DateTimeParseException ignored) {
-        }
-        try {
-            return Timestamp.from(LocalDateTime.parse(normalized, LOCAL_DATE_TIME_MINUTE_FORMATTER)
-                .atZone(ZoneId.systemDefault()).toInstant());
-        } catch (DateTimeParseException ex) {
-            throw new ValidationException("costResetAt must be RFC3339 or yyyy-MM-dd'T'HH:mm.");
-        }
+        return ConsoleDateTimeUtil.parseTimestamp(
+            value,
+            "costResetAt",
+            "RFC3339 or yyyy-MM-dd'T'HH:mm[:ss] in UTC");
     }
 
     private Connection openConnection() throws SQLException {

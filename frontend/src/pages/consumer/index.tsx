@@ -15,6 +15,7 @@ import {
   updateConsumer,
   updateConsumerStatus,
 } from '@/services/consumer';
+import { formatDateTimeDisplay } from '@/utils/time';
 import { ApartmentOutlined, ExclamationCircleOutlined, RedoOutlined, UserOutlined } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-layout';
 import { useRequest } from 'ahooks';
@@ -56,47 +57,8 @@ const ConsumerList: React.FC = () => {
   const [openInviteCodeModal, setOpenInviteCodeModal] = useState(false);
   const [inviteStatusFilter, setInviteStatusFilter] = useState<string | undefined>(undefined);
 
-  const parseDateValue = (value: any): Date | null => {
-    if (!value) {
-      return null;
-    }
-    if (value instanceof Date) {
-      return Number.isNaN(value.getTime()) ? null : value;
-    }
-    if (Array.isArray(value)) {
-      const [year, month, day, hour = 0, minute = 0, second = 0, nano = 0] = value;
-      if ([year, month, day].every((item) => typeof item === 'number')) {
-        const date = new Date(year, month - 1, day, hour, minute, second, Math.floor((nano || 0) / 1_000_000));
-        return Number.isNaN(date.getTime()) ? null : date;
-      }
-      return null;
-    }
-    if (typeof value === 'object') {
-      const year = value.year;
-      const month = value.monthValue ?? value.month;
-      const day = value.dayOfMonth ?? value.day;
-      if ([year, month, day].every((item) => typeof item === 'number')) {
-        const hour = value.hour || 0;
-        const minute = value.minute || 0;
-        const second = value.second || 0;
-        const nano = value.nano || 0;
-        const date = new Date(year, month - 1, day, hour, minute, second, Math.floor(nano / 1_000_000));
-        return Number.isNaN(date.getTime()) ? null : date;
-      }
-    }
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? null : date;
-  };
-
   const formatDateTime = (value?: any) => {
-    if (!value) {
-      return '-';
-    }
-    const date = parseDateValue(value);
-    if (!date) {
-      return '-';
-    }
-    return date.toLocaleString();
+    return formatDateTimeDisplay(value);
   };
 
   const renderInviteStatus = (status?: string) => {

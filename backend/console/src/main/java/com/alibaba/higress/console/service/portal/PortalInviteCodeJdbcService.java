@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 
 import com.alibaba.higress.console.model.portal.PortalInviteCodePageQuery;
 import com.alibaba.higress.console.model.portal.PortalInviteCodeRecord;
+import com.alibaba.higress.console.util.ConsoleDateTimeUtil;
 import com.alibaba.higress.sdk.exception.BusinessException;
 import com.alibaba.higress.sdk.exception.ValidationException;
 import com.alibaba.higress.sdk.model.PaginatedResult;
@@ -57,7 +58,7 @@ public class PortalInviteCodeJdbcService {
             throw new IllegalStateException("Portal database is unavailable.");
         }
         int validDays = normalizeExpireDays(expiresInDays);
-        LocalDateTime expiresAt = LocalDateTime.now().plusDays(validDays);
+        LocalDateTime expiresAt = ConsoleDateTimeUtil.now().plusDays(validDays);
         String insertSql = "INSERT INTO portal_invite_code (invite_code, status, expires_at) VALUES (?, ?, ?)";
 
         for (int i = 0; i < MAX_GENERATE_ATTEMPTS; i++) {
@@ -66,7 +67,7 @@ public class PortalInviteCodeJdbcService {
                 PreparedStatement statement = connection.prepareStatement(insertSql)) {
                 statement.setString(1, inviteCode);
                 statement.setString(2, STATUS_ACTIVE);
-                statement.setTimestamp(3, Timestamp.valueOf(expiresAt));
+                statement.setTimestamp(3, ConsoleDateTimeUtil.toTimestamp(expiresAt));
                 statement.executeUpdate();
                 return queryByInviteCode(inviteCode);
             } catch (SQLException ex) {
@@ -203,6 +204,6 @@ public class PortalInviteCodeJdbcService {
         if (timestamp == null) {
             return null;
         }
-        return timestamp.toLocalDateTime();
+        return ConsoleDateTimeUtil.toLocalDateTime(timestamp);
     }
 }

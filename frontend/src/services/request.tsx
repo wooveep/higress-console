@@ -1,7 +1,12 @@
 import { Modal } from "antd";
-import axios from "axios";
+import axios, { AxiosRequestConfig } from "axios";
 import i18next from 'i18next';
 import { ErrorComp } from './exception';
+
+export interface RequestOptions extends AxiosRequestConfig {
+  skipAuthRedirect?: boolean;
+  skipErrorModal?: boolean;
+}
 
 const request = axios.create({
   timeout: 5 * 1000,
@@ -42,23 +47,26 @@ request.interceptors.response.use(
   (error) => {
     // console.log("error====", error);
     let { message, config, code } = error;
+    const requestConfig = (config || {}) as RequestOptions;
+    const requestUrl = requestConfig.url || '';
     if (error.response) {
       const { status, data } = error.response;
 
       if (status === 401) {
-        if (config.url.indexOf('/login') !== -1) {
+        if (requestUrl.includes('/login')) {
           // Unauthorized response is allowed for a login request.
-          Promise.resolve(error.response);
-          return;
+          return Promise.resolve(error.response);
+        }
+        if (requestConfig.skipAuthRedirect) {
+          return Promise.reject(error);
         }
         // Unauthorized. Jump to the login page.
-        Promise.reject(error);
         if (window.location.href.indexOf('/init') === -1 && window.location.href.indexOf('/login') === -1) {
           window.location.href = `/login?redirect=${window.location.pathname}`;
         }
-        return;
+        return Promise.reject(error);
       }
-      const messageKeys = [`request.error.${status}_${config.method}`, `request.error.${status}`];
+      const messageKeys = [`request.error.${status}_${requestConfig.method}`, `request.error.${status}`];
       for (const key of messageKeys) {
         const localizedMessage = i18next.t(key);
         if (localizedMessage !== key) {
@@ -68,10 +76,12 @@ request.interceptors.response.use(
       }
       code = status;
       if (data) {
-        config.data = typeof data === 'string' ? data : JSON.stringify(data);
+        requestConfig.data = typeof data === 'string' ? data : JSON.stringify(data);
       }
     }
-    showErrorModal(message, config, code);
+    if (!requestConfig.skipErrorModal) {
+      showErrorModal(message, requestConfig, code);
+    }
     return Promise.reject(error);
   },
 );

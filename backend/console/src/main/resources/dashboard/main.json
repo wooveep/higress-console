@@ -2304,7 +2304,7 @@
     "to": "now"
   },
   "timepicker": {},
-  "timezone": "",
+  "timezone": "browser",
   "title": "Higress Dashboard",
   "weekStart": ""
 }

@@ -332,7 +332,7 @@
         "limitWeekly": "周上限",
         "limitMonthly": "月上限",
         "costResetAt": "软重置起点",
-        "costResetAtHelp": "留空表示不变。可填写 RFC3339 时间，或使用 yyyy-MM-ddTHH:mm，例如 2026-03-27T10:30。",
+        "costResetAtHelp": "留空表示不变。页面按浏览器本地时间填写 yyyy-MM-ddTHH:mm，提交时会自动转换为 UTC；也支持直接填写 RFC3339 时间。",
         "amountHelp": "页面按 RMB 输入，保存时会自动转换为 micro_yuan。"
       }
     },
@@ -651,7 +651,9 @@
     "providerForm": {
       "sections": {
         "portalModelMeta": "模型元数据（Portal 展示）",
-        "modelPricing": "模型定价"
+        "modelPricing": "模型定价",
+        "cachePricing": "缓存定价",
+        "imagePricing": "图像定价"
       },
       "actions": {
         "addTag": "添加标签",
@@ -661,7 +663,10 @@
       "help": {
         "pricingCurrency": "一期计费统一使用人民币，Portal 会按 RMB 金额和 token 单价扣费。",
         "inputPer1K": "填写该模型每 1K 输入 tokens 的 RMB 单价，保存后会同步到 Portal 账务表。",
-        "outputPer1K": "填写该模型每 1K 输出 tokens 的 RMB 单价，保存后会同步到 Portal 账务表。"
+        "outputPer1K": "填写该模型每 1K 输出 tokens 的 RMB 单价，保存后会同步到 Portal 账务表。",
+        "inputCostPerToken": "填写该模型每个输入 token 的 RMB 单价，保存时会物化为 Portal 账务运行态价格。",
+        "outputCostPerToken": "填写该模型每个输出 token 的 RMB 单价，保存时会物化为 Portal 账务运行态价格。",
+        "cachePricingFallback": "缓存价格项可选；未显式配置时会按输入/输出基础单价走约定回退链。"
       },
       "fixedCurrencyValue": "CNY（RMB）",
       "label": {
@@ -669,6 +674,20 @@
         "pricingCurrency": "计费币种",
         "inputPer1K": "输入价格（每 1K tokens，RMB）",
         "outputPer1K": "输出价格（每 1K tokens，RMB）",
+        "inputCostPerToken": "输入 Token 单价（RMB）",
+        "outputCostPerToken": "输出 Token 单价（RMB）",
+        "inputCostPerRequest": "每请求固定费用（RMB）",
+        "inputCostPerTokenAbove200K": "输入 Token 单价（超过 200K，上下文长窗，RMB）",
+        "outputCostPerTokenAbove200K": "输出 Token 单价（超过 200K，上下文长窗，RMB）",
+        "cacheCreationInputTokenCost": "缓存创建 Token 单价（5m，RMB）",
+        "cacheCreationInputTokenCostAbove1hr": "缓存创建 Token 单价（1h，RMB）",
+        "cacheReadInputTokenCost": "缓存读取 Token 单价（RMB）",
+        "cacheCreationInputTokenCostAbove200K": "缓存创建 Token 单价（超过 200K，RMB）",
+        "cacheReadInputTokenCostAbove200K": "缓存读取 Token 单价（超过 200K，RMB）",
+        "outputCostPerImage": "输出图像按张计费（RMB）",
+        "outputCostPerImageToken": "输出图像 Token 单价（RMB）",
+        "inputCostPerImage": "输入图像按张计费（RMB）",
+        "inputCostPerImageToken": "输入图像 Token 单价（RMB）",
         "modelIntro": "模型介绍",
         "modelTags": "模型标签",
         "modelModalities": "模型能力 - 模态",
@@ -719,6 +738,8 @@
         "typeRequired": "请选择大模型供应商",
         "inputPer1KRequired": "请输入输入价格（每 1K tokens 的 RMB 单价）",
         "outputPer1KRequired": "请输入输出价格（每 1K tokens 的 RMB 单价）",
+        "inputCostPerTokenRequired": "请输入输入 Token 单价（RMB）",
+        "outputCostPerTokenRequired": "请输入输出 Token 单价（RMB）",
         "serviceNameRequired": "请输入服务名称",
         "serviceNameNoSlash": "服务名称不能包含斜杠（/）",
         "failureThresholdRequired": "请输入最小连续请求失败次数",

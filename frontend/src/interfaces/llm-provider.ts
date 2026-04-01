@@ -36,6 +36,21 @@ export interface PortalModelMeta {
   };
   pricing?: {
     currency?: 'CNY';
+    input_cost_per_token?: number;
+    output_cost_per_token?: number;
+    input_cost_per_request?: number;
+    cache_creation_input_token_cost?: number;
+    cache_creation_input_token_cost_above_1hr?: number;
+    cache_read_input_token_cost?: number;
+    input_cost_per_token_above_200k_tokens?: number;
+    output_cost_per_token_above_200k_tokens?: number;
+    cache_creation_input_token_cost_above_200k_tokens?: number;
+    cache_read_input_token_cost_above_200k_tokens?: number;
+    output_cost_per_image?: number;
+    output_cost_per_image_token?: number;
+    input_cost_per_image?: number;
+    input_cost_per_image_token?: number;
+    supports_prompt_caching?: boolean;
     inputPer1K?: number;
     outputPer1K?: number;
   };

@@ -8,9 +8,9 @@ info:
   title: AI Token Rate Limit
   x-title-i18n:
     zh-CN: AI Token 限流
-  description: Implement token rate limiting based on specific keys, where the key source can be URL parameters, HTTP request headers, client IP addresses, etc.
+  description: Implement AI rate limiting by dynamic keys, with support for both token-based and amount-based windows.
   x-description-i18n:
-    zh-CN: 基于特定键值实现 token 限流，键值来源可以是 URL 参数、HTTP 请求头、客户端 IP 地址等。
+    zh-CN: 基于动态键值实现 AI 限流，同时支持 token 与 amount 两种窗口累计方式。
   iconUrl: https://img.alicdn.com/imgextra/i1/O1CN018iKKih1iVx287RltL_!!6000000004419-2-tps-42-42.png
   version: 2.0.0
   contact:
@@ -21,7 +21,7 @@ spec:
   configSchema:
     openAPIV3Schema:
       type: object
-      required: [rule_name, rule_items, redis]
+      required: [rule_name, redis]
       properties:
         rule_name:
           type: string
@@ -31,6 +31,77 @@ spec:
           description: 限流规则名称，根据限流规则名称+限流类型+限流key名称+限流key对应的实际值来拼装redis key
           x-description-i18n:
             en-US: Name of the rate limiting rule, used to assemble the redis key based on the rule name + rate limiting type + rate limiting key name + actual value corresponding to the rate limiting key
+        limit_unit:
+          type: string
+          title: 限流单位
+          x-title-i18n:
+            en-US: Limit Unit
+          description: 限流单位，支持 token 或 amount
+          x-description-i18n:
+            en-US: Limit unit, either token or amount
+          enum: [token, amount]
+          default: token
+        global_threshold:
+          type: object
+          title: 全局限流阈值
+          x-title-i18n:
+            en-US: Global Threshold
+          description: 对整个规则组生效的限流阈值，支持 token 或 amount 维度
+          x-description-i18n:
+            en-US: Global threshold for the entire rule group, in token or amount units
+          properties:
+            token_per_second:
+              type: integer
+              title: 每秒 token 限额
+              x-title-i18n:
+                en-US: Token Per Second
+            token_per_minute:
+              type: integer
+              title: 每分钟 token 限额
+              x-title-i18n:
+                en-US: Token Per Minute
+            token_per_hour:
+              type: integer
+              title: 每小时 token 限额
+              x-title-i18n:
+                en-US: Token Per Hour
+            token_per_day:
+              type: integer
+              title: 每天 token 限额
+              x-title-i18n:
+                en-US: Token Per Day
+            amount_per_second:
+              type: integer
+              title: 每秒金额限额
+              x-title-i18n:
+                en-US: Amount Per Second
+              description: 允许每秒请求金额，单位 micro_yuan
+              x-description-i18n:
+                en-US: Allowed billed cost per second in micro_yuan
+            amount_per_minute:
+              type: integer
+              title: 每分钟金额限额
+              x-title-i18n:
+                en-US: Amount Per Minute
+              description: 允许每分钟请求金额，单位 micro_yuan
+              x-description-i18n:
+                en-US: Allowed billed cost per minute in micro_yuan
+            amount_per_hour:
+              type: integer
+              title: 每小时金额限额
+              x-title-i18n:
+                en-US: Amount Per Hour
+              description: 允许每小时请求金额，单位 micro_yuan
+              x-description-i18n:
+                en-US: Allowed billed cost per hour in micro_yuan
+            amount_per_day:
+              type: integer
+              title: 每天金额限额
+              x-title-i18n:
+                en-US: Amount Per Day
+              description: 允许每天请求金额，单位 micro_yuan
+              x-description-i18n:
+                en-US: Allowed billed cost per day in micro_yuan
         rule_items:
           type: array
           title: 限流规则项
@@ -167,6 +238,38 @@ spec:
                       description: 允许每天请求token数
                       x-description-i18n:
                         en-US: Allowed number of token requests per day
+                    amount_per_second:
+                      type: integer
+                      title: 每秒金额限额
+                      x-title-i18n:
+                        en-US: Amount Per Second
+                      description: 允许每秒请求金额，单位 micro_yuan
+                      x-description-i18n:
+                        en-US: Allowed billed cost per second in micro_yuan
+                    amount_per_minute:
+                      type: integer
+                      title: 每分钟金额限额
+                      x-title-i18n:
+                        en-US: Amount Per Minute
+                      description: 允许每分钟请求金额，单位 micro_yuan
+                      x-description-i18n:
+                        en-US: Allowed billed cost per minute in micro_yuan
+                    amount_per_hour:
+                      type: integer
+                      title: 每小时金额限额
+                      x-title-i18n:
+                        en-US: Amount Per Hour
+                      description: 允许每小时请求金额，单位 micro_yuan
+                      x-description-i18n:
+                        en-US: Allowed billed cost per hour in micro_yuan
+                    amount_per_day:
+                      type: integer
+                      title: 每天金额限额
+                      x-title-i18n:
+                        en-US: Amount Per Day
+                      description: 允许每天请求金额，单位 micro_yuan
+                      x-description-i18n:
+                        en-US: Allowed billed cost per day in micro_yuan
         rejected_code:
           type: integer
           title: 限流状态码
@@ -185,6 +288,15 @@ spec:
           x-description-i18n:
             en-US: The response body returned when the request is rate limited
           default: Too many requests
+        price_key_prefix:
+          type: string
+          title: 模型价格 Redis Key前缀
+          x-title-i18n:
+            en-US: Model Price Redis Key Prefix
+          description: amount 模式下读取模型价格 Redis Hash 的 key 前缀
+          x-description-i18n:
+            en-US: Redis hash prefix used to load model pricing in amount mode
+          default: "billing:model-price:"
         redis:
           type: object
           title: Redis配置
@@ -238,6 +350,7 @@ spec:
               default: 1000
       example:
         rule_name: default_rule
+        limit_unit: token
         rule_items:
           - limit_by_per_ip: from-remote-addr
             limit_keys:
@@ -251,7 +364,7 @@ spec:
   routeConfigSchema:
     openAPIV3Schema:
       type: object
-      required: [rule_name, rule_items, redis]
+      required: [rule_name, redis]
       properties:
         rule_name:
           type: string
@@ -261,6 +374,77 @@ spec:
           description: 限流规则名称，根据限流规则名称+限流类型+限流key名称+限流key对应的实际值来拼装redis key
           x-description-i18n:
             en-US: Name of the rate limiting rule, used to assemble the redis key based on the rule name + rate limiting type + rate limiting key name + actual value corresponding to the rate limiting key
+        limit_unit:
+          type: string
+          title: 限流单位
+          x-title-i18n:
+            en-US: Limit Unit
+          description: 限流单位，支持 token 或 amount
+          x-description-i18n:
+            en-US: Limit unit, either token or amount
+          enum: [token, amount]
+          default: token
+        global_threshold:
+          type: object
+          title: 全局限流阈值
+          x-title-i18n:
+            en-US: Global Threshold
+          description: 对整个规则组生效的限流阈值，支持 token 或 amount 维度
+          x-description-i18n:
+            en-US: Global threshold for the entire rule group, in token or amount units
+          properties:
+            token_per_second:
+              type: integer
+              title: 每秒 token 限额
+              x-title-i18n:
+                en-US: Token Per Second
+            token_per_minute:
+              type: integer
+              title: 每分钟 token 限额
+              x-title-i18n:
+                en-US: Token Per Minute
+            token_per_hour:
+              type: integer
+              title: 每小时 token 限额
+              x-title-i18n:
+                en-US: Token Per Hour
+            token_per_day:
+              type: integer
+              title: 每天 token 限额
+              x-title-i18n:
+                en-US: Token Per Day
+            amount_per_second:
+              type: integer
+              title: 每秒金额限额
+              x-title-i18n:
+                en-US: Amount Per Second
+              description: 允许每秒请求金额，单位 micro_yuan
+              x-description-i18n:
+                en-US: Allowed billed cost per second in micro_yuan
+            amount_per_minute:
+              type: integer
+              title: 每分钟金额限额
+              x-title-i18n:
+                en-US: Amount Per Minute
+              description: 允许每分钟请求金额，单位 micro_yuan
+              x-description-i18n:
+                en-US: Allowed billed cost per minute in micro_yuan
+            amount_per_hour:
+              type: integer
+              title: 每小时金额限额
+              x-title-i18n:
+                en-US: Amount Per Hour
+              description: 允许每小时请求金额，单位 micro_yuan
+              x-description-i18n:
+                en-US: Allowed billed cost per hour in micro_yuan
+            amount_per_day:
+              type: integer
+              title: 每天金额限额
+              x-title-i18n:
+                en-US: Amount Per Day
+              description: 允许每天请求金额，单位 micro_yuan
+              x-description-i18n:
+                en-US: Allowed billed cost per day in micro_yuan
         rule_items:
           type: array
           title: 限流规则项
@@ -397,6 +581,38 @@ spec:
                       description: 允许每天请求token数
                       x-description-i18n:
                         en-US: Allowed number of token requests per day
+                    amount_per_second:
+                      type: integer
+                      title: 每秒金额限额
+                      x-title-i18n:
+                        en-US: Amount Per Second
+                      description: 允许每秒请求金额，单位 micro_yuan
+                      x-description-i18n:
+                        en-US: Allowed billed cost per second in micro_yuan
+                    amount_per_minute:
+                      type: integer
+                      title: 每分钟金额限额
+                      x-title-i18n:
+                        en-US: Amount Per Minute
+                      description: 允许每分钟请求金额，单位 micro_yuan
+                      x-description-i18n:
+                        en-US: Allowed billed cost per minute in micro_yuan
+                    amount_per_hour:
+                      type: integer
+                      title: 每小时金额限额
+                      x-title-i18n:
+                        en-US: Amount Per Hour
+                      description: 允许每小时请求金额，单位 micro_yuan
+                      x-description-i18n:
+                        en-US: Allowed billed cost per hour in micro_yuan
+                    amount_per_day:
+                      type: integer
+                      title: 每天金额限额
+                      x-title-i18n:
+                        en-US: Amount Per Day
+                      description: 允许每天请求金额，单位 micro_yuan
+                      x-description-i18n:
+                        en-US: Allowed billed cost per day in micro_yuan
         rejected_code:
           type: integer
           title: 限流状态码
@@ -415,6 +631,15 @@ spec:
           x-description-i18n:
             en-US: The response body returned when the request is rate limited
           default: Too many requests
+        price_key_prefix:
+          type: string
+          title: 模型价格 Redis Key前缀
+          x-title-i18n:
+            en-US: Model Price Redis Key Prefix
+          description: amount 模式下读取模型价格 Redis Hash 的 key 前缀
+          x-description-i18n:
+            en-US: Redis hash prefix used to load model pricing in amount mode
+          default: "billing:model-price:"
         redis:
           type: object
           title: Redis配置
@@ -478,4 +703,3 @@ spec:
           service_port: 6379
           username: default
           password: '123456'
-

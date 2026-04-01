@@ -15,6 +15,7 @@ package com.alibaba.higress.console.controller.ai;
 import javax.annotation.Resource;
 import javax.validation.constraints.NotBlank;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -56,6 +57,37 @@ public class LlmProvidersController {
 
     private static final String PORTAL_MODEL_META_KEY = "portalModelMeta";
     private static final String CURRENCY_CNY = "CNY";
+    private static final String TAG_CACHE = "cache";
+    private static final String TAG_IMAGE = "image";
+    private static final String[] CACHE_TAG_ALIASES = new String[] {"cache", "prompt-cache"};
+    private static final String[] IMAGE_TAG_ALIASES = new String[] {"image", "image-generation"};
+    private static final String[] OPTIONAL_PRICING_FIELDS = new String[] {
+        "input_cost_per_request",
+        "cache_creation_input_token_cost",
+        "cache_creation_input_token_cost_above_1hr",
+        "cache_read_input_token_cost",
+        "input_cost_per_token_above_200k_tokens",
+        "output_cost_per_token_above_200k_tokens",
+        "cache_creation_input_token_cost_above_200k_tokens",
+        "cache_read_input_token_cost_above_200k_tokens",
+        "output_cost_per_image",
+        "output_cost_per_image_token",
+        "input_cost_per_image",
+        "input_cost_per_image_token",
+    };
+    private static final String[] CACHE_PRICING_FIELDS = new String[] {
+        "cache_creation_input_token_cost",
+        "cache_creation_input_token_cost_above_1hr",
+        "cache_read_input_token_cost",
+        "cache_creation_input_token_cost_above_200k_tokens",
+        "cache_read_input_token_cost_above_200k_tokens",
+    };
+    private static final String[] IMAGE_PRICING_FIELDS = new String[] {
+        "output_cost_per_image",
+        "output_cost_per_image_token",
+        "input_cost_per_image",
+        "input_cost_per_image_token",
+    };
 
     private LlmProviderService llmProviderService;
     private PortalModelPricingJdbcService portalModelPricingJdbcService;
@@ -145,6 +177,12 @@ public class LlmProvidersController {
         Map<String, Object> portalModelMeta = (Map<String, Object>)metaObj;
         validateStringField(portalModelMeta, "intro");
         validateStringListField(portalModelMeta, "tags");
+        List<String> normalizedTags = normalizeTags(portalModelMeta.get("tags"));
+        if (normalizedTags.isEmpty()) {
+            portalModelMeta.remove("tags");
+        } else {
+            portalModelMeta.put("tags", normalizedTags);
+        }
 
         Object capabilitiesObj = portalModelMeta.get("capabilities");
         if (capabilitiesObj != null) {
@@ -163,8 +201,26 @@ public class LlmProvidersController {
         if (StringUtils.isNotBlank(currency) && !StringUtils.equalsIgnoreCase(currency, CURRENCY_CNY)) {
             throw new ValidationException("rawConfigs.portalModelMeta.pricing.currency must be CNY.");
         }
-        requireNumberField(pricing, "inputPer1K", "rawConfigs.portalModelMeta.pricing", false);
-        requireNumberField(pricing, "outputPer1K", "rawConfigs.portalModelMeta.pricing", false);
+        pricing.put("input_cost_per_token",
+            requirePerTokenField(pricing, "input_cost_per_token", "inputPer1K", "rawConfigs.portalModelMeta.pricing"));
+        pricing.put("output_cost_per_token",
+            requirePerTokenField(pricing, "output_cost_per_token", "outputPer1K", "rawConfigs.portalModelMeta.pricing"));
+        for (String fieldName : OPTIONAL_PRICING_FIELDS) {
+            validateNumberField(pricing, fieldName, "rawConfigs.portalModelMeta.pricing", false);
+        }
+        if (!normalizedTags.contains(TAG_CACHE)) {
+            for (String fieldName : CACHE_PRICING_FIELDS) {
+                pricing.remove(fieldName);
+            }
+        }
+        if (!normalizedTags.contains(TAG_IMAGE)) {
+            for (String fieldName : IMAGE_PRICING_FIELDS) {
+                pricing.remove(fieldName);
+            }
+        }
+        pricing.put("supports_prompt_caching", normalizedTags.contains(TAG_CACHE));
+        pricing.remove("inputPer1K");
+        pricing.remove("outputPer1K");
         pricing.put("currency", CURRENCY_CNY);
 
         Object limitsObj = portalModelMeta.get("limits");
@@ -263,6 +319,62 @@ public class LlmProvidersController {
             }
         }
         return null;
+    }
+
+    private String asString(Object value) {
+        return value instanceof String ? (String)value : null;
+    }
+
+    private double requirePerTokenField(Map<String, Object> pricing, String fieldName, String legacyField, String parentPath) {
+        Double value = parseNumber(pricing.get(fieldName));
+        if (value != null) {
+            if (value < 0) {
+                throw new ValidationException(parentPath + "." + fieldName + " cannot be negative.");
+            }
+            return value;
+        }
+        Double legacyValue = parseNumber(pricing.get(legacyField));
+        if (legacyValue != null) {
+            if (legacyValue < 0) {
+                throw new ValidationException(parentPath + "." + legacyField + " cannot be negative.");
+            }
+            return legacyValue / 1000D;
+        }
+        throw new ValidationException(parentPath + "." + fieldName + " is required.");
+    }
+
+    private List<String> normalizeTags(Object value) {
+        List<String> result = new ArrayList<>();
+        if (!(value instanceof List)) {
+            return result;
+        }
+        @SuppressWarnings("unchecked")
+        List<Object> values = (List<Object>)value;
+        for (Object item : values) {
+            String normalized = normalizeTag(asString(item));
+            if (normalized != null && !result.contains(normalized)) {
+                result.add(normalized);
+            }
+        }
+        return result;
+    }
+
+    private String normalizeTag(String rawTag) {
+        String normalized = StringUtils.trimToNull(StringUtils.lowerCase(rawTag));
+        if (normalized == null) {
+            return null;
+        }
+        for (String alias : CACHE_TAG_ALIASES) {
+            if (StringUtils.equals(normalized, alias)) {
+                return TAG_CACHE;
+            }
+        }
+        for (String alias : IMAGE_TAG_ALIASES) {
+            if (StringUtils.equals(normalized, alias)) {
+                return TAG_IMAGE;
+            }
+        }
+        return normalized;
     }
 
     private LlmProvider addOrUpdateWithPortalSync(LlmProvider provider) {

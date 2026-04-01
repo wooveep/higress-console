@@ -53,6 +53,34 @@ When `value_source` is `response_streaming_body`, `rule` should be configured to
 - `replace`: extract value from the last valid chunk 
 - `append`: join value pieces from all valid chunks
 
+### Built-in Attributes
+
+You can use built-in attribute keys without configuring `value_source` and `value`. Common built-ins include:
+
+- `question`
+- `answer`
+- `tool_calls`
+- `reasoning`
+- `reasoning_tokens`
+- `cached_tokens`
+- `input_token_details`
+- `output_token_details`
+
+### Detailed Usage Metrics
+
+In addition to `input_token`, `output_token`, and `total_token`, the plugin normalizes multi-provider usage into these detailed fields and emits them to metrics, logs, and spans:
+
+- `cache_creation_input_tokens`
+- `cache_creation_5m_input_tokens`
+- `cache_creation_1h_input_tokens`
+- `cache_read_input_tokens`
+- `input_image_tokens`
+- `output_image_tokens`
+- `input_image_count`
+- `output_image_count`
+- `request_count`
+- `cache_ttl`
+
 ## Configuration example
 If you want to record ai-statistic related statistical values ​​​​in the gateway access log, you need to modify log_format and add a new field based on the original log_format. The example is as follows:
 

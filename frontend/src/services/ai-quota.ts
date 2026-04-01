@@ -7,12 +7,16 @@ import {
   AiQuotaUserPolicy,
   AiQuotaUserPolicyRequest,
 } from '@/interfaces/ai-quota';
-import request from './request';
+import request, { RequestOptions } from './request';
 
 const BASE_URL = '/v1/ai/quotas';
+const QUIET_MENU_REQUEST_OPTIONS: RequestOptions = {
+  skipAuthRedirect: true,
+  skipErrorModal: true,
+};
 
 export const getAiQuotaMenuState = (): Promise<AiQuotaMenuState> => {
-  return request.get<any, AiQuotaMenuState>(`${BASE_URL}/menu-state`);
+  return request.get<any, AiQuotaMenuState>(`${BASE_URL}/menu-state`, QUIET_MENU_REQUEST_OPTIONS);
 };
 
 export const getAiQuotaRoutes = (): Promise<AiQuotaRouteSummary[]> => {

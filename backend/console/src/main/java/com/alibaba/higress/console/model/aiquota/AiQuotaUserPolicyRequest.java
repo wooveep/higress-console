@@ -32,6 +32,6 @@ public class AiQuotaUserPolicyRequest {
     @Schema(description = "Monthly cost limit in micro_yuan")
     private Long limitMonthly;
 
-    @Schema(description = "Soft reset start time in RFC3339 format or yyyy-MM-dd'T'HH:mm")
+    @Schema(description = "Soft reset start time in RFC3339 format or yyyy-MM-dd'T'HH:mm interpreted in UTC")
     private String costResetAt;
 }

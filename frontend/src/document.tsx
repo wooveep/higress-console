@@ -13,10 +13,12 @@ export default function Document() {
           content={
             "default-src 'self'; " +
             "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+            "worker-src 'self' blob:; " +
             "style-src 'self' 'unsafe-inline'; " +
             "img-src * data:; " +
             "font-src 'self' data:; " +
             "connect-src 'self'; " +
+            "child-src 'self' blob:; " +
             "frame-src *; "
           }
         />

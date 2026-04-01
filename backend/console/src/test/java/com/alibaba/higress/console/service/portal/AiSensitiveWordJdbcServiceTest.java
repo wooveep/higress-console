@@ -14,6 +14,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.alibaba.higress.console.model.aisensitive.AiSensitiveBlockAudit;
 import com.alibaba.higress.console.model.aisensitive.AiSensitiveBlockAuditEvent;
 import com.alibaba.higress.console.model.aisensitive.AiSensitiveSystemConfig;
+import com.alibaba.higress.console.util.ConsoleDateTimeUtil;
 
 class AiSensitiveWordJdbcServiceTest {
 
@@ -33,7 +34,7 @@ class AiSensitiveWordJdbcServiceTest {
 
     @Test
     void saveAuditAndListAuditsShouldPersistBlockedEvent() {
-        LocalDateTime blockedAt = LocalDateTime.now().withNano(0);
+        LocalDateTime blockedAt = ConsoleDateTimeUtil.now().withNano(0);
         AiSensitiveBlockAuditEvent event = AiSensitiveBlockAuditEvent.builder()
             .requestId("req-1")
             .routeName("ai-route-doubao.internal")
@@ -66,7 +67,7 @@ class AiSensitiveWordJdbcServiceTest {
         assertEquals(1, audits.size());
         assertEquals(saved.getId(), audits.get(0).getId());
         assertEquals("请介绍南京的旅游景点", audits.get(0).getMatchedExcerpt());
-        assertEquals(blockedAt, Instant.parse(audits.get(0).getBlockedAt()).atZone(java.time.ZoneId.systemDefault())
+        assertEquals(blockedAt, Instant.parse(audits.get(0).getBlockedAt()).atZone(ConsoleDateTimeUtil.APP_ZONE_ID)
             .toLocalDateTime());
     }
 
@@ -91,8 +92,8 @@ class AiSensitiveWordJdbcServiceTest {
             null,
             "ai-route-doubao.internal",
             "contains",
-            blockedAt.minusMinutes(5).atZone(java.time.ZoneId.systemDefault()).toInstant().toString(),
-            blockedAt.plusMinutes(5).atZone(java.time.ZoneId.systemDefault()).toInstant().toString(),
+            blockedAt.minusMinutes(5).atZone(ConsoleDateTimeUtil.APP_ZONE_ID).toInstant().toString(),
+            blockedAt.plusMinutes(5).atZone(ConsoleDateTimeUtil.APP_ZONE_ID).toInstant().toString(),
             10);
 
         assertEquals(1, audits.size());

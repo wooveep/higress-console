@@ -11,6 +11,12 @@ The `ai-quota` plugin supports two operating modes:
 
 The `ai-quota` plugin needs to work with authentication plugins such as `key-auth`, `jwt-auth`, etc., to obtain the consumer name associated with the authenticated identity. In `amount` mode it no longer relies on `ai-statistics` as the source of truth for billing.
 
+Natural day/week/month windows in `amount` mode are always computed in `UTC`:
+
+- daily windows reset at the next `00:00` in Shanghai
+- weekly windows start on Monday `00:00`
+- monthly windows start at the first day of the next month `00:00`
+
 ## Runtime Properties
 Plugin execution phase: `default phase`
 Plugin execution priority: `750`
@@ -51,6 +57,23 @@ redis:
   service_port: 6379
   timeout: 2000
 ```
+
+### Detailed Billing Semantics In `amount` Mode
+
+`amount` mode reads the Redis hash at `price_key_prefix + <provider>/<model>`. The Portal control plane materializes this price snapshot in advance, so all `ModelPriceData` fallback rules are already resolved before runtime charging begins.
+
+The usage event and ledger pipeline now persist:
+
+- `input_tokens` / `output_tokens`
+- `cache_creation_input_tokens` / `cache_creation_5m_input_tokens` / `cache_creation_1h_input_tokens`
+- `cache_read_input_tokens`
+- `input_image_tokens` / `output_image_tokens`
+- `input_image_count` / `output_image_count`
+- `request_count`
+
+The final charge can therefore include per-token pricing, `input_cost_per_request`, per-image pricing, and `above_200k` tier pricing in one ledger event.
+
+Daily, weekly, and monthly amount-window TTLs are derived from the Shanghai calendar instead of the host machine timezone.
 
 ### Refresh Quota / Balance
 If the suffix of the current request URL matches the admin_path, for example, if the plugin is effective on the route example.com/v1/chat/completions, then the quota can be updated via:

@@ -21,6 +21,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.alibaba.higress.console.util.ConsoleDateTimeUtil;
 import com.alibaba.higress.sdk.exception.BusinessException;
 import com.alibaba.higress.sdk.exception.ValidationException;
 
@@ -230,7 +231,7 @@ public class PortalBillingQuotaJdbcService {
         if (deltaMicroYuan == 0) {
             return;
         }
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = ConsoleDateTimeUtil.now();
         try (PreparedStatement statement = connection.prepareStatement(
             "INSERT INTO billing_transaction "
                 + "(tx_id, consumer_name, tx_type, amount_micro_yuan, currency, source_type, source_id, occurred_at, created_at) "
@@ -241,8 +242,8 @@ public class PortalBillingQuotaJdbcService {
             statement.setString(4, CURRENCY_CNY);
             statement.setString(5, sourceType);
             statement.setString(6, sourceID);
-            statement.setTimestamp(7, Timestamp.valueOf(now));
-            statement.setTimestamp(8, Timestamp.valueOf(now));
+            statement.setTimestamp(7, ConsoleDateTimeUtil.toTimestamp(now));
+            statement.setTimestamp(8, ConsoleDateTimeUtil.toTimestamp(now));
             statement.executeUpdate();
         }
     }

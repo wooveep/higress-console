@@ -53,6 +53,34 @@ Attribute 配置说明:
 - `replace`：多个chunk中取最后一个有效chunk的值
 - `append`：拼接多个有效chunk中的值，可用于获取回答内容
 
+### 内置属性
+
+插件支持直接使用内置属性键，无需再填写 `value_source` 和 `value`。常用内置属性包括：
+
+- `question`
+- `answer`
+- `tool_calls`
+- `reasoning`
+- `reasoning_tokens`
+- `cached_tokens`
+- `input_token_details`
+- `output_token_details`
+
+### 细分 usage 指标
+
+除 `input_token`、`output_token`、`total_token` 外，插件还会把多供应商 usage 归一化为以下细分字段，并写入 metric、日志与 span：
+
+- `cache_creation_input_tokens`
+- `cache_creation_5m_input_tokens`
+- `cache_creation_1h_input_tokens`
+- `cache_read_input_tokens`
+- `input_image_tokens`
+- `output_image_tokens`
+- `input_image_count`
+- `output_image_count`
+- `request_count`
+- `cache_ttl`
+
 ## 配置示例
 如果希望在网关访问日志中记录ai-statistic相关的统计值，需要修改log_format，在原log_format基础上添加一个新字段，示例如下：
 

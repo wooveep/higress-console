@@ -17,6 +17,87 @@ const protocolList = [
   { label: "openai/v1", value: "openai/v1" },
 ];
 
+const cacheTagAliases = new Set(['cache', 'prompt-cache']);
+const imageTagAliases = new Set(['image', 'image-generation']);
+const cachePricingFields = [
+  'cache_creation_input_token_cost',
+  'cache_creation_input_token_cost_above_1hr',
+  'cache_read_input_token_cost',
+  'cache_creation_input_token_cost_above_200k_tokens',
+  'cache_read_input_token_cost_above_200k_tokens',
+];
+const imagePricingFields = [
+  'output_cost_per_image',
+  'output_cost_per_image_token',
+  'input_cost_per_image',
+  'input_cost_per_image_token',
+];
+const allPricingFields = [
+  'input_cost_per_token',
+  'output_cost_per_token',
+  'input_cost_per_request',
+  ...cachePricingFields,
+  'input_cost_per_token_above_200k_tokens',
+  'output_cost_per_token_above_200k_tokens',
+  ...imagePricingFields,
+];
+
+function normalizeModelTag(value: any): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return '';
+  }
+  if (cacheTagAliases.has(normalized)) {
+    return 'cache';
+  }
+  if (imageTagAliases.has(normalized)) {
+    return 'image';
+  }
+  return normalized;
+}
+
+function normalizeModelTags(value: any): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  return value
+    .map((item) => normalizeModelTag(item))
+    .filter((item) => {
+      if (!item || seen.has(item)) {
+        return false;
+      }
+      seen.add(item);
+      return true;
+    });
+}
+
+function hasFiniteNumber(value: any): boolean {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function convertLegacyPer1KToPerToken(value: any): number | undefined {
+  if (!hasFiniteNumber(value)) {
+    return undefined;
+  }
+  return value / 1000;
+}
+
+function hydratePricing(pricing: any) {
+  const nextPricing = pricing && typeof pricing === 'object' ? { ...pricing } : {};
+  if (!hasFiniteNumber(nextPricing.input_cost_per_token) && hasFiniteNumber(nextPricing.inputPer1K)) {
+    nextPricing.input_cost_per_token = convertLegacyPer1KToPerToken(nextPricing.inputPer1K);
+  }
+  if (!hasFiniteNumber(nextPricing.output_cost_per_token) && hasFiniteNumber(nextPricing.outputPer1K)) {
+    nextPricing.output_cost_per_token = convertLegacyPer1KToPerToken(nextPricing.outputPer1K);
+  }
+  nextPricing.currency = 'CNY';
+  return nextPricing;
+}
+
 const ProviderForm: React.FC = forwardRef((props: { value: any }, ref) => {
   const { t } = useTranslation();
   const [form] = Form.useForm();
@@ -28,6 +109,10 @@ const ProviderForm: React.FC = forwardRef((props: { value: any }, ref) => {
   const [qwenServerType, setQwenServerType] = useState<string | null>();
   const [providerConfig, setProviderConfig] = useState<object | null>();
   const [proxyServerOptions, setProxyServerOptions] = useState<OptionItem[] | null>();
+  const watchedTags = Form.useWatch(["rawConfigs", "portalModelMeta", "tags"], form) as string[] | undefined;
+  const normalizedTags = normalizeModelTags(watchedTags);
+  const showCachePricing = normalizedTags.includes('cache');
+  const showImagePricing = normalizedTags.includes('image');
   const proxyServersResult = useRequest(getProxyServers, {
     manual: true,
     onSuccess: (proxyServers: ProxyServer[]) => {
@@ -68,9 +153,7 @@ const ProviderForm: React.FC = forwardRef((props: { value: any }, ref) => {
       proxyName: '',
       rawConfigs: {
         portalModelMeta: {
-          pricing: {
-            currency: 'CNY',
-          },
+          pricing: { currency: 'CNY' },
         },
       },
     });
@@ -185,10 +268,7 @@ const ProviderForm: React.FC = forwardRef((props: { value: any }, ref) => {
           ...rawConfigs,
           portalModelMeta: {
             ...rawConfigs.portalModelMeta,
-            pricing: {
-              ...rawConfigs.portalModelMeta?.pricing,
-              currency: 'CNY',
-            },
+            pricing: hydratePricing(rawConfigs.portalModelMeta?.pricing),
           },
         },
       });
@@ -279,11 +359,17 @@ const ProviderForm: React.FC = forwardRef((props: { value: any }, ref) => {
       if (!Array.isArray(value)) {
         return [];
       }
+      const seen = new Set<string>();
       return value
         .map((item) => (typeof item === 'string' ? item.trim() : ''))
-        .filter((item) => !!item);
+        .filter((item) => {
+          if (!item || seen.has(item)) {
+            return false;
+          }
+          seen.add(item);
+          return true;
+        });
     };
-    const hasNumber = (value: any): boolean => typeof value === 'number' && Number.isFinite(value);
 
     if (typeof meta.intro === 'string') {
       meta.intro = meta.intro.trim();
@@ -292,7 +378,7 @@ const ProviderForm: React.FC = forwardRef((props: { value: any }, ref) => {
       delete meta.intro;
     }
 
-    const tags = normalizeStringArray(meta.tags);
+    const tags = normalizeModelTags(meta.tags);
     if (tags.length > 0) {
       meta.tags = tags;
     } else {
@@ -322,16 +408,29 @@ const ProviderForm: React.FC = forwardRef((props: { value: any }, ref) => {
     if (!meta.pricing || typeof meta.pricing !== 'object') {
       delete meta.pricing;
     } else {
-      const hasPricing = hasNumber(meta.pricing.inputPer1K) || hasNumber(meta.pricing.outputPer1K);
-      meta.pricing.currency = hasPricing ? 'CNY' : undefined;
-      if (!hasNumber(meta.pricing.inputPer1K)) {
-        delete meta.pricing.inputPer1K;
+      meta.pricing = hydratePricing(meta.pricing);
+      meta.pricing.supports_prompt_caching = tags.includes('cache');
+      delete meta.pricing.inputPer1K;
+      delete meta.pricing.outputPer1K;
+      for (const field of allPricingFields) {
+        if (!hasFiniteNumber(meta.pricing[field])) {
+          delete meta.pricing[field];
+        }
       }
-      if (!hasNumber(meta.pricing.outputPer1K)) {
-        delete meta.pricing.outputPer1K;
+      if (!tags.includes('cache')) {
+        for (const field of cachePricingFields) {
+          delete meta.pricing[field];
+        }
       }
-      if (!hasNumber(meta.pricing.inputPer1K) && !hasNumber(meta.pricing.outputPer1K)) {
+      if (!tags.includes('image')) {
+        for (const field of imagePricingFields) {
+          delete meta.pricing[field];
+        }
+      }
+      if (!hasFiniteNumber(meta.pricing.input_cost_per_token) && !hasFiniteNumber(meta.pricing.output_cost_per_token)) {
         delete meta.pricing;
+      } else {
+        meta.pricing.currency = 'CNY';
       }
     }
 
@@ -1226,25 +1325,110 @@ const ProviderForm: React.FC = forwardRef((props: { value: any }, ref) => {
         <Input value={t('llmProvider.providerForm.fixedCurrencyValue')} disabled />
       </Form.Item>
       <Form.Item
-        label={t('llmProvider.providerForm.label.inputPer1K')}
-        name={["rawConfigs", "portalModelMeta", "pricing", "inputPer1K"]}
-        extra={t('llmProvider.providerForm.help.inputPer1K')}
+        label={t('llmProvider.providerForm.label.inputCostPerToken')}
+        name={["rawConfigs", "portalModelMeta", "pricing", "input_cost_per_token"]}
+        extra={t('llmProvider.providerForm.help.inputCostPerToken')}
         rules={[
-          { required: true, message: t('llmProvider.providerForm.rules.inputPer1KRequired') },
+          { required: true, message: t('llmProvider.providerForm.rules.inputCostPerTokenRequired') },
         ]}
       >
         <InputNumber min={0} style={{ width: '100%' }} />
       </Form.Item>
       <Form.Item
-        label={t('llmProvider.providerForm.label.outputPer1K')}
-        name={["rawConfigs", "portalModelMeta", "pricing", "outputPer1K"]}
-        extra={t('llmProvider.providerForm.help.outputPer1K')}
+        label={t('llmProvider.providerForm.label.outputCostPerToken')}
+        name={["rawConfigs", "portalModelMeta", "pricing", "output_cost_per_token"]}
+        extra={t('llmProvider.providerForm.help.outputCostPerToken')}
         rules={[
-          { required: true, message: t('llmProvider.providerForm.rules.outputPer1KRequired') },
+          { required: true, message: t('llmProvider.providerForm.rules.outputCostPerTokenRequired') },
         ]}
       >
         <InputNumber min={0} style={{ width: '100%' }} />
       </Form.Item>
+      <Form.Item
+        label={t('llmProvider.providerForm.label.inputCostPerRequest')}
+        name={["rawConfigs", "portalModelMeta", "pricing", "input_cost_per_request"]}
+      >
+        <InputNumber min={0} style={{ width: '100%' }} />
+      </Form.Item>
+      <Form.Item
+        label={t('llmProvider.providerForm.label.inputCostPerTokenAbove200K')}
+        name={["rawConfigs", "portalModelMeta", "pricing", "input_cost_per_token_above_200k_tokens"]}
+      >
+        <InputNumber min={0} style={{ width: '100%' }} />
+      </Form.Item>
+      <Form.Item
+        label={t('llmProvider.providerForm.label.outputCostPerTokenAbove200K')}
+        name={["rawConfigs", "portalModelMeta", "pricing", "output_cost_per_token_above_200k_tokens"]}
+      >
+        <InputNumber min={0} style={{ width: '100%' }} />
+      </Form.Item>
+
+      {showCachePricing && (
+        <>
+          <Divider orientation="left">{t('llmProvider.providerForm.sections.cachePricing')}</Divider>
+          <Form.Item
+            label={t('llmProvider.providerForm.label.cacheCreationInputTokenCost')}
+            name={["rawConfigs", "portalModelMeta", "pricing", "cache_creation_input_token_cost"]}
+            extra={t('llmProvider.providerForm.help.cachePricingFallback')}
+          >
+            <InputNumber min={0} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item
+            label={t('llmProvider.providerForm.label.cacheCreationInputTokenCostAbove1hr')}
+            name={["rawConfigs", "portalModelMeta", "pricing", "cache_creation_input_token_cost_above_1hr"]}
+          >
+            <InputNumber min={0} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item
+            label={t('llmProvider.providerForm.label.cacheReadInputTokenCost')}
+            name={["rawConfigs", "portalModelMeta", "pricing", "cache_read_input_token_cost"]}
+          >
+            <InputNumber min={0} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item
+            label={t('llmProvider.providerForm.label.cacheCreationInputTokenCostAbove200K')}
+            name={["rawConfigs", "portalModelMeta", "pricing", "cache_creation_input_token_cost_above_200k_tokens"]}
+          >
+            <InputNumber min={0} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item
+            label={t('llmProvider.providerForm.label.cacheReadInputTokenCostAbove200K')}
+            name={["rawConfigs", "portalModelMeta", "pricing", "cache_read_input_token_cost_above_200k_tokens"]}
+          >
+            <InputNumber min={0} style={{ width: '100%' }} />
+          </Form.Item>
+        </>
+      )}
+
+      {showImagePricing && (
+        <>
+          <Divider orientation="left">{t('llmProvider.providerForm.sections.imagePricing')}</Divider>
+          <Form.Item
+            label={t('llmProvider.providerForm.label.outputCostPerImage')}
+            name={["rawConfigs", "portalModelMeta", "pricing", "output_cost_per_image"]}
+          >
+            <InputNumber min={0} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item
+            label={t('llmProvider.providerForm.label.outputCostPerImageToken')}
+            name={["rawConfigs", "portalModelMeta", "pricing", "output_cost_per_image_token"]}
+          >
+            <InputNumber min={0} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item
+            label={t('llmProvider.providerForm.label.inputCostPerImage')}
+            name={["rawConfigs", "portalModelMeta", "pricing", "input_cost_per_image"]}
+          >
+            <InputNumber min={0} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item
+            label={t('llmProvider.providerForm.label.inputCostPerImageToken')}
+            name={["rawConfigs", "portalModelMeta", "pricing", "input_cost_per_image_token"]}
+          >
+            <InputNumber min={0} style={{ width: '100%' }} />
+          </Form.Item>
+        </>
+      )}
 
       <Form.Item
         label={t('llmProvider.providerForm.label.modelIntro')}

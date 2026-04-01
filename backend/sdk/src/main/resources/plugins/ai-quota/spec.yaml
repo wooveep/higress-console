@@ -8,9 +8,9 @@ info:
   title: AI Quota
   x-title-i18n:
     zh-CN: AI 配额管理
-  description: Implement quota-based rate limiting according to assigned fixed quotas, while also supporting quota management capabilities, including querying, refreshing, and adjusting quotas.
+  description: Implement quota-based management in both token and amount modes, including quota queries, refresh, delta updates, and durable billing event emission in amount mode. Natural day/week/month windows in amount mode use UTC.
   x-description-i18n:
-    zh-CN: 根据分配固定的 quota 进行 quota 策略限流，同时支持 quota 管理能力，包括查询 quota、刷新 quota、增减 quota。
+    zh-CN: 支持 token 与 amount 两种配额模式，既可以进行 quota 管理，也可以在 amount 模式下发出细分账务事件并落库；amount 模式的自然日/周/月窗口统一按 UTC 计算。
   iconUrl: https://img.alicdn.com/imgextra/i1/O1CN018iKKih1iVx287RltL_!!6000000004419-2-tps-42-42.png
   version: 1.1.0
   contact:
@@ -57,18 +57,18 @@ spec:
           title: 模型价格 Redis Key前缀
           x-title-i18n:
             en-US: Model Price Redis Key Prefix
-          description: amount 模式下的模型价格 redis key 前缀
+          description: amount 模式下的模型价格 redis key 前缀，对应 Portal 物化后的完整 ModelPriceData 价格快照
           x-description-i18n:
-            en-US: Model price redis key prefix in amount mode
+            en-US: Redis key prefix for the materialized ModelPriceData pricing hash used in amount mode
           default: "billing:model-price:"
         usage_event_stream:
           type: string
           title: 消费事件 Stream
           x-title-i18n:
             en-US: Usage Event Stream
-          description: amount 模式下写入消费事件的 Redis Stream 名称
+          description: amount 模式下写入细分 token、图像和 request_count 账务事件的 Redis Stream 名称
           x-description-i18n:
-            en-US: Redis stream name used to emit usage events in amount mode
+            en-US: Redis stream used to emit detailed billing usage events in amount mode
           default: "billing:usage:stream"
         usage_event_dedup_prefix:
           type: string
@@ -200,18 +200,18 @@ spec:
           title: 模型价格 Redis Key前缀
           x-title-i18n:
             en-US: Model Price Redis Key Prefix
-          description: amount 模式下的模型价格 redis key 前缀
+          description: amount 模式下的模型价格 redis key 前缀，对应 Portal 物化后的完整 ModelPriceData 价格快照
           x-description-i18n:
-            en-US: Model price redis key prefix in amount mode
+            en-US: Redis key prefix for the materialized ModelPriceData pricing hash used in amount mode
           default: "billing:model-price:"
         usage_event_stream:
           type: string
           title: 消费事件 Stream
           x-title-i18n:
             en-US: Usage Event Stream
-          description: amount 模式下写入消费事件的 Redis Stream 名称
+          description: amount 模式下写入细分 token、图像和 request_count 账务事件的 Redis Stream 名称
           x-description-i18n:
-            en-US: Redis stream name used to emit usage events in amount mode
+            en-US: Redis stream used to emit detailed billing usage events in amount mode
           default: "billing:usage:stream"
         usage_event_dedup_prefix:
           type: string

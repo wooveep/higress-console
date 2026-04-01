@@ -28,8 +28,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import com.alibaba.higress.console.model.portal.PortalUserRecord;
 import com.alibaba.higress.console.model.portal.PortalPasswordResetResult;
+import com.alibaba.higress.console.model.portal.PortalUserRecord;
+import com.alibaba.higress.console.util.ConsoleDateTimeUtil;
 import com.alibaba.higress.sdk.model.consumer.Consumer;
 import com.alibaba.higress.sdk.exception.ValidationException;
 
@@ -289,7 +290,7 @@ public class PortalUserJdbcService {
         Timestamp lastLogin = rs.getTimestamp("last_login_at");
         LocalDateTime lastLoginAt = null;
         if (lastLogin != null) {
-            lastLoginAt = lastLogin.toLocalDateTime();
+            lastLoginAt = ConsoleDateTimeUtil.toLocalDateTime(lastLogin);
         }
         return PortalUserRecord.builder().consumerName(rs.getString("consumer_name"))
             .displayName(rs.getString("display_name")).email(rs.getString("email"))
@@ -537,7 +538,7 @@ public class PortalUserJdbcService {
         }
 
         return PortalPasswordResetResult.builder().consumerName(consumerName).tempPassword(tempPassword)
-            .updatedAt(LocalDateTime.now()).build();
+            .updatedAt(ConsoleDateTimeUtil.now()).build();
     }
 
     private String generateTempPassword() {

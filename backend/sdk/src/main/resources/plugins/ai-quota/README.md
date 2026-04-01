@@ -13,6 +13,12 @@ description: AI 配额管理插件配置参考
 
 `ai-quota` 插件需要配合认证插件比如 `key-auth`、`jwt-auth` 等插件获取认证身份的 consumer 名称。在金额模式下不再依赖 `ai-statistics` 作为主账务来源。
 
+`amount` 模式下的日/周/月自然窗口统一按 `UTC` 计算：
+
+- 日窗口在上海时区的次日 `00:00` 重置
+- 周窗口以周一 `00:00` 为起点
+- 月窗口以下月 1 日 `00:00` 为起点
+
 ## 运行属性
 
 插件执行阶段：`默认阶段`
@@ -60,6 +66,23 @@ redis:
   service_port: 6379
   timeout: 2000
 ```
+
+### 金额模式计费口径
+
+`amount` 模式读取 `price_key_prefix + <provider>/<model>` 对应的 Redis Hash。该价格快照由 Portal 提前物化，已包含 `ModelPriceData` 的回退结果，运行态直接按生效价格计费。
+
+会被写入消费事件并进入 Portal 账本聚合的 usage 字段包括：
+
+- `input_tokens` / `output_tokens`
+- `cache_creation_input_tokens` / `cache_creation_5m_input_tokens` / `cache_creation_1h_input_tokens`
+- `cache_read_input_tokens`
+- `input_image_tokens` / `output_image_tokens`
+- `input_image_count` / `output_image_count`
+- `request_count`
+
+最终金额会同时覆盖 token 单价、`input_cost_per_request`、图像按张费用以及 `above_200k` 分级价格。
+
+金额模式里的日/周/月额度窗口 TTL 也按 `UTC` 推导，而不是依赖部署机器的本地时区。
 
 
 ###  刷新 quota / balance

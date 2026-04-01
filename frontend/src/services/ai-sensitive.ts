@@ -7,12 +7,16 @@ import {
   AiSensitiveStatus,
   AiSensitiveSystemConfig,
 } from '@/interfaces/ai-sensitive';
-import request from './request';
+import request, { RequestOptions } from './request';
 
 const BASE_URL = '/v1/ai/sensitive-words';
+const QUIET_MENU_REQUEST_OPTIONS: RequestOptions = {
+  skipAuthRedirect: true,
+  skipErrorModal: true,
+};
 
 export const getAiSensitiveMenuState = (): Promise<AiSensitiveMenuState> => {
-  return request.get<any, AiSensitiveMenuState>(`${BASE_URL}/menu-state`);
+  return request.get<any, AiSensitiveMenuState>(`${BASE_URL}/menu-state`, QUIET_MENU_REQUEST_OPTIONS);
 };
 
 export const getAiSensitiveStatus = (): Promise<AiSensitiveStatus> => {

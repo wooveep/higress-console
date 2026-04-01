@@ -18,6 +18,12 @@ import {
   saveAiQuotaUserPolicy,
   saveAiQuotaScheduleRule,
 } from '@/services/ai-quota';
+import {
+  dateTimeLocalInputToISOString,
+  formatDateTimeDisplay,
+  formatDateTimeLocalInputValue,
+  getNowDateTimeLocalInputValue,
+} from '@/utils/time';
 import { RedoOutlined } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-layout';
 import { useRequest } from 'ahooks';
@@ -144,7 +150,7 @@ const AiQuotaPage: React.FC = () => {
     dailyResetTime: policy?.dailyResetTime || '00:00',
     limitWeekly: toFormQuotaValue(policy?.limitWeekly ?? 0, selectedRoute?.quotaUnit),
     limitMonthly: toFormQuotaValue(policy?.limitMonthly ?? 0, selectedRoute?.quotaUnit),
-    costResetAt: policy?.costResetAt || '',
+    costResetAt: formatDateTimeLocalInputValue(policy?.costResetAt || '', ''),
   });
 
   const { loading: routesLoading, run: loadRoutes } = useRequest(getAiQuotaRoutes, {
@@ -306,12 +312,7 @@ const AiQuotaPage: React.FC = () => {
   };
 
   const fillPolicyResetNow = () => {
-    const now = new Date();
-    const pad = (value: number) => `${value}`.padStart(2, '0');
-    const localValue = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(
-      now.getHours(),
-    )}:${pad(now.getMinutes())}`;
-    policyForm.setFieldsValue({ costResetAt: localValue });
+    policyForm.setFieldsValue({ costResetAt: getNowDateTimeLocalInputValue() });
   };
 
   const clearPolicyResetAt = () => {
@@ -331,7 +332,7 @@ const AiQuotaPage: React.FC = () => {
       dailyResetTime: values.dailyResetTime,
       limitWeekly: toStoredQuotaValue(values.limitWeekly, selectedRoute?.quotaUnit),
       limitMonthly: toStoredQuotaValue(values.limitMonthly, selectedRoute?.quotaUnit),
-      costResetAt: values.costResetAt?.trim() ? values.costResetAt.trim() : undefined,
+      costResetAt: dateTimeLocalInputToISOString(values.costResetAt?.trim()),
     };
     setPolicySubmitting(true);
     try {
@@ -467,7 +468,7 @@ const AiQuotaPage: React.FC = () => {
       title: t('aiQuota.schedule.columns.lastAppliedAt'),
       dataIndex: 'lastAppliedAt',
       key: 'lastAppliedAt',
-      render: (value?: number) => (value ? new Date(value).toLocaleString() : '-'),
+      render: (value?: number) => formatDateTimeDisplay(value),
     },
     {
       title: t('aiQuota.schedule.columns.lastError'),

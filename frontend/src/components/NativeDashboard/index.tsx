@@ -2,6 +2,7 @@ import { ReloadOutlined } from '@ant-design/icons';
 import { Line } from '@ant-design/charts';
 import { DashboardInfo, DashboardType, NativeDashboardPanel } from '@/interfaces/dashboard';
 import { getNativeDashboard } from '@/services';
+import { formatChartTimeLabel, formatDateTimeDisplay, normalizeTimestamp } from '@/utils/time';
 import { useRequest } from 'ahooks';
 import { Alert, Button, Card, Collapse, Empty, Select, Spin, Statistic, Table } from 'antd';
 import React, { useEffect, useState } from 'react';
@@ -19,13 +20,11 @@ interface NativeDashboardProps {
   dashboardInfo: DashboardInfo;
 }
 
-const NativeDashboard: React.FC<NativeDashboardProps> = ({ type, dashboardInfo }) => {
+const NativeDashboard: React.FC<NativeDashboardProps> = ({ type, dashboardInfo: _dashboardInfo }) => {
   const { t } = useTranslation();
   const [rangeMs, setRangeMs] = useState(DEFAULT_RANGE_MS);
   const [refreshMs, setRefreshMs] = useState(30 * 1000);
   const [activeRows, setActiveRows] = useState<string[]>([]);
-  const [gateway, setGateway] = useState<string>();
-  const [namespace, setNamespace] = useState<string>();
 
   const {
     data,
@@ -37,12 +36,10 @@ const NativeDashboard: React.FC<NativeDashboardProps> = ({ type, dashboardInfo }
     return getNativeDashboard(type, {
       from: to - rangeMs,
       to,
-      gateway,
-      namespace,
     });
   }, {
     pollingInterval: refreshMs > 0 ? refreshMs : undefined,
-    refreshDeps: [type, rangeMs, gateway, namespace],
+    refreshDeps: [type, rangeMs],
   });
 
   useEffect(() => {
@@ -72,29 +69,12 @@ const NativeDashboard: React.FC<NativeDashboardProps> = ({ type, dashboardInfo }
     );
   }
 
-  const currentGateway = gateway || data.variables.gateway.value;
-  const currentNamespace = namespace || data.variables.namespace.value;
-  const grafanaUrl = dashboardInfo.builtIn && dashboardInfo.url ? `${location.origin}${dashboardInfo.url}` : dashboardInfo.url;
+  const hasAnyData = data.rows.some((row) => row.panels.some((panel) => panelHasData(panel)));
 
   return (
     <div className={styles.wrapper}>
       <div className={styles.toolbar}>
         <div className={styles.toolbarMeta}>
-          <div className={styles.control}>
-            <span className={styles.controlLabel}>{t('dashboard.native.gateway')}</span>
-            <Select
-              value={currentGateway || undefined}
-              options={data.variables.gateway.options.map((option) => ({ label: option, value: option }))}
-              onChange={(value) => {
-                setGateway(value);
-                setNamespace(undefined);
-              }}
-            />
-          </div>
-          <div className={styles.control}>
-            <span className={styles.controlLabel}>{t('dashboard.native.namespace')}</span>
-            <span className={styles.namespace}>{currentNamespace || '-'}</span>
-          </div>
           <div className={styles.control}>
             <span className={styles.controlLabel}>{t('dashboard.native.range')}</span>
             <Select
@@ -117,62 +97,75 @@ const NativeDashboard: React.FC<NativeDashboardProps> = ({ type, dashboardInfo }
               onChange={(value) => setRefreshMs(value)}
             />
           </div>
-          <span className={styles.status}>
-            {t('dashboard.native.lastUpdated', { time: formatDateTime(data.to) })}
-          </span>
         </div>
         <div className={styles.toolbarAction}>
           <Button icon={<ReloadOutlined />} onClick={() => refresh()}>
             {t('dashboard.native.refresh')}
           </Button>
-          {grafanaUrl && (
-            <a href={grafanaUrl} target="_blank" rel="noreferrer">
-              {t('dashboard.openInNewPage')}
-            </a>
-          )}
         </div>
       </div>
 
-      <Collapse
-        className={styles.collapse}
-        activeKey={activeRows}
-        onChange={(keys) => setActiveRows(Array.isArray(keys) ? keys as string[] : [keys as string])}
-      >
-        {data.rows.map((row) => (
-          <Panel header={translateNativeText(t, 'rows', row.title)} key={row.title}>
-            <div className={styles.grid}>
-              {row.panels.map((panel) => (
-                <div
-                  className={styles.panelCell}
-                  key={panel.id}
-                  style={{
-                    gridColumn: `${panel.gridPos.x + 1} / span ${Math.max(1, panel.gridPos.w)}`,
-                  }}
-                >
-                  <DashboardPanelCard panel={panel} />
-                </div>
-              ))}
-            </div>
-          </Panel>
-        ))}
-      </Collapse>
+      {!hasAnyData && (
+        <Card className={styles.panelCard} bordered={false}>
+          <div className={styles.emptyWrap}>
+            <Empty description={t('dashboard.native.noData')} />
+          </div>
+        </Card>
+      )}
+
+      {hasAnyData && (
+        <Collapse
+          className={styles.collapse}
+          activeKey={activeRows}
+          onChange={(keys) => setActiveRows(Array.isArray(keys) ? keys as string[] : [keys as string])}
+        >
+          {data.rows.map((row) => (
+            <Panel header={translateNativeText(t, 'rows', row.title)} key={row.title}>
+              <div className={styles.grid}>
+                {row.panels.map((panel) => (
+                  <div
+                    className={styles.panelCell}
+                    key={panel.id}
+                    style={{
+                      gridColumn: `${panel.gridPos.x + 1} / span ${Math.max(1, panel.gridPos.w)}`,
+                    }}
+                  >
+                    <DashboardPanelCard panel={panel} rangeMs={rangeMs} />
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          ))}
+        </Collapse>
+      )}
     </div>
   );
 };
 
-const DashboardPanelCard: React.FC<{ panel: NativeDashboardPanel }> = ({ panel }) => {
+const DashboardPanelCard: React.FC<{ panel: NativeDashboardPanel; rangeMs: number }> = ({ panel, rangeMs }) => {
   const { t } = useTranslation();
   const cardHeight = Math.max(panel.type === 'stat' ? 180 : 240, panel.gridPos.h * 38);
   const lineData = [];
   for (const series of panel.series || []) {
     for (const point of series.points) {
+      const timeValue = normalizeTimestamp(point.time);
+      if (timeValue === null) {
+        continue;
+      }
       lineData.push({
-        time: point.time,
+        timeValue,
+        timeTooltip: formatDateTimeDisplay(timeValue),
         series: translateNativeText(t, 'series', series.name),
         value: point.value,
       });
     }
   }
+  lineData.sort((left, right) => {
+    if (left.timeValue !== right.timeValue) {
+      return left.timeValue - right.timeValue;
+    }
+    return left.series.localeCompare(right.series);
+  });
 
   return (
     <Card
@@ -193,10 +186,16 @@ const DashboardPanelCard: React.FC<{ panel: NativeDashboardPanel }> = ({ panel }
         )}
         {panel.type === 'stat' && (
           <div className={styles.statWrap}>
-            <Statistic
-              value={panel.stat?.value ?? null}
-              formatter={(value) => formatValue(value as number | null | undefined, panel.unit)}
-            />
+            {panel.stat?.value === null || panel.stat?.value === undefined ? (
+              <div className={styles.emptyWrap}>
+                <Empty description={t('dashboard.native.noData')} />
+              </div>
+            ) : (
+              <Statistic
+                value={panel.stat?.value ?? null}
+                formatter={(value) => formatValue(value as number | null | undefined, panel.unit)}
+              />
+            )}
           </div>
         )}
         {panel.type === 'timeseries' && (
@@ -204,7 +203,7 @@ const DashboardPanelCard: React.FC<{ panel: NativeDashboardPanel }> = ({ panel }
             {lineData.length > 0 ? (
               <Line
                 data={lineData}
-                xField="time"
+                xField="timeValue"
                 yField="value"
                 seriesField="series"
                 autoFit
@@ -212,9 +211,8 @@ const DashboardPanelCard: React.FC<{ panel: NativeDashboardPanel }> = ({ panel }
                 animation={false}
                 padding="auto"
                 xAxis={{
-                  type: 'time',
                   label: {
-                    formatter: (value) => formatTime(value),
+                    formatter: (value) => formatChartTimeLabel(Number(value), rangeMs),
                   },
                 }}
                 yAxis={{
@@ -227,7 +225,7 @@ const DashboardPanelCard: React.FC<{ panel: NativeDashboardPanel }> = ({ panel }
                 }}
                 tooltip={{
                   formatter: (datum) => ({
-                    name: datum.series,
+                    name: `${datum.series} (${datum.timeTooltip})`,
                     value: formatValue(datum.value as number, panel.unit),
                   }),
                 }}
@@ -354,16 +352,20 @@ function formatDuration(value: number) {
   return `${formatNumber(value)} ms`;
 }
 
-function formatDateTime(timestamp: number) {
-  return new Date(timestamp).toLocaleString();
-}
-
-function formatTime(value: string | number) {
-  const date = typeof value === 'number' ? new Date(value) : new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return typeof value === 'number' ? String(value) : value;
+function panelHasData(panel: NativeDashboardPanel) {
+  if (panel.error) {
+    return true;
   }
-  return date.toLocaleTimeString();
+  if (panel.type === 'stat') {
+    return panel.stat?.value !== null && panel.stat?.value !== undefined;
+  }
+  if (panel.type === 'timeseries') {
+    return !!panel.series?.some((series) => series.points.length > 0);
+  }
+  if (panel.type === 'table') {
+    return !!panel.table?.rows?.length;
+  }
+  return false;
 }
 
 function translateNativeText(t: (key: string, options?: any) => string, group: string, value?: string) {

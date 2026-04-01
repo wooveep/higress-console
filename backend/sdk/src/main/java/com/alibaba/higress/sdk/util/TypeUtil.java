@@ -23,6 +23,8 @@ import org.apache.commons.lang3.StringUtils;
  */
 public class TypeUtil {
 
+    private static final ZoneId DEFAULT_ZONE_ID = ZoneId.of("UTC");
+
     public static byte[] string2Bytes(String str) {
         return str != null ? str.getBytes() : new byte[0];
     }
@@ -32,7 +34,7 @@ public class TypeUtil {
     }
 
     public static LocalDateTime date2LocalDateTime(Date date) {
-        return date.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime();
+        return date.toInstant().atZone(DEFAULT_ZONE_ID).toLocalDateTime();
     }
 
     public static Integer string2Integer(String str) {

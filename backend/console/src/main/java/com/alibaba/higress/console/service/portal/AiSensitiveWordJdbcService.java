@@ -30,6 +30,7 @@ import com.alibaba.higress.console.model.aisensitive.AiSensitiveDetectRule;
 import com.alibaba.higress.console.model.aisensitive.AiSensitiveReplaceRule;
 import com.alibaba.higress.console.model.aisensitive.AiSensitiveSystemConfig;
 import com.alibaba.higress.console.util.AiSensitiveDateTimeUtil;
+import com.alibaba.higress.console.util.ConsoleDateTimeUtil;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -159,7 +160,7 @@ public class AiSensitiveWordJdbcService {
             .updatedBy(StringUtils.defaultIfBlank(StringUtils.trimToNull(updatedBy), SYSTEM_UPDATED_BY))
             .build();
         if (!enabled()) {
-            normalized.setUpdatedAt(AiSensitiveDateTimeUtil.formatLocalDateTime(LocalDateTime.now()));
+            normalized.setUpdatedAt(AiSensitiveDateTimeUtil.formatLocalDateTime(ConsoleDateTimeUtil.now()));
             return normalized;
         }
         try (Connection connection = openConnection()) {
@@ -452,7 +453,7 @@ public class AiSensitiveWordJdbcService {
         if (!enabled() || event == null) {
             return null;
         }
-        LocalDateTime blockedAt = event.getBlockedAt() == null ? LocalDateTime.now() : event.getBlockedAt();
+        LocalDateTime blockedAt = event.getBlockedAt() == null ? ConsoleDateTimeUtil.now() : event.getBlockedAt();
         String sql = "INSERT INTO ai_sensitive_block_audit "
             + "(request_id, route_name, consumer_name, display_name, blocked_at, blocked_by, request_phase, "
             + "blocked_reason_json, match_type, matched_rule, matched_excerpt, provider_id, cost_usd) "
@@ -463,7 +464,7 @@ public class AiSensitiveWordJdbcService {
             statement.setString(2, event.getRouteName());
             statement.setString(3, event.getConsumerName());
             statement.setString(4, displayName);
-            statement.setTimestamp(5, Timestamp.valueOf(blockedAt));
+            statement.setTimestamp(5, ConsoleDateTimeUtil.toTimestamp(blockedAt));
             statement.setString(6, StringUtils.defaultIfBlank(event.getBlockedBy(), "sensitive_word"));
             statement.setString(7, event.getRequestPhase());
             statement.setString(8, event.getBlockedReasonJson());

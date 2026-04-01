@@ -332,7 +332,7 @@
         "limitWeekly": "Weekly Limit",
         "limitMonthly": "Monthly Limit",
         "costResetAt": "Soft Reset Start",
-        "costResetAtHelp": "Leave empty to keep the current value. Supports RFC3339 or yyyy-MM-ddTHH:mm, for example 2026-03-27T10:30.",
+        "costResetAtHelp": "Leave empty to keep the current value. Enter yyyy-MM-ddTHH:mm in your browser local time and it will be submitted as UTC automatically, or provide an RFC3339 timestamp directly.",
         "amountHelp": "The form accepts RMB and converts it to micro_yuan before submission."
       }
     },
@@ -651,7 +651,9 @@
     "providerForm": {
       "sections": {
         "portalModelMeta": "Model Metadata (Portal Display)",
-        "modelPricing": "Model Pricing"
+        "modelPricing": "Model Pricing",
+        "cachePricing": "Cache Pricing",
+        "imagePricing": "Image Pricing"
       },
       "actions": {
         "addTag": "Add Tag",
@@ -661,7 +663,10 @@
       "help": {
         "pricingCurrency": "Phase 1 billing uses RMB only. Portal deducts balances by RMB amount and token pricing.",
         "inputPer1K": "Enter the RMB unit price for every 1K input tokens. The value is synced into Portal billing tables after save.",
-        "outputPer1K": "Enter the RMB unit price for every 1K output tokens. The value is synced into Portal billing tables after save."
+        "outputPer1K": "Enter the RMB unit price for every 1K output tokens. The value is synced into Portal billing tables after save.",
+        "inputCostPerToken": "Enter the RMB unit price for each input token. The effective billing price is materialized into Portal runtime tables on save.",
+        "outputCostPerToken": "Enter the RMB unit price for each output token. The effective billing price is materialized into Portal runtime tables on save.",
+        "cachePricingFallback": "Cache pricing fields are optional. If omitted, the system falls back to the configured base token pricing chain."
       },
       "fixedCurrencyValue": "CNY (RMB)",
       "label": {
@@ -669,6 +674,20 @@
         "pricingCurrency": "Billing Currency",
         "inputPer1K": "Input Price (per 1K tokens, RMB)",
         "outputPer1K": "Output Price (per 1K tokens, RMB)",
+        "inputCostPerToken": "Input Token Price (RMB)",
+        "outputCostPerToken": "Output Token Price (RMB)",
+        "inputCostPerRequest": "Fixed Request Cost (RMB)",
+        "inputCostPerTokenAbove200K": "Input Token Price Above 200K (RMB)",
+        "outputCostPerTokenAbove200K": "Output Token Price Above 200K (RMB)",
+        "cacheCreationInputTokenCost": "Cache Creation Token Price (5m, RMB)",
+        "cacheCreationInputTokenCostAbove1hr": "Cache Creation Token Price (1h, RMB)",
+        "cacheReadInputTokenCost": "Cache Read Token Price (RMB)",
+        "cacheCreationInputTokenCostAbove200K": "Cache Creation Token Price Above 200K (RMB)",
+        "cacheReadInputTokenCostAbove200K": "Cache Read Token Price Above 200K (RMB)",
+        "outputCostPerImage": "Output Image Price Per Image (RMB)",
+        "outputCostPerImageToken": "Output Image Token Price (RMB)",
+        "inputCostPerImage": "Input Image Price Per Image (RMB)",
+        "inputCostPerImageToken": "Input Image Token Price (RMB)",
         "modelIntro": "Model Intro",
         "modelTags": "Model Tags",
         "modelModalities": "Model Capabilities - Modalities",
@@ -719,6 +738,8 @@
         "typeRequired": "Please select a LLM provider",
         "inputPer1KRequired": "Please input the RMB unit price for every 1K input tokens",
         "outputPer1KRequired": "Please input the RMB unit price for every 1K output tokens",
+        "inputCostPerTokenRequired": "Please input the RMB unit price for each input token",
+        "outputCostPerTokenRequired": "Please input the RMB unit price for each output token",
         "serviceNameRequired": "Please input service name",
         "serviceNameNoSlash": "Slashes (/) are not allowed in name",
         "failureThresholdRequired": "Please input min consecuitive failures to mark down a token",

@@ -792,6 +792,339 @@
       "type": "stat"
     },
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 70
+      },
+      "id": 401,
+      "panels": [],
+      "title": "Detailed Token",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource.id}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 71
+      },
+      "id": 402,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "expr": "sum(irate(route_upstream_model_consumer_metric_cache_creation_input_token{}[2m]))",
+          "legendFormat": "cache create token",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "expr": "sum(irate(route_upstream_model_consumer_metric_cache_read_input_token{}[2m]))",
+          "legendFormat": "cache read token",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Cache Token Per Second",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource.id}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 71
+      },
+      "id": 403,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "expr": "sum(irate(route_upstream_model_consumer_metric_input_image_token{}[2m]))",
+          "legendFormat": "input image token",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "expr": "sum(irate(route_upstream_model_consumer_metric_output_image_token{}[2m]))",
+          "legendFormat": "output image token",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Image Token Per Second",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource.id}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 71
+      },
+      "id": 404,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "expr": "sum(irate(route_upstream_model_consumer_metric_request_count{}[2m]))",
+          "legendFormat": "request count",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "expr": "sum(irate(route_upstream_model_consumer_metric_input_image_count{}[2m]))",
+          "legendFormat": "input image count",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "expr": "sum(irate(route_upstream_model_consumer_metric_output_image_count{}[2m]))",
+          "legendFormat": "output image count",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Request And Image Count",
+      "type": "timeseries"
+    },
+    {
       "collapsed": true,
       "gridPos": {
         "h": 1,
@@ -1763,7 +2096,7 @@
         "sortBy": [
           {
             "desc": true,
-            "displayName": "Provider"
+            "displayName": "Total Token"
           }
         ]
       },
@@ -1776,11 +2109,11 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "label_replace(sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_input_token{}[$__range])), \"provider\", \"$1\", \"ai_cluster\", \".*-(.*).internal.*\")",
+          "expr": "label_replace(sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_total_token{}[$__range])), \"provider\", \"$1\", \"ai_cluster\", \".*-(.*).internal.*\")",
           "format": "table",
           "instant": true,
           "interval": "",
-          "legendFormat": "input_token",
+          "legendFormat": "total_token",
           "range": false,
           "refId": "A"
         },
@@ -1791,11 +2124,11 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "label_replace(sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_output_token{}[$__range])), \"provider\", \"$1\", \"ai_cluster\", \".*-(.*).internal.*\")",
+          "expr": "label_replace((sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_input_token{}[$__range])) or on(ai_cluster) (0 * sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_total_token{}[$__range])))), \"provider\", \"$1\", \"ai_cluster\", \".*-(.*).internal.*\")",
           "format": "table",
           "hide": false,
           "instant": true,
-          "legendFormat": "output_token",
+          "legendFormat": "input_token",
           "range": false,
           "refId": "B"
         },
@@ -1806,13 +2139,148 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "label_replace(sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_input_token{}[$__range])) + sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_output_token{}[$__range])), \"provider\", \"$1\", \"ai_cluster\", \".*-(.*).internal.*\")",
+          "expr": "label_replace((sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_output_token{}[$__range])) or on(ai_cluster) (0 * sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_total_token{}[$__range])))), \"provider\", \"$1\", \"ai_cluster\", \".*-(.*).internal.*\")",
           "format": "table",
           "hide": false,
           "instant": true,
-          "legendFormat": "total_token",
+          "legendFormat": "output_token",
           "range": false,
           "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "label_replace((sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_cache_creation_input_token{}[$__range])) or on(ai_cluster) (0 * sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_total_token{}[$__range])))), \"provider\", \"$1\", \"ai_cluster\", \".*-(.*).internal.*\")",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "cache_creation_input_token",
+          "range": false,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "label_replace((sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_cache_creation_5m_input_token{}[$__range])) or on(ai_cluster) (0 * sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_total_token{}[$__range])))), \"provider\", \"$1\", \"ai_cluster\", \".*-(.*).internal.*\")",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "cache_creation_5m_input_token",
+          "range": false,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "label_replace((sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_cache_creation_1h_input_token{}[$__range])) or on(ai_cluster) (0 * sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_total_token{}[$__range])))), \"provider\", \"$1\", \"ai_cluster\", \".*-(.*).internal.*\")",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "cache_creation_1h_input_token",
+          "range": false,
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "label_replace((sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_cache_read_input_token{}[$__range])) or on(ai_cluster) (0 * sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_total_token{}[$__range])))), \"provider\", \"$1\", \"ai_cluster\", \".*-(.*).internal.*\")",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "cache_read_input_token",
+          "range": false,
+          "refId": "G"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "label_replace((sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_input_image_token{}[$__range])) or on(ai_cluster) (0 * sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_total_token{}[$__range])))), \"provider\", \"$1\", \"ai_cluster\", \".*-(.*).internal.*\")",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "input_image_token",
+          "range": false,
+          "refId": "H"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "label_replace((sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_output_image_token{}[$__range])) or on(ai_cluster) (0 * sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_total_token{}[$__range])))), \"provider\", \"$1\", \"ai_cluster\", \".*-(.*).internal.*\")",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "output_image_token",
+          "range": false,
+          "refId": "I"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "label_replace((sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_request_count{}[$__range])) or on(ai_cluster) (0 * sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_total_token{}[$__range])))), \"provider\", \"$1\", \"ai_cluster\", \".*-(.*).internal.*\")",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "request_count",
+          "range": false,
+          "refId": "J"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "label_replace((sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_input_image_count{}[$__range])) or on(ai_cluster) (0 * sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_total_token{}[$__range])))), \"provider\", \"$1\", \"ai_cluster\", \".*-(.*).internal.*\")",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "input_image_count",
+          "range": false,
+          "refId": "K"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "label_replace((sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_output_image_count{}[$__range])) or on(ai_cluster) (0 * sum by(ai_cluster) (increase(route_upstream_model_consumer_metric_total_token{}[$__range])))), \"provider\", \"$1\", \"ai_cluster\", \".*-(.*).internal.*\")",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "output_image_count",
+          "range": false,
+          "refId": "L"
         }
       ],
       "title": "Provider Usage",
@@ -1833,6 +2301,15 @@
                 "Value #A",
                 "Value #B",
                 "Value #C",
+                "Value #D",
+                "Value #E",
+                "Value #F",
+                "Value #G",
+                "Value #H",
+                "Value #I",
+                "Value #J",
+                "Value #K",
+                "Value #L",
                 "provider"
               ]
             }
@@ -1844,20 +2321,34 @@
             "excludeByName": {},
             "includeByName": {},
             "indexByName": {
-              "Time": 0,
-              "Value": 2,
-              "ai_model": 1
+              "provider": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "Value #D": 4,
+              "Value #E": 5,
+              "Value #F": 6,
+              "Value #G": 7,
+              "Value #H": 8,
+              "Value #I": 9,
+              "Value #J": 10,
+              "Value #K": 11,
+              "Value #L": 12
             },
             "renameByName": {
-              "Time": "",
-              "Value": "Input Token Usage",
-              "Value #A": "Input Token",
-              "Value #B": "Output Token",
-              "Value #C": "Total Token",
-              "ai_cluster": "Cluster",
-              "ai_model": "Model",
-              "provider": "Provider",
-              "provider 1": "Provider"
+              "Value #A": "Total Token",
+              "Value #B": "Input Token",
+              "Value #C": "Output Token",
+              "Value #D": "Cache Create Token",
+              "Value #E": "Cache Create 5m Token",
+              "Value #F": "Cache Create 1h Token",
+              "Value #G": "Cache Read Token",
+              "Value #H": "Input Image Token",
+              "Value #I": "Output Image Token",
+              "Value #J": "Request Count",
+              "Value #K": "Input Image Count",
+              "Value #L": "Output Image Count",
+              "provider": "Provider"
             }
           }
         }
@@ -1914,7 +2405,12 @@
           "show": false
         },
         "showHeader": true,
-        "sortBy": []
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Total Token"
+          }
+        ]
       },
       "pluginVersion": "10.4.2",
       "targets": [
@@ -1925,11 +2421,11 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum by(ai_model) (increase(route_upstream_model_consumer_metric_input_token{}[$__range]))",
+          "expr": "sum by(ai_model) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))",
           "format": "table",
           "instant": true,
           "interval": "",
-          "legendFormat": "input_token",
+          "legendFormat": "total_token",
           "range": false,
           "refId": "A"
         },
@@ -1940,11 +2436,11 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum by(ai_model) (increase(route_upstream_model_consumer_metric_output_token{}[$__range]))",
+          "expr": "(sum by(ai_model) (increase(route_upstream_model_consumer_metric_input_token{}[$__range])) or on(ai_model) (0 * sum by(ai_model) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
           "format": "table",
           "hide": false,
           "instant": true,
-          "legendFormat": "output_token",
+          "legendFormat": "input_token",
           "range": false,
           "refId": "B"
         },
@@ -1955,13 +2451,148 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum by(ai_model) (increase(route_upstream_model_consumer_metric_input_token{}[$__range])) + sum by(ai_model) (increase(route_upstream_model_consumer_metric_output_token{}[$__range]))",
+          "expr": "(sum by(ai_model) (increase(route_upstream_model_consumer_metric_output_token{}[$__range])) or on(ai_model) (0 * sum by(ai_model) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
           "format": "table",
           "hide": false,
           "instant": true,
-          "legendFormat": "total_token",
+          "legendFormat": "output_token",
           "range": false,
           "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_model) (increase(route_upstream_model_consumer_metric_cache_creation_input_token{}[$__range])) or on(ai_model) (0 * sum by(ai_model) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "cache_creation_input_token",
+          "range": false,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_model) (increase(route_upstream_model_consumer_metric_cache_creation_5m_input_token{}[$__range])) or on(ai_model) (0 * sum by(ai_model) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "cache_creation_5m_input_token",
+          "range": false,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_model) (increase(route_upstream_model_consumer_metric_cache_creation_1h_input_token{}[$__range])) or on(ai_model) (0 * sum by(ai_model) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "cache_creation_1h_input_token",
+          "range": false,
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_model) (increase(route_upstream_model_consumer_metric_cache_read_input_token{}[$__range])) or on(ai_model) (0 * sum by(ai_model) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "cache_read_input_token",
+          "range": false,
+          "refId": "G"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_model) (increase(route_upstream_model_consumer_metric_input_image_token{}[$__range])) or on(ai_model) (0 * sum by(ai_model) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "input_image_token",
+          "range": false,
+          "refId": "H"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_model) (increase(route_upstream_model_consumer_metric_output_image_token{}[$__range])) or on(ai_model) (0 * sum by(ai_model) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "output_image_token",
+          "range": false,
+          "refId": "I"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_model) (increase(route_upstream_model_consumer_metric_request_count{}[$__range])) or on(ai_model) (0 * sum by(ai_model) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "request_count",
+          "range": false,
+          "refId": "J"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_model) (increase(route_upstream_model_consumer_metric_input_image_count{}[$__range])) or on(ai_model) (0 * sum by(ai_model) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "input_image_count",
+          "range": false,
+          "refId": "K"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_model) (increase(route_upstream_model_consumer_metric_output_image_count{}[$__range])) or on(ai_model) (0 * sum by(ai_model) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "output_image_count",
+          "range": false,
+          "refId": "L"
         }
       ],
       "title": "Model Usage",
@@ -1982,7 +2613,16 @@
                 "ai_model",
                 "Value #A",
                 "Value #B",
-                "Value #C"
+                "Value #C",
+                "Value #D",
+                "Value #E",
+                "Value #F",
+                "Value #G",
+                "Value #H",
+                "Value #I",
+                "Value #J",
+                "Value #K",
+                "Value #L"
               ]
             }
           }
@@ -1993,16 +2633,33 @@
             "excludeByName": {},
             "includeByName": {},
             "indexByName": {
-              "Time": 0,
-              "Value": 2,
-              "ai_model": 1
+              "ai_model": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "Value #D": 4,
+              "Value #E": 5,
+              "Value #F": 6,
+              "Value #G": 7,
+              "Value #H": 8,
+              "Value #I": 9,
+              "Value #J": 10,
+              "Value #K": 11,
+              "Value #L": 12
             },
             "renameByName": {
-              "Time": "",
-              "Value": "Input Token Usage",
-              "Value #A": "Input Token",
-              "Value #B": "Output Token",
-              "Value #C": "Total Token",
+              "Value #A": "Total Token",
+              "Value #B": "Input Token",
+              "Value #C": "Output Token",
+              "Value #D": "Cache Create Token",
+              "Value #E": "Cache Create 5m Token",
+              "Value #F": "Cache Create 1h Token",
+              "Value #G": "Cache Read Token",
+              "Value #H": "Input Image Token",
+              "Value #I": "Output Image Token",
+              "Value #J": "Request Count",
+              "Value #K": "Input Image Count",
+              "Value #L": "Output Image Count",
               "ai_model": "Model"
             }
           }
@@ -2060,7 +2717,12 @@
           "show": false
         },
         "showHeader": true,
-        "sortBy": []
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Total Token"
+          }
+        ]
       },
       "pluginVersion": "10.4.2",
       "targets": [
@@ -2071,11 +2733,11 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_input_token{}[$__range]))",
+          "expr": "sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))",
           "format": "table",
           "instant": true,
           "interval": "",
-          "legendFormat": "input_token",
+          "legendFormat": "total_token",
           "range": false,
           "refId": "A"
         },
@@ -2086,11 +2748,11 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_output_token{}[$__range]))",
+          "expr": "(sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_input_token{}[$__range])) or on(ai_consumer) (0 * sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
           "format": "table",
           "hide": false,
           "instant": true,
-          "legendFormat": "output_token",
+          "legendFormat": "input_token",
           "range": false,
           "refId": "B"
         },
@@ -2101,13 +2763,148 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_input_token{}[$__range])) + sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_output_token{}[$__range]))",
+          "expr": "(sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_output_token{}[$__range])) or on(ai_consumer) (0 * sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
           "format": "table",
           "hide": false,
           "instant": true,
-          "legendFormat": "total_token",
+          "legendFormat": "output_token",
           "range": false,
           "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_cache_creation_input_token{}[$__range])) or on(ai_consumer) (0 * sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "cache_creation_input_token",
+          "range": false,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_cache_creation_5m_input_token{}[$__range])) or on(ai_consumer) (0 * sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "cache_creation_5m_input_token",
+          "range": false,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_cache_creation_1h_input_token{}[$__range])) or on(ai_consumer) (0 * sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "cache_creation_1h_input_token",
+          "range": false,
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_cache_read_input_token{}[$__range])) or on(ai_consumer) (0 * sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "cache_read_input_token",
+          "range": false,
+          "refId": "G"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_input_image_token{}[$__range])) or on(ai_consumer) (0 * sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "input_image_token",
+          "range": false,
+          "refId": "H"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_output_image_token{}[$__range])) or on(ai_consumer) (0 * sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "output_image_token",
+          "range": false,
+          "refId": "I"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_request_count{}[$__range])) or on(ai_consumer) (0 * sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "request_count",
+          "range": false,
+          "refId": "J"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_input_image_count{}[$__range])) or on(ai_consumer) (0 * sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "input_image_count",
+          "range": false,
+          "refId": "K"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource.id}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "(sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_output_image_count{}[$__range])) or on(ai_consumer) (0 * sum by(ai_consumer) (increase(route_upstream_model_consumer_metric_total_token{}[$__range]))))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "output_image_count",
+          "range": false,
+          "refId": "L"
         }
       ],
       "title": "Consumer Usage",
@@ -2128,6 +2925,15 @@
                 "Value #A",
                 "Value #B",
                 "Value #C",
+                "Value #D",
+                "Value #E",
+                "Value #F",
+                "Value #G",
+                "Value #H",
+                "Value #I",
+                "Value #J",
+                "Value #K",
+                "Value #L",
                 "ai_consumer"
               ]
             }
@@ -2139,21 +2945,36 @@
             "excludeByName": {},
             "includeByName": {},
             "indexByName": {
-              "Time": 0,
-              "Value": 2,
-              "ai_model": 1
+              "ai_consumer": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "Value #D": 4,
+              "Value #E": 5,
+              "Value #F": 6,
+              "Value #G": 7,
+              "Value #H": 8,
+              "Value #I": 9,
+              "Value #J": 10,
+              "Value #K": 11,
+              "Value #L": 12
             },
             "renameByName": {
-              "Time": "",
-              "Value": "Input Token Usage",
-              "Value #A": "Input Token",
-              "Value #B": "Output Token",
-              "Value #C": "Total Token",
-              "ai_cluster": "Cluster",
+              "Value #A": "Total Token",
+              "Value #B": "Input Token",
+              "Value #C": "Output Token",
+              "Value #D": "Cache Create Token",
+              "Value #E": "Cache Create 5m Token",
+              "Value #F": "Cache Create 1h Token",
+              "Value #G": "Cache Read Token",
+              "Value #H": "Input Image Token",
+              "Value #I": "Output Image Token",
+              "Value #J": "Request Count",
+              "Value #K": "Input Image Count",
+              "Value #L": "Output Image Count",
               "ai_consumer": "Consumer",
               "ai_model": "Model",
-              "provider": "Provider",
-              "provider 1": "Provider"
+              "provider": "Provider"
             }
           }
         }
@@ -3277,7 +4098,7 @@
     "to": "now"
   },
   "timepicker": {},
-  "timezone": "",
+  "timezone": "browser",
   "title": "Higress AI Gateway Dashboard",
   "weekStart": ""
 }

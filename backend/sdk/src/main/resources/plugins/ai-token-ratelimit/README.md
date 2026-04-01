@@ -7,7 +7,7 @@ description: AI Token限流插件配置参考
 
 ## 功能说明
 
-`ai-token-ratelimit`插件实现了基于特定键值实现token限流，键值来源可以是 URL 参数、HTTP 请求头、客户端 IP 地址、consumer 名称、cookie中 key 名称
+`ai-token-ratelimit`插件基于 Redis 实现 AI 限流，既支持按特定键值分组，也支持按真实金额限流。键值来源可以是 URL 参数、HTTP 请求头、客户端 IP 地址、consumer 名称、cookie 中的 key 名称。
 
 ## 运行属性
 
@@ -19,10 +19,26 @@ description: AI Token限流插件配置参考
 | 配置项                  | 类型   | 必填 | 默认值 | 说明                                                                        |
 | ----------------------- | ------ | ---- | ------ |---------------------------------------------------------------------------|
 | rule_name               | string | 是 | - | 限流规则名称，根据限流规则名称+限流类型+限流key名称+限流key对应的实际值来拼装redis key                      |
-| rule_items | array of object | 是   | -                 | 限流规则项，按照rule_items下的排列顺序，匹配第一个rule_item后命中限流规则，后续规则将被忽略                   |
+| limit_unit             | string | 否 | `token`          | 限流单位，支持 `token` 或 `amount` |
+| global_threshold | Object | 否，`global_threshold` 或 `rule_items` 选填一项 | - | 对整个自定义规则组进行限流 |
+| rule_items | array of object | 否，`global_threshold` 或 `rule_items` 选填一项 | -                 | 限流规则项，按照rule_items下的排列顺序，匹配第一个rule_item后命中限流规则，后续规则将被忽略                   |
 | rejected_code           | int | 否 | 429 | 请求被限流时，返回的HTTP状态码                                                         |
 | rejected_msg            | string | 否 | Too many requests | 请求被限流时，返回的响应体                                                             |
+| price_key_prefix       | string | 否 | `billing:model-price:` | `amount` 模式下读取模型价格 Redis Hash 的 key 前缀 |
 | redis                   | object          | 是                                                           | -                 | redis相关配置                                                                 |
+
+`global_threshold`中每一项的配置字段说明
+
+| 配置项           | 类型 | 必填                                                         | 默认值 | 说明                  |
+| ---------------- | ---- | ------------------------------------------------------------ | ------ | --------------------- |
+| token_per_second | int  | 否，`token_per_second`,`token_per_minute`,`token_per_hour`,`token_per_day` 中选填一项 | -      | 允许每秒请求token数   |
+| token_per_minute | int  | 否，`token_per_second`,`token_per_minute`,`token_per_hour`,`token_per_day` 中选填一项 | -      | 允许每分钟请求token数 |
+| token_per_hour   | int  | 否，`token_per_second`,`token_per_minute`,`token_per_hour`,`token_per_day` 中选填一项 | -      | 允许每小时请求token数 |
+| token_per_day    | int  | 否，`token_per_second`,`token_per_minute`,`token_per_hour`,`token_per_day` 中选填一项 | -      | 允许每天请求token数   |
+| amount_per_second | int | 否，`amount_per_second`,`amount_per_minute`,`amount_per_hour`,`amount_per_day` 中选填一项 | -      | 允许每秒请求金额，单位 `micro_yuan` |
+| amount_per_minute | int | 否，`amount_per_second`,`amount_per_minute`,`amount_per_hour`,`amount_per_day` 中选填一项 | -      | 允许每分钟请求金额，单位 `micro_yuan` |
+| amount_per_hour   | int | 否，`amount_per_second`,`amount_per_minute`,`amount_per_hour`,`amount_per_day` 中选填一项 | -      | 允许每小时请求金额，单位 `micro_yuan` |
+| amount_per_day    | int | 否，`amount_per_second`,`amount_per_minute`,`amount_per_hour`,`amount_per_day` 中选填一项 | -      | 允许每天请求金额，单位 `micro_yuan` |
 
 `rule_items`中每一项的配置字段说明
 
@@ -48,6 +64,10 @@ description: AI Token限流插件配置参考
 | token_per_minute | int    | 否，`token_per_second`,`token_per_minute`,`token_per_hour`,`token_per_day` 中选填一项 | -      | 允许每分钟请求token数                                           |
 | token_per_hour   | int    | 否，`token_per_second`,`token_per_minute`,`token_per_hour`,`token_per_day` 中选填一项 | -      | 允许每小时请求token数                                           |
 | token_per_day    | int    | 否，`token_per_second`,`token_per_minute`,`token_per_hour`,`token_per_day` 中选填一项 | -      | 允许每天请求token数                                             |
+| amount_per_second | int   | 否，`amount_per_second`,`amount_per_minute`,`amount_per_hour`,`amount_per_day` 中选填一项 | -      | 允许每秒请求金额，单位 `micro_yuan` |
+| amount_per_minute | int   | 否，`amount_per_second`,`amount_per_minute`,`amount_per_hour`,`amount_per_day` 中选填一项 | -      | 允许每分钟请求金额，单位 `micro_yuan` |
+| amount_per_hour   | int   | 否，`amount_per_second`,`amount_per_minute`,`amount_per_hour`,`amount_per_day` 中选填一项 | -      | 允许每小时请求金额，单位 `micro_yuan` |
+| amount_per_day    | int   | 否，`amount_per_second`,`amount_per_minute`,`amount_per_hour`,`amount_per_day` 中选填一项 | -      | 允许每天请求金额，单位 `micro_yuan` |
 
 `redis`中每一项的配置字段说明
 
@@ -62,6 +82,30 @@ description: AI Token限流插件配置参考
 
 
 ## 配置示例
+
+### 自定义规则组全局限流
+
+```yaml
+rule_name: routeA-global-limit-rule
+global_threshold:
+  token_per_minute: 1000
+redis:
+  service_name: redis.static
+```
+
+### 金额模式限流
+
+```yaml
+rule_name: model-cost-limit
+limit_unit: amount
+price_key_prefix: billing:model-price:
+global_threshold:
+  amount_per_minute: 5000000
+redis:
+  service_name: redis.static
+```
+
+`amount` 模式会在响应阶段解析细分 usage，并结合 Redis 中的模型价格快照计算真实金额。金额窗口会覆盖输入/输出 token、缓存创建/读取、图像 token、图像张数和固定请求费。
 
 ### 识别请求参数 apikey，进行区别限流
 

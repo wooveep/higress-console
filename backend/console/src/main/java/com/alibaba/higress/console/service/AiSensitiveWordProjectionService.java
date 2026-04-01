@@ -24,6 +24,7 @@ import com.alibaba.higress.console.model.aisensitive.AiSensitiveStatus;
 import com.alibaba.higress.console.model.aisensitive.AiSensitiveSystemConfig;
 import com.alibaba.higress.console.service.portal.AiSensitiveWordJdbcService;
 import com.alibaba.higress.console.util.AiSensitiveDateTimeUtil;
+import com.alibaba.higress.console.util.ConsoleDateTimeUtil;
 import com.alibaba.higress.sdk.constant.plugin.BuiltInPluginName;
 import com.alibaba.higress.sdk.model.WasmPluginInstance;
 import com.alibaba.higress.sdk.model.WasmPluginInstanceScope;
@@ -121,7 +122,7 @@ public class AiSensitiveWordProjectionService {
                 wasmPluginInstanceService.addOrUpdateAll(instancesToUpdate);
             }
             projectedInstanceCount = activeInstanceCount;
-            lastReconciledAt = LocalDateTime.now();
+            lastReconciledAt = ConsoleDateTimeUtil.now();
             lastError = null;
         } catch (Exception ex) {
             lastError = ex.getMessage();
@@ -265,7 +266,7 @@ public class AiSensitiveWordProjectionService {
         }
 
         if (imported) {
-            lastMigratedAt = LocalDateTime.now();
+            lastMigratedAt = ConsoleDateTimeUtil.now();
         }
     }
 

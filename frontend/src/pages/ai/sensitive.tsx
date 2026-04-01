@@ -22,6 +22,7 @@ import {
   saveAiSensitiveReplaceRule,
   updateAiSensitiveSystemConfig,
 } from '@/services/ai-sensitive';
+import { APP_DATE_TIME_DISPLAY_FORMAT, formatDateTimeDisplay } from '@/utils/time';
 import { RedoOutlined } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-layout';
 import {
@@ -53,41 +54,10 @@ const { TextArea } = Input;
 
 const DEFAULT_AUDIT_LIMIT = 200;
 const DEFAULT_AUDIT_LOOKBACK_HOURS = 1;
-const DATE_TIME_DISPLAY_FORMAT = 'YYYY-MM-DD HH:mm:ss';
-
-const parseDateTime = (value?: AiSensitiveDateTimeValue) => {
-  if (!value) {
-    return undefined;
-  }
-  if (Array.isArray(value)) {
-    const [year, month, day, hour = 0, minute = 0, second = 0] = value;
-    const date = moment({
-      year,
-      month: (month || 1) - 1,
-      day,
-      hour,
-      minute,
-      second,
-    });
-    return date.isValid() ? date : undefined;
-  }
-  const zonedDate = moment.parseZone(value);
-  if (zonedDate.isValid()) {
-    return zonedDate.local();
-  }
-  const localDate = moment(value, [DATE_TIME_DISPLAY_FORMAT, 'YYYY-MM-DDTHH:mm:ss'], true);
-  return localDate.isValid() ? localDate : undefined;
-};
+const DATE_TIME_DISPLAY_FORMAT = APP_DATE_TIME_DISPLAY_FORMAT;
 
 const formatDateTime = (value?: AiSensitiveDateTimeValue) => {
-  const date = parseDateTime(value);
-  if (!date) {
-    if (Array.isArray(value)) {
-      return value.join('-');
-    }
-    return value || '-';
-  }
-  return date.format(DATE_TIME_DISPLAY_FORMAT);
+  return formatDateTimeDisplay(value);
 };
 
 const buildDefaultAuditQuery = () => ({

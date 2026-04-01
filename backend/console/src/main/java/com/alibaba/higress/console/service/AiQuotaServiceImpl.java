@@ -38,6 +38,7 @@ import com.alibaba.higress.console.service.portal.PortalConsumerService;
 import com.alibaba.higress.console.service.portal.PortalUserQuotaPolicyJdbcService;
 import com.alibaba.higress.console.service.portal.PortalUserQuotaPolicyJdbcService.AiQuotaUserPolicyRequestData;
 import com.alibaba.higress.console.service.portal.PortalUserJdbcService;
+import com.alibaba.higress.console.util.ConsoleDateTimeUtil;
 import com.alibaba.higress.sdk.constant.CommonKey;
 import com.alibaba.higress.sdk.constant.HigressConstants;
 import com.alibaba.higress.sdk.constant.KubernetesConstants;
@@ -554,8 +555,8 @@ public class AiQuotaServiceImpl implements AiQuotaService {
             return false;
         }
         long baseMillis = ObjectUtils.firstNonNull(rule.getLastAppliedAt(), rule.getCreatedAt(), now);
-        ZonedDateTime baseTime = Instant.ofEpochMilli(baseMillis).atZone(ZoneId.systemDefault());
-        ZonedDateTime nowTime = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault());
+        ZonedDateTime baseTime = ConsoleDateTimeUtil.atAppZone(baseMillis);
+        ZonedDateTime nowTime = ConsoleDateTimeUtil.atAppZone(now);
         ZonedDateTime nextTime = cronExpression.next(baseTime);
         return nextTime != null && !nextTime.isAfter(nowTime);
     }
