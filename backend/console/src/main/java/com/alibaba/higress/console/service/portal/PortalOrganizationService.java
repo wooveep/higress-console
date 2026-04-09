@@ -41,6 +41,9 @@ public class PortalOrganizationService {
     @Resource
     private PortalConsumerLevelAuthReconcileService portalConsumerLevelAuthReconcileService;
 
+    @Resource
+    private PortalAgentCatalogJdbcService portalAgentCatalogJdbcService;
+
     @Value("${higress.portal.org.default-password:}")
     private String defaultOrgPassword;
 
@@ -160,7 +163,12 @@ public class PortalOrganizationService {
 
     public List<AssetGrantRecord> replaceGrants(String assetType, String assetId, List<AssetGrantRecord> grants) {
         ensureEnabled();
-        return portalAssetGrantJdbcService.replaceGrants(assetType, assetId, grants);
+        List<AssetGrantRecord> result = portalAssetGrantJdbcService.replaceGrants(assetType, assetId, grants);
+        if (StringUtils.equalsIgnoreCase(StringUtils.trimToEmpty(assetType), "agent_catalog")
+            && StringUtils.isNotBlank(assetId)) {
+            portalAgentCatalogJdbcService.syncPublishedAgentMcpAuthorization(assetId);
+        }
+        return result;
     }
 
     public List<String> resolveGrantedConsumers(String assetType, String assetId) {

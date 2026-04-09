@@ -20,6 +20,7 @@
     "aiDashboard": "AI Dashboard",
     "llmProviderManagement": "LLM Provider Management",
     "modelAssetManagement": "Model Asset Management",
+    "agentCatalogManagement": "Agent Catalog Management",
     "domainManagement": "Domain Management",
     "certManagement": "Certificate Management",
     "consumerManagement": "Organization",

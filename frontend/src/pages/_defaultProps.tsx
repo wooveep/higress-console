@@ -71,6 +71,10 @@ export default {
             path: '/ai/model-assets',
           },
           {
+            name: 'menu.agentCatalogManagement',
+            path: '/ai/agent-catalog',
+          },
+          {
             name: 'menu.aiRouteManagement',
             path: '/ai/route',
           },

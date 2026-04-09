@@ -20,6 +20,7 @@
     "aiDashboard": "AI监控面板",
     "llmProviderManagement": "AI服务提供者管理",
     "modelAssetManagement": "模型资产管理",
+    "agentCatalogManagement": "智能体目录管理",
     "domainManagement": "域名管理",
     "certManagement": "证书管理",
     "consumerManagement": "组织架构",
