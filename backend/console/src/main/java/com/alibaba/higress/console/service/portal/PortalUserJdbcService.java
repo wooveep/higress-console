@@ -75,7 +75,8 @@ public class PortalUserJdbcService {
 
     @PostConstruct
     public void init() {
-        ensurePortalUserLevelColumn();
+        ensurePortalUserSchema();
+        ensureAccountMembershipTable();
     }
 
     public boolean enabled() {
@@ -96,8 +97,10 @@ public class PortalUserJdbcService {
         }
 
         String placeholders = names.stream().map(i -> "?").collect(Collectors.joining(","));
-        String sql = "SELECT consumer_name, display_name, email, department, user_level, status, source, last_login_at "
-            + "FROM portal_user WHERE consumer_name IN (" + placeholders + ")";
+        String sql = "SELECT u.consumer_name, u.display_name, u.email, m.department_id, m.parent_consumer_name, "
+            + "u.user_level, u.status, u.source, u.last_login_at, u.is_deleted "
+            + "FROM portal_user u LEFT JOIN org_account_membership m ON u.consumer_name = m.consumer_name "
+            + "WHERE u.consumer_name IN (" + placeholders + ") AND COALESCE(u.is_deleted, 0) = 0";
 
         Map<String, PortalUserRecord> result = new HashMap<>();
         try (Connection connection = openConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -120,8 +123,11 @@ public class PortalUserJdbcService {
         if (!enabled()) {
             return Collections.emptyList();
         }
-        String sql = "SELECT consumer_name, display_name, email, department, user_level, status, source, last_login_at "
-            + "FROM portal_user ORDER BY consumer_name ASC";
+        String sql = "SELECT u.consumer_name, u.display_name, u.email, m.department_id, m.parent_consumer_name, "
+            + "u.user_level, u.status, u.source, u.last_login_at, u.is_deleted "
+            + "FROM portal_user u LEFT JOIN org_account_membership m ON u.consumer_name = m.consumer_name "
+            + "WHERE COALESCE(u.is_deleted, 0) = 0 "
+            + "ORDER BY u.consumer_name ASC";
         List<PortalUserRecord> result = new ArrayList<>();
         try (Connection connection = openConnection(); PreparedStatement statement = connection.prepareStatement(sql);
             ResultSet rs = statement.executeQuery()) {
@@ -135,31 +141,26 @@ public class PortalUserJdbcService {
     }
 
     public List<String> listDistinctDepartments() {
-        if (!enabled()) {
-            return Collections.emptyList();
-        }
-        String sql = "SELECT DISTINCT department FROM portal_user WHERE department IS NOT NULL AND department <> '' ORDER BY department ASC";
-        List<String> result = new ArrayList<>();
-        try (Connection connection = openConnection(); PreparedStatement statement = connection.prepareStatement(sql);
-            ResultSet rs = statement.executeQuery()) {
-            while (rs.next()) {
-                String department = StringUtils.trimToNull(rs.getString("department"));
-                if (department != null) {
-                    result.add(department);
-                }
-            }
-        } catch (SQLException ex) {
-            log.warn("Failed to list portal departments from MySQL.", ex);
-        }
-        return result;
+        return Collections.emptyList();
     }
 
     public PortalUserRecord queryByConsumerName(String consumerName) {
+        return queryByConsumerNameInternal(consumerName, false);
+    }
+
+    private PortalUserRecord queryByConsumerNameAny(String consumerName) {
+        return queryByConsumerNameInternal(consumerName, true);
+    }
+
+    private PortalUserRecord queryByConsumerNameInternal(String consumerName, boolean includeDeleted) {
         if (!enabled() || StringUtils.isBlank(consumerName)) {
             return null;
         }
-        String sql = "SELECT consumer_name, display_name, email, department, user_level, status, source, last_login_at "
-            + "FROM portal_user WHERE consumer_name = ?";
+        String sql = "SELECT u.consumer_name, u.display_name, u.email, m.department_id, m.parent_consumer_name, "
+            + "u.user_level, u.status, u.source, u.last_login_at, u.is_deleted "
+            + "FROM portal_user u LEFT JOIN org_account_membership m ON u.consumer_name = m.consumer_name "
+            + "WHERE u.consumer_name = ?"
+            + (includeDeleted ? "" : " AND COALESCE(u.is_deleted, 0) = 0");
         try (Connection connection = openConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, consumerName);
             try (ResultSet rs = statement.executeQuery()) {
@@ -179,13 +180,14 @@ public class PortalUserJdbcService {
         }
 
         String consumerName = consumer.getName();
-        PortalUserRecord existed = queryByConsumerName(consumerName);
+        PortalUserRecord existed = queryByConsumerNameAny(consumerName);
 
-        String displayName = StringUtils.firstNonBlank(consumer.getPortalDisplayName(),
-            existed == null ? null : existed.getDisplayName(), consumerName);
-        String email = StringUtils.firstNonBlank(consumer.getPortalEmail(), existed == null ? null : existed.getEmail(), "");
-        String department = StringUtils.firstNonBlank(consumer.getDepartment(),
-            existed == null ? null : existed.getDepartment(), "");
+        String displayName = StringUtils.defaultIfBlank(
+            StringUtils.firstNonBlank(consumer.getPortalDisplayName(), existed == null ? null : existed.getDisplayName()),
+            consumerName);
+        String email = StringUtils.defaultString(
+            StringUtils.trimToNull(StringUtils.firstNonBlank(consumer.getPortalEmail(),
+                existed == null ? null : existed.getEmail())));
         String userLevel = normalizeUserLevel(StringUtils.firstNonBlank(consumer.getPortalUserLevel(),
             existed == null ? null : existed.getUserLevel(), USER_LEVEL_NORMAL));
         String status = StringUtils.firstNonBlank(consumer.getPortalStatus(),
@@ -203,33 +205,31 @@ public class PortalUserJdbcService {
         try (Connection connection = openConnection()) {
             if (existed == null) {
                 String insertSql = "INSERT INTO portal_user "
-                    + "(consumer_name, display_name, email, department, user_level, password_hash, status, source) "
-                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                    + "(consumer_name, display_name, email, user_level, password_hash, status, source) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?)";
                 try (PreparedStatement statement = connection.prepareStatement(insertSql)) {
                     statement.setString(1, consumerName);
                     statement.setString(2, displayName);
                     statement.setString(3, email);
-                    statement.setString(4, department);
-                    statement.setString(5, userLevel);
-                    statement.setString(6, passwordEncoder.encode(password));
-                    statement.setString(7, status);
-                    statement.setString(8, source);
+                    statement.setString(4, userLevel);
+                    statement.setString(5, passwordEncoder.encode(password));
+                    statement.setString(6, status);
+                    statement.setString(7, source);
                     statement.executeUpdate();
                 }
             } else {
                 String updateSql;
                 if (password == null) {
-                    updateSql = "UPDATE portal_user SET display_name=?, email=?, department=?, user_level=?, status=?, source=? "
-                        + "WHERE consumer_name=?";
+                    updateSql = "UPDATE portal_user SET display_name=?, email=?, user_level=?, status=?, source=?, "
+                        + "is_deleted=0, deleted_at=NULL WHERE consumer_name=?";
                 } else {
-                    updateSql = "UPDATE portal_user SET display_name=?, email=?, department=?, user_level=?, status=?, source=?, "
-                        + "password_hash=? WHERE consumer_name=?";
+                    updateSql = "UPDATE portal_user SET display_name=?, email=?, user_level=?, status=?, source=?, "
+                        + "password_hash=?, is_deleted=0, deleted_at=NULL WHERE consumer_name=?";
                 }
                 try (PreparedStatement statement = connection.prepareStatement(updateSql)) {
                     int idx = 1;
                     statement.setString(idx++, displayName);
                     statement.setString(idx++, email);
-                    statement.setString(idx++, department);
                     statement.setString(idx++, userLevel);
                     statement.setString(idx++, status);
                     statement.setString(idx++, source);
@@ -240,6 +240,7 @@ public class PortalUserJdbcService {
                     statement.executeUpdate();
                 }
             }
+            ensureMembershipRow(connection, consumerName);
         } catch (SQLException ex) {
             log.warn("Failed to upsert portal user {}.", consumerName, ex);
             return null;
@@ -256,13 +257,60 @@ public class PortalUserJdbcService {
         if (!enabled() || StringUtils.isBlank(consumerName) || StringUtils.isBlank(status)) {
             return;
         }
-        String sql = "UPDATE portal_user SET status = ? WHERE consumer_name = ?";
+        String sql = "UPDATE portal_user SET status = ? WHERE consumer_name = ? AND COALESCE(is_deleted, 0) = 0";
         try (Connection connection = openConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, status);
             statement.setString(2, consumerName);
             statement.executeUpdate();
         } catch (SQLException ex) {
             log.warn("Failed to update portal user status for {}.", consumerName, ex);
+        }
+    }
+
+    public void logicalDelete(String consumerName) {
+        if (!enabled() || StringUtils.isBlank(consumerName)) {
+            return;
+        }
+        try (Connection connection = openConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                try (PreparedStatement statement = connection.prepareStatement(
+                    "UPDATE portal_user SET status='disabled', is_deleted=1, deleted_at=CURRENT_TIMESTAMP "
+                        + "WHERE consumer_name = ? AND COALESCE(is_deleted, 0) = 0")) {
+                    statement.setString(1, consumerName);
+                    int affected = statement.executeUpdate();
+                    if (affected <= 0) {
+                        throw new ValidationException("Consumer not found: " + consumerName);
+                    }
+                }
+                try (PreparedStatement statement = connection.prepareStatement(
+                    "UPDATE portal_api_key SET status='disabled', deleted_at=COALESCE(deleted_at, CURRENT_TIMESTAMP) "
+                        + "WHERE consumer_name = ?")) {
+                    statement.setString(1, consumerName);
+                    statement.executeUpdate();
+                }
+                try (PreparedStatement statement = connection.prepareStatement(
+                    "DELETE FROM portal_session WHERE consumer_name = ?")) {
+                    statement.setString(1, consumerName);
+                    statement.executeUpdate();
+                }
+                try (PreparedStatement statement = connection.prepareStatement(
+                    "UPDATE org_account_membership SET parent_consumer_name = NULL WHERE parent_consumer_name = ?")) {
+                    statement.setString(1, consumerName);
+                    statement.executeUpdate();
+                }
+                connection.commit();
+            } catch (Exception ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (ValidationException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            log.warn("Failed to logically delete portal user {}.", consumerName, ex);
+            throw new IllegalStateException("Failed to delete consumer.");
         }
     }
 
@@ -294,10 +342,11 @@ public class PortalUserJdbcService {
         }
         return PortalUserRecord.builder().consumerName(rs.getString("consumer_name"))
             .displayName(rs.getString("display_name")).email(rs.getString("email"))
-            .department(rs.getString("department"))
+            .departmentId(rs.getString("department_id"))
+            .parentConsumerName(rs.getString("parent_consumer_name"))
             .userLevel(normalizeUserLevel(rs.getString("user_level")))
             .status(rs.getString("status"))
-            .source(rs.getString("source")).lastLoginAt(lastLoginAt).build();
+            .source(rs.getString("source")).deleted(rs.getBoolean("is_deleted")).lastLoginAt(lastLoginAt).build();
     }
 
     private String normalizeUserLevel(String userLevel) {
@@ -308,33 +357,67 @@ public class PortalUserJdbcService {
         return USER_LEVEL_NORMAL;
     }
 
-    private void ensurePortalUserLevelColumn() {
+    private void ensurePortalUserSchema() {
         if (!enabled()) {
             return;
         }
-        String existsSql = "SELECT COUNT(1) AS cnt FROM information_schema.COLUMNS "
-            + "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'portal_user' AND COLUMN_NAME = 'user_level'";
-        try (Connection connection = openConnection();
-            PreparedStatement statement = connection.prepareStatement(existsSql);
-            ResultSet resultSet = statement.executeQuery()) {
-            boolean exists = false;
-            if (resultSet.next()) {
-                exists = resultSet.getInt("cnt") > 0;
-            }
-            if (exists) {
-                return;
-            }
+        String createTableSql = "CREATE TABLE IF NOT EXISTS portal_user ("
+            + "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+            + "consumer_name VARCHAR(128) NOT NULL UNIQUE,"
+            + "display_name VARCHAR(128) NOT NULL,"
+            + "email VARCHAR(255) NOT NULL DEFAULT '',"
+            + "password_hash VARCHAR(255) NOT NULL,"
+            + "status VARCHAR(16) NOT NULL DEFAULT 'active',"
+            + "source VARCHAR(16) NOT NULL DEFAULT 'portal',"
+            + "last_login_at DATETIME NULL,"
+            + "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            + "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+            + "user_level VARCHAR(16) NOT NULL DEFAULT 'normal'"
+            + ")";
+        try (Connection connection = openConnection(); PreparedStatement statement = connection.prepareStatement(createTableSql)) {
+            statement.executeUpdate();
+            ensurePortalUserColumn(connection, "display_name",
+                "ALTER TABLE portal_user ADD COLUMN display_name VARCHAR(128) NOT NULL DEFAULT ''");
+            ensurePortalUserColumn(connection, "email",
+                "ALTER TABLE portal_user ADD COLUMN email VARCHAR(255) NOT NULL DEFAULT ''");
+            ensurePortalUserColumn(connection, "password_hash",
+                "ALTER TABLE portal_user ADD COLUMN password_hash VARCHAR(255) NOT NULL DEFAULT ''");
+            ensurePortalUserColumn(connection, "status",
+                "ALTER TABLE portal_user ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'active'");
+            ensurePortalUserColumn(connection, "source",
+                "ALTER TABLE portal_user ADD COLUMN source VARCHAR(16) NOT NULL DEFAULT 'portal'");
+            ensurePortalUserColumn(connection, "last_login_at",
+                "ALTER TABLE portal_user ADD COLUMN last_login_at DATETIME NULL");
+            ensurePortalUserColumn(connection, "created_at",
+                "ALTER TABLE portal_user ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP");
+            ensurePortalUserColumn(connection, "updated_at",
+                "ALTER TABLE portal_user ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP "
+                    + "ON UPDATE CURRENT_TIMESTAMP");
+            ensurePortalUserColumn(connection, "user_level",
+                "ALTER TABLE portal_user ADD COLUMN user_level VARCHAR(16) NOT NULL DEFAULT 'normal'");
+            ensurePortalUserColumn(connection, "is_deleted",
+                "ALTER TABLE portal_user ADD COLUMN is_deleted TINYINT(1) NOT NULL DEFAULT 0");
+            ensurePortalUserColumn(connection, "deleted_at",
+                "ALTER TABLE portal_user ADD COLUMN deleted_at DATETIME NULL");
         } catch (SQLException ex) {
-            log.warn("Failed to check portal_user.user_level column existence.", ex);
+            log.warn("Failed to ensure portal_user schema.", ex);
             return;
         }
+    }
 
-        String alterSql =
-            "ALTER TABLE portal_user ADD COLUMN user_level VARCHAR(16) NOT NULL DEFAULT 'normal' AFTER department";
-        try (Connection connection = openConnection(); PreparedStatement statement = connection.prepareStatement(alterSql)) {
+    private void ensurePortalUserColumn(Connection connection, String columnName, String alterSql) throws SQLException {
+        String existsSql = "SELECT COUNT(1) AS cnt FROM information_schema.COLUMNS "
+            + "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'portal_user' AND COLUMN_NAME = ?";
+        try (PreparedStatement statement = connection.prepareStatement(existsSql)) {
+            statement.setString(1, columnName);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next() && resultSet.getInt("cnt") > 0) {
+                    return;
+                }
+            }
+        }
+        try (PreparedStatement statement = connection.prepareStatement(alterSql)) {
             statement.executeUpdate();
-        } catch (SQLException ex) {
-            log.warn("Failed to add portal_user.user_level column.", ex);
         }
     }
 
@@ -342,7 +425,8 @@ public class PortalUserJdbcService {
         if (!enabled() || StringUtils.isBlank(consumerName)) {
             return Collections.emptyList();
         }
-        String sql = "SELECT raw_key FROM portal_api_key WHERE consumer_name=? AND status='active' ORDER BY id ASC";
+        String sql = "SELECT raw_key FROM portal_api_key WHERE consumer_name=? AND status='active' "
+            + "AND deleted_at IS NULL ORDER BY id ASC";
         List<String> result = new ArrayList<>();
         try (Connection connection = openConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, consumerName);
@@ -371,8 +455,8 @@ public class PortalUserJdbcService {
 
         String placeholders = names.stream().map(i -> "?").collect(Collectors.joining(","));
         String sql =
-            "SELECT consumer_name, raw_key FROM portal_api_key WHERE status='active' AND consumer_name IN (" + placeholders
-                + ") ORDER BY id ASC";
+            "SELECT consumer_name, raw_key FROM portal_api_key WHERE status='active' AND deleted_at IS NULL "
+                + "AND consumer_name IN (" + placeholders + ") ORDER BY id ASC";
         Map<String, List<String>> result = new HashMap<>();
         try (Connection connection = openConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             for (int i = 0; i < names.size(); i++) {
@@ -394,28 +478,27 @@ public class PortalUserJdbcService {
         return result;
     }
 
-    public PortalUserRecord ensureMigrationUser(String consumerName, String department) {
+    public PortalUserRecord ensureMigrationUser(String consumerName) {
         if (!enabled() || StringUtils.isBlank(consumerName)) {
             return null;
         }
-        PortalUserRecord existed = queryByConsumerName(consumerName);
+        PortalUserRecord existed = queryByConsumerNameAny(consumerName);
         if (existed != null) {
             return existed;
         }
-        String sql = "INSERT INTO portal_user (consumer_name, display_name, email, department, user_level, password_hash, status, source) "
-            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-        String normalizedDepartment = StringUtils.defaultString(StringUtils.trimToNull(department));
+        String sql = "INSERT INTO portal_user (consumer_name, display_name, email, user_level, password_hash, status, source) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?)";
         String randomPassword = UUID.randomUUID().toString().replace("-", "");
         try (Connection connection = openConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, consumerName);
             statement.setString(2, consumerName);
             statement.setString(3, "");
-            statement.setString(4, normalizedDepartment);
-            statement.setString(5, USER_LEVEL_NORMAL);
-            statement.setString(6, passwordEncoder.encode(randomPassword));
-            statement.setString(7, STATUS_PENDING);
-            statement.setString(8, SOURCE_MIGRATION);
+            statement.setString(4, USER_LEVEL_NORMAL);
+            statement.setString(5, passwordEncoder.encode(randomPassword));
+            statement.setString(6, STATUS_PENDING);
+            statement.setString(7, SOURCE_MIGRATION);
             statement.executeUpdate();
+            ensureMembershipRow(connection, consumerName);
         } catch (SQLException ex) {
             if (!isDuplicateKey(ex)) {
                 log.warn("Failed to ensure migration portal user {}.", consumerName, ex);
@@ -429,23 +512,23 @@ public class PortalUserJdbcService {
         if (!enabled()) {
             return null;
         }
-        PortalUserRecord existed = queryByConsumerName(BUILTIN_ADMIN_CONSUMER);
+        PortalUserRecord existed = queryByConsumerNameAny(BUILTIN_ADMIN_CONSUMER);
         if (existed == null) {
             String insertSql = "INSERT INTO portal_user "
-                + "(consumer_name, display_name, email, department, user_level, password_hash, status, source) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                + "(consumer_name, display_name, email, user_level, password_hash, status, source) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?)";
             String randomPassword = UUID.randomUUID().toString().replace("-", "");
             try (Connection connection = openConnection(); PreparedStatement statement = connection.prepareStatement(
                 insertSql)) {
                 statement.setString(1, BUILTIN_ADMIN_CONSUMER);
                 statement.setString(2, BUILTIN_ADMIN_CONSUMER);
                 statement.setString(3, "");
-                statement.setString(4, "");
-                statement.setString(5, USER_LEVEL_NORMAL);
-                statement.setString(6, passwordEncoder.encode(randomPassword));
-                statement.setString(7, STATUS_PENDING);
-                statement.setString(8, SOURCE_SYSTEM);
+                statement.setString(4, USER_LEVEL_NORMAL);
+                statement.setString(5, passwordEncoder.encode(randomPassword));
+                statement.setString(6, STATUS_PENDING);
+                statement.setString(7, SOURCE_SYSTEM);
                 statement.executeUpdate();
+                ensureMembershipRow(connection, BUILTIN_ADMIN_CONSUMER);
             } catch (SQLException ex) {
                 if (!isDuplicateKey(ex)) {
                     log.warn("Failed to ensure built-in administrator user.", ex);
@@ -595,6 +678,41 @@ public class PortalUserJdbcService {
             return builder.toString();
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 algorithm is unavailable.", ex);
+        }
+    }
+
+    private void ensureAccountMembershipTable() {
+        if (!enabled()) {
+            return;
+        }
+        String sql = "CREATE TABLE IF NOT EXISTS org_account_membership ("
+            + " id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+            + " consumer_name VARCHAR(128) NOT NULL UNIQUE,"
+            + " department_id VARCHAR(64) NULL,"
+            + " parent_consumer_name VARCHAR(128) NULL,"
+            + " created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            + " updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+            + " INDEX idx_org_account_department (department_id),"
+            + " INDEX idx_org_account_parent (parent_consumer_name)"
+            + ")";
+        try (Connection connection = openConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.executeUpdate();
+        } catch (SQLException ex) {
+            log.warn("Failed to ensure org_account_membership table.", ex);
+        }
+    }
+
+    private void ensureMembershipRow(Connection connection, String consumerName) throws SQLException {
+        if (connection == null || StringUtils.isBlank(consumerName)) {
+            return;
+        }
+        String sql = "INSERT INTO org_account_membership (consumer_name, department_id, parent_consumer_name) "
+            + "VALUES (?, NULL, NULL) "
+            + "ON DUPLICATE KEY UPDATE consumer_name = VALUES(consumer_name), "
+            + "updated_at = CURRENT_TIMESTAMP";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, consumerName);
+            statement.executeUpdate();
         }
     }
 }

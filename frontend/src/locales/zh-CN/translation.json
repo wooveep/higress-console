@@ -19,6 +19,7 @@
     "aiSensitiveManagement": "AI脱敏管理",
     "aiDashboard": "AI监控面板",
     "llmProviderManagement": "AI服务提供者管理",
+    "modelAssetManagement": "模型资产管理",
     "domainManagement": "域名管理",
     "certManagement": "证书管理",
     "consumerManagement": "组织架构",
@@ -109,7 +110,10 @@
       "byWeight": "按比例",
       "addTargetService": "添加目标AI服务",
       "addModelPredicate": "添加模型匹配规则",
-      "selectModelService": "选择模型服务"
+      "selectModelService": "选择模型服务",
+      "legacyBindingWarning": "以下路由仍引用未发布绑定或已下线 Provider，当前按原 Provider 回显：",
+      "legacyBindingDescription": "当前仍可继续保存，但目标模型候选只会来自该 Provider 的已发布绑定，建议尽快补齐或调整绑定。",
+      "legacyBindingOption": "遗留 Provider 配置"
     },
     "create": "创建AI路由",
     "edit": "编辑AI路由",

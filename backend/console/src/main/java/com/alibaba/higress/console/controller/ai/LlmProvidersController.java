@@ -35,7 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.alibaba.higress.console.controller.dto.PaginatedResponse;
 import com.alibaba.higress.console.controller.dto.Response;
 import com.alibaba.higress.console.controller.util.ControllerUtil;
-import com.alibaba.higress.console.service.portal.PortalModelPricingJdbcService;
+import com.alibaba.higress.console.service.portal.PortalModelAssetJdbcService;
 import com.alibaba.higress.sdk.exception.ValidationException;
 import com.alibaba.higress.sdk.model.CommonPageQuery;
 import com.alibaba.higress.sdk.model.PaginatedResult;
@@ -90,7 +90,7 @@ public class LlmProvidersController {
     };
 
     private LlmProviderService llmProviderService;
-    private PortalModelPricingJdbcService portalModelPricingJdbcService;
+    private PortalModelAssetJdbcService portalModelAssetJdbcService;
 
     @Resource
     public void setLlmProviderService(LlmProviderService llmProviderService) {
@@ -98,8 +98,8 @@ public class LlmProvidersController {
     }
 
     @Resource
-    public void setPortalModelPricingJdbcService(PortalModelPricingJdbcService portalModelPricingJdbcService) {
-        this.portalModelPricingJdbcService = portalModelPricingJdbcService;
+    public void setPortalModelAssetJdbcService(PortalModelAssetJdbcService portalModelAssetJdbcService) {
+        this.portalModelAssetJdbcService = portalModelAssetJdbcService;
     }
 
     @GetMapping
@@ -120,7 +120,7 @@ public class LlmProvidersController {
     public ResponseEntity<Response<LlmProvider>> add(@RequestBody LlmProvider provider) {
         provider.validate(false);
         validatePortalModelMeta(provider);
-        LlmProvider newProvider = addOrUpdateWithPortalSync(provider);
+        LlmProvider newProvider = llmProviderService.addOrUpdate(provider);
         return ControllerUtil.buildResponseEntity(newProvider);
     }
 
@@ -149,7 +149,7 @@ public class LlmProvidersController {
         }
         provider.validate(false);
         validatePortalModelMeta(provider);
-        LlmProvider updatedProvider = addOrUpdateWithPortalSync(provider);
+        LlmProvider updatedProvider = llmProviderService.addOrUpdate(provider);
         return ControllerUtil.buildResponseEntity(updatedProvider);
     }
 
@@ -158,17 +158,20 @@ public class LlmProvidersController {
     @ApiResponses(value = {@ApiResponse(responseCode = "204", description = "Provider deleted successfully"),
         @ApiResponse(responseCode = "500", description = "Internal server error")})
     public ResponseEntity<Response<LlmProvider>> delete(@PathVariable("name") @NotBlank String name) {
-        deleteWithPortalSync(name);
+        if (portalModelAssetJdbcService != null && portalModelAssetJdbcService.hasBindingsForProvider(name)) {
+            throw new ValidationException("Provider is still referenced by published or draft model bindings.");
+        }
+        llmProviderService.delete(name);
         return ResponseEntity.noContent().build();
     }
 
     private void validatePortalModelMeta(LlmProvider provider) {
         if (provider == null || provider.getRawConfigs() == null || provider.getRawConfigs().isEmpty()) {
-            throw new ValidationException("rawConfigs.portalModelMeta is required.");
+            return;
         }
         Object metaObj = provider.getRawConfigs().get(PORTAL_MODEL_META_KEY);
         if (metaObj == null) {
-            throw new ValidationException("rawConfigs.portalModelMeta is required.");
+            return;
         }
         if (!(metaObj instanceof Map)) {
             throw new ValidationException("rawConfigs.portalModelMeta must be an object.");
@@ -192,36 +195,41 @@ public class LlmProvidersController {
         }
 
         Object pricingObj = portalModelMeta.get("pricing");
-        if (pricingObj == null) {
-            throw new ValidationException("rawConfigs.portalModelMeta.pricing is required.");
-        }
-        Map<String, Object> pricing = requireMap(pricingObj, "rawConfigs.portalModelMeta.pricing");
-        validateStringField(pricing, "currency", "rawConfigs.portalModelMeta.pricing");
-        String currency = StringUtils.trimToEmpty((String)pricing.get("currency"));
-        if (StringUtils.isNotBlank(currency) && !StringUtils.equalsIgnoreCase(currency, CURRENCY_CNY)) {
-            throw new ValidationException("rawConfigs.portalModelMeta.pricing.currency must be CNY.");
-        }
-        pricing.put("input_cost_per_token",
-            requirePerTokenField(pricing, "input_cost_per_token", "inputPer1K", "rawConfigs.portalModelMeta.pricing"));
-        pricing.put("output_cost_per_token",
-            requirePerTokenField(pricing, "output_cost_per_token", "outputPer1K", "rawConfigs.portalModelMeta.pricing"));
-        for (String fieldName : OPTIONAL_PRICING_FIELDS) {
-            validateNumberField(pricing, fieldName, "rawConfigs.portalModelMeta.pricing", false);
-        }
-        if (!normalizedTags.contains(TAG_CACHE)) {
-            for (String fieldName : CACHE_PRICING_FIELDS) {
-                pricing.remove(fieldName);
+        if (pricingObj != null) {
+            Map<String, Object> pricing = requireMap(pricingObj, "rawConfigs.portalModelMeta.pricing");
+            validateStringField(pricing, "currency", "rawConfigs.portalModelMeta.pricing");
+            String currency = StringUtils.trimToEmpty((String)pricing.get("currency"));
+            if (StringUtils.isNotBlank(currency) && !StringUtils.equalsIgnoreCase(currency, CURRENCY_CNY)) {
+                throw new ValidationException("rawConfigs.portalModelMeta.pricing.currency must be CNY.");
+            }
+            if (pricing.containsKey("input_cost_per_token") || pricing.containsKey("inputPer1K")) {
+                pricing.put("input_cost_per_token",
+                    requirePerTokenField(pricing, "input_cost_per_token", "inputPer1K", "rawConfigs.portalModelMeta.pricing"));
+            }
+            if (pricing.containsKey("output_cost_per_token") || pricing.containsKey("outputPer1K")) {
+                pricing.put("output_cost_per_token",
+                    requirePerTokenField(pricing, "output_cost_per_token", "outputPer1K", "rawConfigs.portalModelMeta.pricing"));
+            }
+            for (String fieldName : OPTIONAL_PRICING_FIELDS) {
+                validateNumberField(pricing, fieldName, "rawConfigs.portalModelMeta.pricing", false);
+            }
+            if (!normalizedTags.contains(TAG_CACHE)) {
+                for (String fieldName : CACHE_PRICING_FIELDS) {
+                    pricing.remove(fieldName);
+                }
+            }
+            if (!normalizedTags.contains(TAG_IMAGE)) {
+                for (String fieldName : IMAGE_PRICING_FIELDS) {
+                    pricing.remove(fieldName);
+                }
+            }
+            pricing.put("supports_prompt_caching", normalizedTags.contains(TAG_CACHE));
+            pricing.remove("inputPer1K");
+            pricing.remove("outputPer1K");
+            if (!pricing.isEmpty()) {
+                pricing.put("currency", CURRENCY_CNY);
             }
         }
-        if (!normalizedTags.contains(TAG_IMAGE)) {
-            for (String fieldName : IMAGE_PRICING_FIELDS) {
-                pricing.remove(fieldName);
-            }
-        }
-        pricing.put("supports_prompt_caching", normalizedTags.contains(TAG_CACHE));
-        pricing.remove("inputPer1K");
-        pricing.remove("outputPer1K");
-        pricing.put("currency", CURRENCY_CNY);
 
         Object limitsObj = portalModelMeta.get("limits");
         if (limitsObj != null) {
@@ -292,15 +300,6 @@ public class LlmProvidersController {
         if (requireInteger && numberValue % 1 != 0) {
             throw new ValidationException(parentPath + "." + fieldName + " must be an integer.");
         }
-    }
-
-    private void requireNumberField(Map<String, Object> container, String fieldName, String parentPath,
-        boolean requireInteger) {
-        Object value = container.get(fieldName);
-        if (value == null) {
-            throw new ValidationException(parentPath + "." + fieldName + " is required.");
-        }
-        validateNumberField(container, fieldName, parentPath, requireInteger);
     }
 
     private Double parseNumber(Object value) {
@@ -377,39 +376,4 @@ public class LlmProvidersController {
         return normalized;
     }
 
-    private LlmProvider addOrUpdateWithPortalSync(LlmProvider provider) {
-        LlmProvider existedProvider = llmProviderService.query(provider.getName());
-        LlmProvider savedProvider = llmProviderService.addOrUpdate(provider);
-        try {
-            portalModelPricingJdbcService.upsertProvider(savedProvider);
-            return savedProvider;
-        } catch (RuntimeException ex) {
-            rollbackProviderMutation(savedProvider.getName(), existedProvider);
-            throw ex;
-        }
-    }
-
-    private void deleteWithPortalSync(String providerName) {
-        LlmProvider existedProvider = llmProviderService.query(providerName);
-        llmProviderService.delete(providerName);
-        try {
-            portalModelPricingJdbcService.disableProvider(providerName);
-        } catch (RuntimeException ex) {
-            rollbackProviderMutation(providerName, existedProvider);
-            throw ex;
-        }
-    }
-
-    private void rollbackProviderMutation(String providerName, LlmProvider existedProvider) {
-        try {
-            if (existedProvider == null) {
-                llmProviderService.delete(providerName);
-            } else {
-                llmProviderService.addOrUpdate(existedProvider);
-            }
-        } catch (RuntimeException rollbackEx) {
-            log.error("Failed to rollback provider mutation for {} after Portal pricing sync failed.", providerName,
-                rollbackEx);
-        }
-    }
 }

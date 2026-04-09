@@ -1,36 +1,63 @@
-import { Consumer } from '@/interfaces/consumer';
-import { AutoComplete, Form, Input, Select } from 'antd';
-import React, { forwardRef, useEffect, useImperativeHandle } from 'react';
+import { OrgAccountMutation, OrgAccountRecord, OrgDepartmentNode } from '@/interfaces/org';
+import { Form, Input, Select, TreeSelect } from 'antd';
+import React, { forwardRef, useEffect, useImperativeHandle, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 interface Props {
-  value?: Consumer | null;
-  departments?: string[];
-  presetDepartment?: string;
+  value?: OrgAccountRecord | null;
+  departments?: OrgDepartmentNode[];
+  accounts?: OrgAccountRecord[];
+  presetDepartmentId?: string;
 }
 
-const ConsumerForm: React.FC<Props> = forwardRef((props, ref) => {
+export interface ConsumerFormRef {
+  reset: () => void;
+  handleSubmit: () => Promise<OrgAccountMutation>;
+}
+
+const buildDepartmentTree = (departments: OrgDepartmentNode[] = []) => {
+  return departments.map((department) => ({
+    title: department.name,
+    value: department.departmentId,
+    key: department.departmentId,
+    children: buildDepartmentTree(department.children || []),
+  }));
+};
+
+const ConsumerForm = forwardRef<ConsumerFormRef, Props>((props, ref) => {
   const { t } = useTranslation();
-  const { value, departments = [], presetDepartment } = props;
+  const { value, departments = [], accounts = [], presetDepartmentId } = props;
   const [form] = Form.useForm();
+
+  const departmentTree = useMemo(() => buildDepartmentTree(departments), [departments]);
+  const parentAccountOptions = useMemo(() => {
+    return accounts
+      .filter((account) => account.consumerName && account.consumerName !== value?.consumerName)
+      .map((account) => ({
+        label: `${account.consumerName}${account.displayName ? ` / ${account.displayName}` : ''}`,
+        value: account.consumerName,
+      }));
+  }, [accounts, value?.consumerName]);
 
   useEffect(() => {
     if (value) {
       form.setFieldsValue({
-        department: value.department,
-        name: value.name,
-        portalDisplayName: value.portalDisplayName,
-        portalEmail: value.portalEmail,
-        portalUserLevel: value.portalUserLevel || 'normal',
+        consumerName: value.consumerName,
+        displayName: value.displayName,
+        email: value.email,
+        userLevel: value.userLevel || 'normal',
+        departmentId: value.departmentId,
+        parentConsumerName: value.isDepartmentAdmin ? undefined : value.parentConsumerName,
+        password: undefined,
       });
-    } else {
-      form.resetFields();
-      form.setFieldValue('portalUserLevel', 'normal');
-      if (presetDepartment) {
-        form.setFieldValue('department', presetDepartment);
-      }
+      return;
     }
-  }, [form, presetDepartment, value]);
+    form.resetFields();
+    form.setFieldsValue({
+      userLevel: 'normal',
+      departmentId: presetDepartmentId || undefined,
+    });
+  }, [form, presetDepartmentId, value]);
 
   useImperativeHandle(ref, () => ({
     reset: () => {
@@ -39,39 +66,24 @@ const ConsumerForm: React.FC<Props> = forwardRef((props, ref) => {
     handleSubmit: async () => {
       const values = await form.validateFields();
       return {
-        ...values,
-        credentials: [],
+        consumerName: values.consumerName,
+        displayName: values.displayName,
+        email: values.email,
+        userLevel: values.userLevel,
+        password: values.password,
+        departmentId: values.departmentId,
+        parentConsumerName: values.parentConsumerName,
       };
     },
   }));
 
   return (
     <Form form={form} layout="vertical">
-      <Form.Item label={t('consumer.consumerForm.department')} name="department">
-        <AutoComplete
-          options={departments.map((department) => ({ value: department }))}
-          filterOption={(inputValue, option) =>
-            (option?.value || '').toUpperCase().includes(inputValue.toUpperCase())
-          }
-        >
-          <Input
-            showCount
-            allowClear
-            maxLength={63}
-            placeholder={t('consumer.consumerForm.departmentPlaceholder') || ''}
-          />
-        </AutoComplete>
-      </Form.Item>
       <Form.Item
-        label={t('consumer.consumerForm.name')}
+        label="账号名"
         required
-        name="name"
-        rules={[
-          {
-            required: true,
-            message: t('consumer.consumerForm.nameRequired') || '',
-          },
-        ]}
+        name="consumerName"
+        rules={[{ required: true, message: t('consumer.consumerForm.nameRequired') || '' }]}
       >
         <Input
           showCount
@@ -81,15 +93,33 @@ const ConsumerForm: React.FC<Props> = forwardRef((props, ref) => {
           disabled={!!value}
         />
       </Form.Item>
-      <Form.Item label="Portal显示名" name="portalDisplayName">
-        <Input showCount allowClear maxLength={63} placeholder="可选，默认与用户名一致" />
+      <Form.Item label="显示名" name="displayName">
+        <Input showCount allowClear maxLength={63} placeholder="可选，默认与账号名一致" />
       </Form.Item>
-      <Form.Item label="Portal邮箱" name="portalEmail">
+      <Form.Item label="邮箱" name="email">
         <Input showCount allowClear maxLength={128} placeholder="可选" />
+      </Form.Item>
+      <Form.Item label="所属部门" name="departmentId">
+        <TreeSelect
+          allowClear
+          treeDefaultExpandAll
+          treeData={departmentTree}
+          placeholder="未分配"
+        />
+      </Form.Item>
+      <Form.Item label="父账号" name="parentConsumerName">
+        <Select
+          allowClear
+          showSearch
+          options={parentAccountOptions}
+          placeholder={value?.isDepartmentAdmin ? '部门管理员默认无父账号' : '留空则默认归属部门管理员'}
+          optionFilterProp="label"
+          disabled={!!value?.isDepartmentAdmin}
+        />
       </Form.Item>
       <Form.Item
         label={t('consumer.consumerForm.portalUserLevel')}
-        name="portalUserLevel"
+        name="userLevel"
         rules={[{ required: true, message: t('consumer.consumerForm.portalUserLevelRequired') || '' }]}
       >
         <Select placeholder={t('consumer.consumerForm.portalUserLevelPlaceholder') || ''}>
@@ -99,7 +129,7 @@ const ConsumerForm: React.FC<Props> = forwardRef((props, ref) => {
           <Select.Option value="ultra">{t('consumer.userLevel.ultra')}</Select.Option>
         </Select>
       </Form.Item>
-      <Form.Item label="Portal密码" name="portalPassword">
+      <Form.Item label="Portal密码" name="password">
         <Input.Password placeholder={value ? '留空则不修改密码' : '留空将由系统生成临时密码'} />
       </Form.Item>
     </Form>

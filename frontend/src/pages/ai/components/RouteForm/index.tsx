@@ -2,27 +2,36 @@
 import { AiRoute } from '@/interfaces/ai-route';
 import { Consumer, CredentialType } from '@/interfaces/consumer';
 import { DEFAULT_DOMAIN, Domain } from '@/interfaces/domain';
-import { LlmProvider } from '@/interfaces/llm-provider';
+import { ModelAsset, ModelAssetBinding } from '@/interfaces/model-asset';
 import FactorGroup from '@/pages/route/components/FactorGroup';
 import { getGatewayDomains } from '@/services';
 import { getConsumers } from '@/services/consumer';
-import { getLlmProviders } from '@/services/llm-provider';
+import { getModelAssets } from '@/services/model-asset';
 import { MinusCircleOutlined, PlusOutlined, RedoOutlined } from '@ant-design/icons';
 import { useRequest } from 'ahooks';
-import { Button, Checkbox, Empty, Form, Input, InputNumber, Select, Space, Switch } from 'antd';
-import { uniqueId } from "lodash";
-import React, { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import { Alert, Button, Checkbox, Empty, Form, Input, InputNumber, Select, Space, Switch } from 'antd';
+import { uniqueId } from 'lodash';
+import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   expandConsumersByAllowedLevels,
   normalizeUserLevels,
   USER_LEVELS,
 } from '@/utils/consumer-level';
-import { aiModelProviders } from '../../configs';
 import { HistoryButton, ModelMappingEditor, RedoOutlinedBtn } from './Components';
 import { modelMapping2String, string2ModelMapping } from './util';
 
 const { Option } = Select;
+
+const AI_ROUTE_BINDING_REFS_CONFIG_KEY = 'higress.io/console-ai-binding-refs';
+
+interface PublishedBindingOption {
+  displayName: string;
+  modelId: string;
+  providerName: string;
+  targetModel: string;
+  label: string;
+}
 
 interface AiRouteFormProps {
   value?: AiRoute | null;
@@ -33,91 +42,169 @@ export interface AiRouteFormHandle {
   handleSubmit: () => Promise<AiRoute | false>;
 }
 
+const toBindingOption = (asset: ModelAsset, binding: ModelAssetBinding): PublishedBindingOption => {
+  const displayName = asset.displayName || asset.canonicalName || asset.assetId;
+  const modelId = binding.modelId || binding.bindingId;
+  const providerName = binding.providerName || '';
+  const targetModel = binding.targetModel || '';
+  return {
+    displayName,
+    modelId,
+    providerName,
+    targetModel,
+    label: `${displayName} / ${modelId} / ${providerName} / ${targetModel}`,
+  };
+};
+
 const AiRouteForm = forwardRef<AiRouteFormHandle, AiRouteFormProps>((props, ref) => {
   const { t } = useTranslation();
   const tr = (key: string) => String(t(key));
   const { value } = props;
   const [form] = Form.useForm();
-  const [fallbackConfig_enabled, setFallbackConfigEnabled] = useState(false);
-  const [authConfig_enabled, setAuthConfigEnabled] = useState(false);
-  const [upstreamsError, setUpstreamsError] = useState<any>(false); // 目标AI服务错误提示
-  const [llmList, setLlmList] = useState<LlmProvider[]>([]);
-  const llmResult = useRequest(getLlmProviders, {
+  const [fallbackConfigEnabled, setFallbackConfigEnabled] = useState(false);
+  const [authConfigEnabled, setAuthConfigEnabled] = useState(false);
+  const [upstreamsError, setUpstreamsError] = useState<any>(false);
+  const [bindingOptions, setBindingOptions] = useState<PublishedBindingOption[]>([]);
+  const [bindingsLoaded, setBindingsLoaded] = useState(false);
+  const [legacyProviderWarning, setLegacyProviderWarning] = useState('');
+  const [consumerList, setConsumerList] = useState<Consumer[]>([]);
+  const [domainList, setDomainList] = useState<Domain[]>([]);
+
+  const publishedProviderOptions = useMemo(
+    () =>
+      Array.from(new Set(bindingOptions.map((item) => item.providerName).filter(Boolean)))
+        .sort((left, right) => left.localeCompare(right))
+        .map((providerName) => ({ label: providerName, value: providerName })),
+    [bindingOptions],
+  );
+  const publishedProviderSet = useMemo(
+    () => new Set(publishedProviderOptions.map((item) => item.value)),
+    [publishedProviderOptions],
+  );
+  const publishedBindingOptionsByProvider = useMemo(
+    () =>
+      bindingOptions.reduce<Record<string, PublishedBindingOption[]>>((accumulator, item) => {
+        if (!item.providerName) {
+          return accumulator;
+        }
+        accumulator[item.providerName] = accumulator[item.providerName] || [];
+        accumulator[item.providerName].push(item);
+        return accumulator;
+      }, {}),
+    [bindingOptions],
+  );
+
+  const bindingResult = useRequest(getModelAssets, {
     manual: true,
     onSuccess: (result) => {
-      const llmProviders = (result || []) as LlmProvider[];
-      llmProviders.sort((i1, i2) => {
-        return i1.name.localeCompare(i2.name);
-      })
-      setLlmList(llmProviders);
+      const options = ((result || []) as ModelAsset[]).flatMap((asset) => {
+        return (asset.bindings || [])
+          .filter((binding) => binding.status === 'published')
+          .map((binding) => toBindingOption(asset, binding));
+      });
+      options.sort((left, right) => left.label.localeCompare(right.label));
+      setBindingOptions(options);
+      setBindingsLoaded(true);
+    },
+    onError: () => {
+      setBindingOptions([]);
+      setBindingsLoaded(true);
     },
   });
-  const [consumerList, setConsumerList] = useState<Consumer[]>([]);
+
   const consumerResult = useRequest(getConsumers, {
     manual: true,
     onSuccess: (result) => {
-      const consumers = (result || []) as Consumer[];
-      setConsumerList(consumers);
+      setConsumerList((result || []) as Consumer[]);
     },
   });
-  const [domainList, setDomainList] = useState<Domain[]>([]);
+
   const domainsResult = useRequest(getGatewayDomains, {
     manual: true,
     onSuccess: (result) => {
       const domains = (result || []) as Domain[];
-      setDomainList(domains.filter(d => d.name !== DEFAULT_DOMAIN));
+      setDomainList(domains.filter((item) => item.name !== DEFAULT_DOMAIN));
     },
   });
-  const default_fallback_responseCodes = ['4xx', '5xx'];
+
+  const defaultFallbackResponseCodes = ['4xx', '5xx'];
 
   useEffect(() => {
-    llmResult.run();
+    bindingResult.run();
     consumerResult.run();
     domainsResult.run();
-    form.resetFields();
-    initForm();
     return () => {
       setAuthConfigEnabled(false);
       setFallbackConfigEnabled(false);
-    }
+    };
   }, []);
+
+  useEffect(() => {
+    if (!bindingsLoaded) {
+      return;
+    }
+    form.resetFields();
+    initForm();
+  }, [bindingsLoaded, value]);
+
+  const getOptionsForProvider = (providerName?: string) => {
+    if (!providerName) {
+      return [];
+    }
+    return (publishedBindingOptionsByProvider[providerName] || []).map((item, index) => ({
+      key: `${providerName}-${item.targetModel}-${item.modelId}-${index}`,
+      label: item.targetModel === item.modelId
+        ? `${item.targetModel} / ${item.displayName}`
+        : `${item.targetModel} / ${item.displayName} / ${item.modelId}`,
+      value: item.targetModel,
+    }));
+  };
+
+  const renderLegacyProviderOption = (providerName?: string) => {
+    if (!providerName || publishedProviderSet.has(providerName)) {
+      return null;
+    }
+    return (
+      <Select.Option key={providerName} value={providerName}>
+        {`${t('aiRoute.routeForm.legacyBindingOption')} / ${providerName}`}
+      </Select.Option>
+    );
+  };
 
   const initForm = () => {
     const {
-      name = "",
+      name = '',
       domains,
       pathPredicate = { matchType: 'PRE', matchValue: '/', caseSensitive: false },
       headerPredicates = [],
       urlParamPredicates = [],
       upstreams = [{ provider: '', weight: 100 }],
       modelPredicates,
-    } = (value || {});
-    const _authConfig_enabled = value?.authConfig?.enabled || false;
-    const _fallbackConfig_enabled = value?.fallbackConfig?.enabled || false;
+    } = value || {};
+    const authConfigEnabledValue = value?.authConfig?.enabled || false;
+    const fallbackConfigEnabledValue = value?.fallbackConfig?.enabled || false;
+    const legacyProviders: string[] = [];
 
-    setAuthConfigEnabled(_authConfig_enabled);
-    setFallbackConfigEnabled(_fallbackConfig_enabled);
-    const fallbackInitValues = { fallbackConfig_enabled: _fallbackConfig_enabled };
-    if (_fallbackConfig_enabled && value?.fallbackConfig?.upstreams) {
-      if (!value.fallbackConfig.responseCodes || value.fallbackConfig.responseCodes.length === 0) {
-        fallbackInitValues['fallbackConfig_responseCodes'] = default_fallback_responseCodes;
-      } else {
-        fallbackInitValues['fallbackConfig_responseCodes'] = value.fallbackConfig.responseCodes;
+    setAuthConfigEnabled(authConfigEnabledValue);
+    setFallbackConfigEnabled(fallbackConfigEnabledValue);
+
+    const fallbackInitValues = { fallbackConfig_enabled: fallbackConfigEnabledValue };
+    if (fallbackConfigEnabledValue && value?.fallbackConfig?.upstreams) {
+      fallbackInitValues.fallbackConfig_responseCodes = value.fallbackConfig.responseCodes?.length
+        ? value.fallbackConfig.responseCodes
+        : defaultFallbackResponseCodes;
+      fallbackInitValues.fallbackConfig_upstreams = value.fallbackConfig.upstreams?.[0]?.provider;
+      if (value.fallbackConfig.upstreams?.[0]?.provider && !publishedProviderSet.has(value.fallbackConfig.upstreams?.[0]?.provider)) {
+        legacyProviders.push(value.fallbackConfig.upstreams?.[0]?.provider);
       }
-      fallbackInitValues['fallbackConfig_upstreams'] = value?.fallbackConfig?.upstreams?.[0]?.provider;
       try {
-        fallbackInitValues['fallbackConfig_modelNames'] = modelMapping2String(value?.fallbackConfig?.upstreams?.[0]?.modelMapping);
-      } catch (err) {
-        fallbackInitValues['fallbackConfig_modelNames'] = '';
+        fallbackInitValues.fallbackConfig_modelNames = modelMapping2String(
+          value.fallbackConfig.upstreams?.[0]?.modelMapping,
+        );
+      } catch (error) {
+        fallbackInitValues.fallbackConfig_modelNames = '';
       }
     }
-
-    headerPredicates && headerPredicates.map((query) => {
-      return { ...query, uid: uniqueId() };
-    });
-    urlParamPredicates && urlParamPredicates.map((header) => {
-      return { ...header, uid: uniqueId() };
-    });
 
     let normalizedDomains: string[] = [];
     if (Array.isArray(domains)) {
@@ -125,32 +212,39 @@ const AiRouteForm = forwardRef<AiRouteFormHandle, AiRouteFormProps>((props, ref)
     } else if (domains) {
       normalizedDomains = [domains];
     }
-    const initValues = {
+    const initValues: Record<string, any> = {
       name,
       domains: normalizedDomains.filter(Boolean),
       pathPredicate: Object.assign({ ...pathPredicate }, { ignoreCase: pathPredicate.caseSensitive === false ? ['ignore'] : [] }),
-      headerPredicates,
-      urlParamPredicates,
-      upstreams,
-      authConfig_enabled: _authConfig_enabled,
+      headerPredicates: headerPredicates.map((item) => ({ ...item, uid: uniqueId() })),
+      urlParamPredicates: urlParamPredicates.map((item) => ({ ...item, uid: uniqueId() })),
+      authConfig_enabled: authConfigEnabledValue,
       authConfig_allowedConsumerLevels: normalizeUserLevels(value?.authConfig?.allowedConsumerLevels),
+      modelPredicates: modelPredicates ? modelPredicates.map((item) => ({ ...item })) : [],
       ...fallbackInitValues,
     };
 
-    initValues["modelPredicates"] = modelPredicates ? modelPredicates.map(item => ({
-      ...item,
-      provider: upstreams[0].provider,
-    })) : [];
-    initValues["upstreams"] = upstreams.map((item) => {
-      let obj = {
-        provider: item.provider,
+    initValues.upstreams = upstreams.map((item, index) => {
+      const nextItem: Record<string, any> = {
+        providerName: item.provider,
         weight: item.weight,
       };
-      if (item.modelMapping) {
-        obj["modelMapping"] = modelMapping2String(item.modelMapping);
+      if (item.provider && !publishedProviderSet.has(item.provider)) {
+        legacyProviders.push(item.provider);
       }
-      return obj;
+      if (item.modelMapping) {
+        nextItem.modelMapping = modelMapping2String(item.modelMapping);
+      }
+      return nextItem;
     });
+
+    if (legacyProviders.length) {
+      setLegacyProviderWarning(
+        `${t('aiRoute.routeForm.legacyBindingWarning')} ${Array.from(new Set(legacyProviders)).join(', ')}`,
+      );
+    } else {
+      setLegacyProviderWarning('');
+    }
 
     form.setFieldsValue(initValues);
   };
@@ -164,15 +258,14 @@ const AiRouteForm = forwardRef<AiRouteFormHandle, AiRouteFormProps>((props, ref)
       const values = await form.validateFields();
       const { upstreams = [] } = values;
 
-      if (!upstreams?.length) {
-        setUpstreamsError("noUpstream");
+      if (!upstreams.length) {
+        setUpstreamsError('noUpstream');
         return false;
       }
 
-      // 判断 AI 服务权重相加是否等于 100
-      const sumWeights: any = upstreams.reduce((accumulator, currentObject) => {
+      const sumWeights = upstreams.reduce((accumulator, currentObject) => {
         return parseInt(accumulator, 10) + parseInt(currentObject.weight, 10);
-      }, 0)
+      }, 0);
 
       if (sumWeights !== 100) {
         setUpstreamsError('badWeightSum');
@@ -194,70 +287,69 @@ const AiRouteForm = forwardRef<AiRouteFormHandle, AiRouteFormProps>((props, ref)
       const normalizedLevels = normalizeUserLevels(authConfig_allowedConsumerLevels);
       const expandedConsumers = expandConsumersByAllowedLevels(normalizedLevels, consumerList);
 
-      const payload = {
+      const payload: AiRoute = {
         name,
         domains: domains && !Array.isArray(domains) ? [domains] : domains,
         pathPredicate,
         headerPredicates,
         urlParamPredicates,
         fallbackConfig: {
-          enabled: fallbackConfig_enabled,
+          enabled: fallbackConfigEnabled,
+          upstreams: [],
         },
         authConfig: {
-          enabled: authConfig_enabled,
+          enabled: authConfigEnabled,
         },
-      }
-      payload["upstreams"] = upstreams.map(({ provider, weight, modelMapping }) => {
-        const obj = { provider, weight, modelMapping: {} };
-        obj["modelMapping"] = string2ModelMapping(modelMapping);
-        return obj;
-      });
-      payload["modelPredicates"] = modelPredicates ? modelPredicates.map(({ matchType, matchValue }) => ({ matchType, matchValue })) : null;
-      if (fallbackConfig_enabled) {
-        const _upstreams = {
-          provider: fallbackConfig_upstreams,
-          modelMapping: {},
+        customConfigs: {
+          ...(value?.customConfigs || {}),
+        },
+        customLabels: value?.customLabels,
+        upstreams: [],
+      };
+      delete payload.customConfigs[AI_ROUTE_BINDING_REFS_CONFIG_KEY];
+
+      payload.upstreams = upstreams.map(({ providerName, weight, modelMapping }) => {
+        return {
+          provider: providerName,
+          weight,
+          modelMapping: string2ModelMapping(modelMapping),
         };
-        _upstreams["modelMapping"] = string2ModelMapping(fallbackConfig_modelNames);
-        payload['fallbackConfig']['upstreams'] = [_upstreams];
-        payload['fallbackConfig']['strategy'] = "SEQ";
-        payload['fallbackConfig']['responseCodes'] = fallbackConfig_responseCodes;
+      });
+
+      payload.modelPredicates = modelPredicates
+        ? modelPredicates.map(({ matchType, matchValue }) => ({ matchType, matchValue }))
+        : null;
+
+      if (fallbackConfigEnabled) {
+        payload.fallbackConfig.upstreams = [{
+          provider: fallbackConfig_upstreams,
+          modelMapping: string2ModelMapping(fallbackConfig_modelNames),
+        }];
+        payload.fallbackConfig.strategy = 'SEQ';
+        payload.fallbackConfig.responseCodes = fallbackConfig_responseCodes;
       }
-      payload['authConfig']['allowedConsumerLevels'] = normalizedLevels;
-      payload['authConfig']['allowedConsumers'] = expandedConsumers;
-      return payload as AiRoute;
+      payload.authConfig.allowedConsumerLevels = normalizedLevels;
+      payload.authConfig.allowedConsumers = expandedConsumers;
+      return payload;
     },
   }));
 
-  const getOptionsForAi = (providerName) => {
-    try { // 通过 【服务名称】 来筛查满足 【目标模型 预定义】 的下拉选项
-      const _list = aiModelProviders.filter(item => item.value.toUpperCase().indexOf(providerName.toUpperCase()) !== -1);
-      if (_list.length) {
-        const _filterList = _list.map(item => item.targetModelList || []);
-        return _filterList.reduce((acc: any[], item) => acc.concat(item), []);
-      }
-      return [];
-    } catch (error) { return []; }
-  }
-
-  const getOptions = (index) => {
+  const getOptions = (index: number) => {
     try {
-      const _upstreams = form.getFieldValue("upstreams"); // 查询 ui 全部Ai服务
-      // 通过传递的 index 筛查出当前Ai服务的【服务名称】。
-      if (_upstreams[index] && _upstreams[index].provider) return getOptionsForAi(_upstreams[index].provider);
-    } catch (err) { return []; }
+      const upstreams = form.getFieldValue('upstreams');
+      if (upstreams[index]?.providerName) {
+        return getOptionsForProvider(upstreams[index].providerName);
+      }
+    } catch (error) {
+      return [];
+    }
     return [];
-  };
-
-  const canUseAsFallback = (provider): boolean => {
-    // TODO
-    return true;
   };
 
   return (
     <Form form={form} layout="vertical">
       <Form.Item
-        label={t('aiRoute.routeForm.label.name')} // {/* 名称 */}
+        label={t('aiRoute.routeForm.label.name')}
         required
         name="name"
         rules={[
@@ -276,19 +368,25 @@ const AiRouteForm = forwardRef<AiRouteFormHandle, AiRouteFormProps>((props, ref)
           placeholder={tr('aiRoute.routeForm.rule.nameRequired')}
         />
       </Form.Item>
+
       <div style={{ display: 'flex' }}>
         <Form.Item
           style={{ flex: 1, marginRight: '8px' }}
-          label={t("aiRoute.routeForm.label.domain")} // {/* 域名 */}
+          label={t('aiRoute.routeForm.label.domain')}
           name="domains"
-          extra={(<HistoryButton text={t("domain.createDomain")} path={"/domain"} />)}
+          extra={<HistoryButton text={t('domain.createDomain')} path="/domain" />}
         >
           <Select allowClear mode="multiple">
-            {domainList.map((item) => (<Select.Option key={item.name} value={item.name}>{item.name}</Select.Option>))}
+            {domainList.map((item) => (
+              <Select.Option key={item.name} value={item.name}>
+                {item.name}
+              </Select.Option>
+            ))}
           </Select>
         </Form.Item>
         <RedoOutlinedBtn getList={domainsResult} />
       </div>
+
       <Form.Item label={t('route.routeForm.path')} required>
         <Input.Group compact>
           <Form.Item
@@ -301,10 +399,7 @@ const AiRouteForm = forwardRef<AiRouteFormHandle, AiRouteFormProps>((props, ref)
               },
             ]}
           >
-            <Select
-              style={{ width: '20%' }}
-              placeholder={t('route.routeForm.matchType')}
-            >
+            <Select style={{ width: '20%' }} placeholder={t('route.routeForm.matchType')}>
               <Option value="PRE">{t('route.matchTypes.PRE')}</Option>
             </Select>
           </Form.Item>
@@ -320,14 +415,12 @@ const AiRouteForm = forwardRef<AiRouteFormHandle, AiRouteFormProps>((props, ref)
           >
             <Input style={{ width: '60%' }} placeholder={tr('route.routeForm.pathMatcherPlacedholder')} />
           </Form.Item>
-          <Form.Item
-            name={['pathPredicate', 'ignoreCase']}
-            noStyle
-          >
+          <Form.Item name={['pathPredicate', 'ignoreCase']} noStyle>
             <Checkbox.Group
               options={[
                 {
-                  label: t('route.routeForm.caseInsensitive'), value: 'ignore',
+                  label: t('route.routeForm.caseInsensitive'),
+                  value: 'ignore',
                 },
               ]}
               style={{ width: '18%', display: 'inline-flex', marginLeft: 12, marginTop: 4 }}
@@ -335,275 +428,282 @@ const AiRouteForm = forwardRef<AiRouteFormHandle, AiRouteFormProps>((props, ref)
           </Form.Item>
         </Input.Group>
       </Form.Item>
-      <Form.Item
-        label={t('route.routeForm.header')}
-        name="headerPredicates"
-        tooltip={t('route.routeForm.headerTooltip')}
-      >
-        <FactorGroup />
-      </Form.Item>
-      <Form.Item
-        label={t('route.routeForm.query')}
-        name="urlParamPredicates"
-        tooltip={t('route.routeForm.queryTooltip')}
-      >
+
+      <Form.Item label={t('route.routeForm.header')} name="headerPredicates" tooltip={t('route.routeForm.headerTooltip')}>
         <FactorGroup />
       </Form.Item>
 
-      {/* 基于模型的路由匹配规则 */}
+      <Form.Item label={t('route.routeForm.query')} name="urlParamPredicates" tooltip={t('route.routeForm.queryTooltip')}>
+        <FactorGroup />
+      </Form.Item>
+
       <Form.Item label={t('aiRoute.routeForm.label.modelPredicates')}>
         <Form.List name="modelPredicates" initialValue={[{}]}>
           {(fields, { add, remove }) => (
             <>
               <div className="ant-table ant-table-small">
                 <div className="ant-table-content">
-                  <table style={{ tableLayout: "auto" }}>
+                  <table style={{ tableLayout: 'auto' }}>
                     <thead className="ant-table-thead">
                       <tr>
                         <th className="ant-table-cell">Key</th>
-                        <th className="ant-table-cell">{t("aiRoute.routeForm.modelMatchType")}</th>{/* 模型匹配方式 */}
-                        <th className="ant-table-cell">{t("aiRoute.routeForm.modelMatchValue")}</th>{/* 模型名称 */}
-                        <th className="ant-table-cell">{t("misc.action")}</th>{/* 操作 */}
+                        <th className="ant-table-cell">{t('aiRoute.routeForm.modelMatchType')}</th>
+                        <th className="ant-table-cell">{t('aiRoute.routeForm.modelMatchValue')}</th>
+                        <th className="ant-table-cell">{t('misc.action')}</th>
                       </tr>
                     </thead>
                     <tbody className="ant-table-tbody">
-                      {
-                        fields.length && fields.map(({ key, name, ...restField }, index) => (
-                          <tr className="ant-table-row ant-table-row-level-0" key={key}>
-                            <td className="ant-table-cell">
-                              model
-                            </td>
-                            <td className="ant-table-cell">
-                              <Form.Item
-                                name={[name, 'matchType']}
-                                noStyle
-                                rules={[{ required: true, message: tr("aiRoute.routeForm.rule.matchTypeRequired") }]}
-                              >
-                                <Select style={{ width: "200px" }}>
-                                  {
-                                    [
-                                      { name: "EQUAL", label: t("route.matchTypes.EQUAL") }, // 精确匹配
-                                      { name: "PRE", label: t("route.matchTypes.PRE") }, // 前缀匹配
-                                    ].map((item) => (<Select.Option key={item.name} value={item.name}>{item.label} </Select.Option>))
-                                  }
-                                </Select>
-                              </Form.Item>
-                            </td>
-                            <td className="ant-table-cell">
-                              <Form.Item
-                                {...restField}
-                                name={[name, 'matchValue']}
-                                noStyle
-                                rules={[{ required: true, message: t("aiRoute.routeForm.rule.matchValueRequired") || '' }]}
-                              >
-                                <Input style={{ width: "200px" }} />
-                              </Form.Item>
-                            </td>
-                            <td className="ant-table-cell">
-                              <MinusCircleOutlined onClick={() => remove(name)} />
-                            </td>
-                          </tr>
-                        )) || (
-                          <tr className="ant-table-row ant-table-row-level-0">
-                            <td className="ant-table-cell" colSpan={4}>
-                              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: 0 }} />
-                            </td>
-                          </tr>
-                        )
-                      }
+                      {fields.length ? fields.map(({ key, name, ...restField }) => (
+                        <tr className="ant-table-row ant-table-row-level-0" key={key}>
+                          <td className="ant-table-cell">model</td>
+                          <td className="ant-table-cell">
+                            <Form.Item
+                              name={[name, 'matchType']}
+                              noStyle
+                              rules={[{ required: true, message: tr('aiRoute.routeForm.rule.matchTypeRequired') }]}
+                            >
+                              <Select style={{ width: '200px' }}>
+                                {[
+                                  { name: 'EQUAL', label: t('route.matchTypes.EQUAL') },
+                                  { name: 'PRE', label: t('route.matchTypes.PRE') },
+                                ].map((item) => (
+                                  <Select.Option key={item.name} value={item.name}>
+                                    {item.label}
+                                  </Select.Option>
+                                ))}
+                              </Select>
+                            </Form.Item>
+                          </td>
+                          <td className="ant-table-cell">
+                            <Form.Item
+                              {...restField}
+                              name={[name, 'matchValue']}
+                              noStyle
+                              rules={[{ required: true, message: t('aiRoute.routeForm.rule.matchValueRequired') || '' }]}
+                            >
+                              <Input style={{ width: '200px' }} />
+                            </Form.Item>
+                          </td>
+                          <td className="ant-table-cell">
+                            <MinusCircleOutlined onClick={() => remove(name)} />
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr className="ant-table-row ant-table-row-level-0">
+                          <td className="ant-table-cell" colSpan={4}>
+                            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: 0 }} />
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
               </div>
-
               <div>
-                <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add()}>{t("aiRoute.routeForm.addModelPredicate")}</Button>
+                <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add()}>
+                  {t('aiRoute.routeForm.addModelPredicate')}
+                </Button>
               </div>
-            </>)
-          }
+            </>
+          )}
         </Form.List>
       </Form.Item>
 
+      {legacyProviderWarning ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={legacyProviderWarning}
+          description={t('aiRoute.routeForm.legacyBindingDescription')}
+        />
+      ) : null}
+
       <Form.Item
-        label={t('aiRoute.routeForm.label.services')} // {/* 目标AI服务 upstreams */}
+        label={t('aiRoute.routeForm.label.services')}
         extra={(
           <>
-            {
-              upstreamsError && (
-                <div className={"ant-form-item-explain-error"}>{t(`aiRoute.routeForm.rule.${upstreamsError}`)}</div>
-              )
-            }
-            <HistoryButton text={t('llmProvider.create')} path={"/ai/provider"} />
+            {upstreamsError ? (
+              <div className="ant-form-item-explain-error">{t(`aiRoute.routeForm.rule.${upstreamsError}`)}</div>
+            ) : null}
+            <HistoryButton text={t('menu.modelAssetManagement')} path="/ai/model-assets" />
           </>
         )}
       >
         <Form.List name="upstreams" initialValue={[null]}>
           {(fields, { add, remove }) => {
-            const baseStyle = { width: 190 };
-            const requiredStyle = { display: "inline-block", marginRight: "4px", color: "#ff4d4f" };
+            const baseStyle = { width: 280 };
+            const weightStyle = { width: 140 };
+            const requiredStyle = { display: 'inline-block', marginRight: '4px', color: '#ff4d4f' };
+
             return (
               <>
-                <Space style={{ display: 'flex', color: "#808080" }} align="start">
-                  <div style={{ ...baseStyle }}><span style={requiredStyle}>*</span>{t("aiRoute.routeForm.label.serviceName")}</div>
-                  <div style={{ ...baseStyle }}><span style={requiredStyle}>*</span>{t("aiRoute.routeForm.label.serviceWeight")}</div>
-                  <div style={{ ...baseStyle }}>{t("aiRoute.routeForm.label.targetModel")}</div>
+                <Space style={{ display: 'flex', color: '#808080' }} align="start">
+                  <div style={baseStyle}>
+                    <span style={requiredStyle}>*</span>
+                    {t('aiRoute.routeForm.label.serviceName')}
+                  </div>
+                  <div style={weightStyle}>
+                    <span style={requiredStyle}>*</span>
+                    {t('aiRoute.routeForm.label.serviceWeight')}
+                  </div>
+                  <div style={baseStyle}>{t('aiRoute.routeForm.label.targetModel')}</div>
                 </Space>
 
-                {fields.map(({ key, name, ...restField }, index) => (
-                  <Space key={key} style={{ display: 'flex' }} align="start">
-                    <Form.Item
-                      {...restField}
-                      name={[name, 'provider']}
-                      style={{ marginBottom: '0.5rem' }}
-                      rules={[{ required: true, message: tr('aiRoute.routeForm.rule.targetServiceRequired') }]}
-                    >{/* 服务名称 */}
-                      <Select
-                        showSearch
-                        style={{ ...baseStyle }}
+                {fields.map(({ key, name, ...restField }) => {
+                  const currentProviderValue = form.getFieldValue(['upstreams', name, 'providerName']);
+                  const selectedProviderValues = ((form.getFieldValue('upstreams') || []) as Array<{ providerName?: string }>)
+                    .map((item) => item?.providerName)
+                    .filter((item) => !!item);
+
+                  return (
+                    <Space key={key} style={{ display: 'flex' }} align="start">
+                      <Form.Item
+                        {...restField}
+                        name={[name, 'providerName']}
+                        style={{ marginBottom: '0.5rem' }}
+                        rules={[{ required: true, message: tr('aiRoute.routeForm.rule.targetServiceRequired') }]}
                       >
-                        {llmList.map((item) => {
-                          const selectArr = form.getFieldValue('upstreams').map(i => i && i.provider) || [];
-                          return (
-                            <Select.Option key={item.name} value={item.name} disabled={!!selectArr.includes(item.name)}>
-                              {item.name}
-                            </Select.Option>)
-                        })}
-                      </Select>
-                    </Form.Item>
-
-                    <Form.Item
-                      {...restField}
-                      name={[name, 'weight']}
-                      style={{ ...baseStyle, marginBottom: '0' }}
-                      rules={[{ required: true, message: tr('aiRoute.routeForm.rule.serviceWeightRequired') }]}
-                    >{/* 请求比例 */}
-                      <InputNumber
-                        style={{ ...baseStyle }}
-                        min={0}
-                        max={100}
-                        addonAfter="%"
-                      />
-                    </Form.Item>
-
-                    <Form.Item {...restField} name={[name, 'modelMapping']} noStyle>
-                      <ModelMappingEditor
-                        style={{ ...baseStyle }}
-                        options={getOptions(index)}
-                      />
-                    </Form.Item>
-                    {
-                      fields.length > 1 &&
-                      <Form.Item noStyle>
-                        <MinusCircleOutlined onClick={() => remove(name)} />
+                        <Select showSearch style={baseStyle} optionFilterProp="children">
+                          {renderLegacyProviderOption(currentProviderValue)}
+                          {publishedProviderOptions.map((item) => (
+                            <Select.Option
+                              key={item.value}
+                              value={item.value}
+                              disabled={selectedProviderValues.includes(item.value) && item.value !== currentProviderValue}
+                            >
+                              {item.label}
+                            </Select.Option>
+                          ))}
+                        </Select>
                       </Form.Item>
-                    }
-                  </Space>
-                ))}
+
+                      <Form.Item
+                        {...restField}
+                        name={[name, 'weight']}
+                        style={{ ...weightStyle, marginBottom: 0 }}
+                        rules={[{ required: true, message: tr('aiRoute.routeForm.rule.serviceWeightRequired') }]}
+                      >
+                        <InputNumber style={weightStyle} min={0} max={100} addonAfter="%" />
+                      </Form.Item>
+
+                      <Form.Item {...restField} name={[name, 'modelMapping']} noStyle>
+                        <ModelMappingEditor style={baseStyle} options={getOptions(name)} />
+                      </Form.Item>
+
+                      {fields.length > 1 ? (
+                        <Form.Item noStyle>
+                          <MinusCircleOutlined onClick={() => remove(name)} />
+                        </Form.Item>
+                      ) : null}
+                    </Space>
+                  );
+                })}
+
                 <div>
-                  <Button
-                    type="dashed"
-                    block
-                    icon={<PlusOutlined />}
-                    onClick={() => add()}
-                  >
-                    {/* 添加目标AI服务 */}{t("aiRoute.routeForm.addTargetService")}
+                  <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add()}>
+                    {t('aiRoute.routeForm.addTargetService')}
                   </Button>
                 </div>
               </>
-            )
+            );
           }}
         </Form.List>
       </Form.Item>
 
       <Form.Item
         name="fallbackConfig_enabled"
-        label={t('aiRoute.routeForm.label.fallbackConfig')} // {/* 降级服务 */}
+        label={t('aiRoute.routeForm.label.fallbackConfig')}
         valuePropName="checked"
         initialValue={false}
         extra={t('aiRoute.routeForm.label.fallbackConfigExtra')}
       >
-        <Switch onChange={e => {
-          setFallbackConfigEnabled(e)
-          form.resetFields(["fallbackConfig_upstreams"])
-        }}
+        <Switch
+          onChange={(checked) => {
+            setFallbackConfigEnabled(checked);
+            form.resetFields(['fallbackConfig_upstreams']);
+          }}
         />
       </Form.Item>
-      {
-        fallbackConfig_enabled ?
-          <>
-            <div style={{ display: 'flex' }}>
-              <Form.Item
-                style={{ flex: 1, marginRight: '8px' }}
-                required
-                name="fallbackConfig_responseCodes"
-                label={t('aiRoute.routeForm.label.fallbackResponseCodes')} // {/* 响应码列表 */}
-                rules={[{ required: true, message: tr('aiRoute.routeForm.rule.fallbackResponseCodesRequired') }]}
-              >
-                <Select mode="multiple">
-                  {default_fallback_responseCodes.map((item) =>
-                    (<Select.Option key={item} value={item}>{item}</Select.Option>))}
-                </Select>
-              </Form.Item>
-              <Form.Item
-                style={{ flex: 1, marginRight: '8px' }}
-                required
-                name="fallbackConfig_upstreams"
-                label={t('aiRoute.routeForm.label.fallbackUpstream')} // {/* 降级服务列表 */}
-                rules={[{ required: true, message: tr('aiRoute.routeForm.rule.fallbackUpstreamRequired') }]}
-              >
-                <Select
-                  showSearch
-                >
-                  {llmList.map((item) =>
-                    (<Select.Option key={item.name} value={item.name} disabled={!canUseAsFallback(item)}>{item.name}</Select.Option>))}
-                </Select>
-              </Form.Item>
-              <Form.Item
-                required
-                style={{ flex: 1 }}
-                name={"fallbackConfig_modelNames"}
-                label={t("aiRoute.routeForm.label.targetModel")}
-                rules={[{ required: true, message: tr('aiRoute.routeForm.rule.modelNameRequired') }]}
-              >{/* 模型名称 */}
-                <ModelMappingEditor
-                  options={getOptionsForAi(form.getFieldValue("fallbackConfig_upstreams"))}
-                />
-              </Form.Item>
-            </div>
-          </>
-          : null
-      }
+
+      {fallbackConfigEnabled ? (
+        <div style={{ display: 'flex' }}>
+          <Form.Item
+            style={{ flex: 1, marginRight: '8px' }}
+            required
+            name="fallbackConfig_responseCodes"
+            label={t('aiRoute.routeForm.label.fallbackResponseCodes')}
+            rules={[{ required: true, message: tr('aiRoute.routeForm.rule.fallbackResponseCodesRequired') }]}
+          >
+            <Select mode="multiple">
+              {defaultFallbackResponseCodes.map((item) => (
+                <Select.Option key={item} value={item}>
+                  {item}
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item
+            style={{ flex: 1, marginRight: '8px' }}
+            required
+            name="fallbackConfig_upstreams"
+            label={t('aiRoute.routeForm.label.fallbackUpstream')}
+            rules={[{ required: true, message: tr('aiRoute.routeForm.rule.fallbackUpstreamRequired') }]}
+          >
+            <Select showSearch optionFilterProp="children">
+              {renderLegacyProviderOption(form.getFieldValue('fallbackConfig_upstreams'))}
+              {publishedProviderOptions.map((item) => (
+                <Select.Option key={item.value} value={item.value}>
+                  {item.label}
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item
+            required
+            style={{ flex: 1 }}
+            name="fallbackConfig_modelNames"
+            label={t('aiRoute.routeForm.label.targetModel')}
+            rules={[{ required: true, message: tr('aiRoute.routeForm.rule.modelNameRequired') }]}
+          >
+            <ModelMappingEditor options={getOptionsForProvider(form.getFieldValue('fallbackConfig_upstreams'))} />
+          </Form.Item>
+        </div>
+      ) : null}
 
       <Form.Item
         name="authConfig_enabled"
-        label={t('aiRoute.routeForm.label.authConfig')} // {/* 请求认证设置 */}
+        label={t('aiRoute.routeForm.label.authConfig')}
         valuePropName="checked"
         initialValue={false}
         extra={t('aiRoute.routeForm.label.authConfigExtra')}
       >
-        <Switch onChange={e => {
-          setAuthConfigEnabled(e)
-        }}
-        />
+        <Switch onChange={(checked) => setAuthConfigEnabled(checked)} />
       </Form.Item>
-      <Form.Item label={t('misc.authType')} name="authType" initialValue={CredentialType.KEY_AUTH.key} extra={t('misc.keyAuthOnlyTip')}>
+
+      <Form.Item
+        label={t('misc.authType')}
+        name="authType"
+        initialValue={CredentialType.KEY_AUTH.key}
+        extra={t('misc.keyAuthOnlyTip')}
+      >
         <Select disabled>
-          {
-            Object.values(CredentialType).filter(ct => !!ct.enabled).map(ct => (
-              <Select.Option key={ct.key} value={ct.key}>{ct.displayName}</Select.Option>
-            ))
-          }
+          {Object.values(CredentialType)
+            .filter((ct) => !!ct.enabled)
+            .map((ct) => (
+              <Select.Option key={ct.key} value={ct.key}>
+                {ct.displayName}
+              </Select.Option>
+            ))}
         </Select>
       </Form.Item>
+
       <Form.Item
         label={t('aiRoute.routeForm.label.authConfigLevelList')}
-        extra={(<HistoryButton text={t('consumer.create')} path={"/consumer"} />)}
+        extra={<HistoryButton text={t('consumer.create')} path="/consumer" />}
       >
         <div style={{ display: 'flex', alignItems: 'center' }}>
-          <Form.Item
-            name="authConfig_allowedConsumerLevels"
-            noStyle
-          >
+          <Form.Item name="authConfig_allowedConsumerLevels" noStyle>
             <Select
               allowClear
               mode="multiple"
@@ -611,15 +711,13 @@ const AiRouteForm = forwardRef<AiRouteFormHandle, AiRouteFormProps>((props, ref)
               style={{ flex: 1 }}
             >
               {USER_LEVELS.map((level) => (
-                <Select.Option key={level} value={level}>{t(`consumer.userLevel.${level}`)}</Select.Option>
+                <Select.Option key={level} value={level}>
+                  {t(`consumer.userLevel.${level}`)}
+                </Select.Option>
               ))}
             </Select>
           </Form.Item>
-          <Button
-            style={{ marginLeft: 8 }}
-            onClick={() => consumerResult.run()}
-            icon={<RedoOutlined />}
-          />
+          <Button style={{ marginLeft: 8 }} onClick={() => consumerResult.run()} icon={<RedoOutlined />} />
         </div>
       </Form.Item>
     </Form>

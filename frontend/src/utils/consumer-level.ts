@@ -38,14 +38,14 @@ export const expandConsumersByAllowedLevels = (levels: string[] | undefined, con
   if (!normalizedLevels.length) {
     return [];
   }
-  const maxRank = normalizedLevels.reduce((acc, item) => Math.max(acc, USER_LEVEL_RANK[item]), 1);
+  const minRank = normalizedLevels.reduce((acc, item) => Math.min(acc, USER_LEVEL_RANK[item]), Number.MAX_SAFE_INTEGER);
   const result: string[] = [];
   consumers.forEach((consumer) => {
     if (!consumer?.name) {
       return;
     }
     const consumerRank = USER_LEVEL_RANK[normalizeUserLevel(consumer.portalUserLevel)];
-    if (consumerRank <= maxRank && !result.includes(consumer.name)) {
+    if (consumerRank >= minRank && !result.includes(consumer.name)) {
       result.push(consumer.name);
     }
   });

@@ -67,6 +67,10 @@ export default {
             path: '/ai/provider',
           },
           {
+            name: 'menu.modelAssetManagement',
+            path: '/ai/model-assets',
+          },
+          {
             name: 'menu.aiRouteManagement',
             path: '/ai/route',
           },

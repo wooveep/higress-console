@@ -102,7 +102,7 @@ public class PortalConsumerProjectionService {
             if (StringUtils.isBlank(consumerName)) {
                 continue;
             }
-            PortalUserRecord user = portalUserJdbcService.ensureMigrationUser(consumerName, legacyConsumer.getDepartment());
+            PortalUserRecord user = portalUserJdbcService.ensureMigrationUser(consumerName);
             if (user == null) {
                 continue;
             }
@@ -214,17 +214,12 @@ public class PortalConsumerProjectionService {
 
         Consumer consumer = new Consumer();
         consumer.setName(user.getConsumerName());
-        consumer.setDepartment(user.getDepartment());
         consumer.setCredentials(Collections.singletonList(keyAuthCredential));
         return consumer;
     }
 
     private boolean sameProjection(Consumer existed, Consumer desired) {
         if (existed == null || desired == null) {
-            return false;
-        }
-        if (!StringUtils.equals(StringUtils.defaultString(existed.getDepartment()),
-            StringUtils.defaultString(desired.getDepartment()))) {
             return false;
         }
         Set<String> existedValues = new LinkedHashSet<>(extractRawKeys(existed));

@@ -12,6 +12,8 @@ export interface AiRoute {
   upstreams: AiUpstream[];
   authConfig?: AuthConfig;
   fallbackConfig: AiRouteFallbackConfig;
+  customConfigs?: Record<string, string>;
+  customLabels?: Record<string, string>;
 }
 
 export interface AiRouteFallbackConfig {

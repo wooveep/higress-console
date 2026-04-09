@@ -19,6 +19,7 @@
     "aiSensitiveManagement": "AI Desensitization Management",
     "aiDashboard": "AI Dashboard",
     "llmProviderManagement": "LLM Provider Management",
+    "modelAssetManagement": "Model Asset Management",
     "domainManagement": "Domain Management",
     "certManagement": "Certificate Management",
     "consumerManagement": "Organization",
@@ -109,7 +110,10 @@
       "byWeight": "By weight",
       "addTargetService": "Add target AI service",
       "addModelPredicate": "Add model match rule",
-      "selectModelService": "Select an AI service"
+      "selectModelService": "Select an AI service",
+      "legacyBindingWarning": "The following routes still reference unpublished bindings or retired providers and are restored by provider name:",
+      "legacyBindingDescription": "You can still save the route, but target model suggestions only come from published bindings under the current provider. Consider updating the binding soon.",
+      "legacyBindingOption": "Legacy provider config"
     },
     "create": "Create AI Route",
     "edit": "Edit AI Route",

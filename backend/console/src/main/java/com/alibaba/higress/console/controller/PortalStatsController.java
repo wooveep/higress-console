@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.alibaba.higress.console.controller.dto.Response;
 import com.alibaba.higress.console.controller.util.ControllerUtil;
+import com.alibaba.higress.console.model.portal.PortalDepartmentBillRecord;
+import com.alibaba.higress.console.model.portal.PortalUsageEventRecord;
 import com.alibaba.higress.console.model.portal.PortalUsageStatRecord;
 import com.alibaba.higress.console.service.portal.PortalUsageStatsService;
 
@@ -43,6 +45,39 @@ public class PortalStatsController {
         @RequestParam(required = false) Long from, @RequestParam(required = false) Long to) {
         try {
             List<PortalUsageStatRecord> result = portalUsageStatsService.listUsage(from, to);
+            return ControllerUtil.buildResponseEntity(result);
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Response.failure(ex.getMessage()));
+        }
+    }
+
+    @GetMapping("/usage-events")
+    @Operation(summary = "List request-level usage events")
+    public ResponseEntity<Response<List<PortalUsageEventRecord>>> listUsageEvents(
+        @RequestParam(required = false) Long from, @RequestParam(required = false) Long to,
+        @RequestParam(required = false) String consumerName, @RequestParam(required = false) String departmentId,
+        @RequestParam(required = false) Boolean includeChildren, @RequestParam(required = false) String apiKeyId,
+        @RequestParam(required = false) String modelId, @RequestParam(required = false) String routeName,
+        @RequestParam(required = false) String requestStatus, @RequestParam(required = false) String usageStatus,
+        @RequestParam(required = false) Integer pageNum, @RequestParam(required = false) Integer pageSize) {
+        try {
+            List<PortalUsageEventRecord> result = portalUsageStatsService.listUsageEvents(from, to, consumerName,
+                departmentId, includeChildren, apiKeyId, modelId, routeName, requestStatus, usageStatus, pageNum,
+                pageSize);
+            return ControllerUtil.buildResponseEntity(result);
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Response.failure(ex.getMessage()));
+        }
+    }
+
+    @GetMapping("/department-bills")
+    @Operation(summary = "List department bill summaries")
+    public ResponseEntity<Response<List<PortalDepartmentBillRecord>>> listDepartmentBills(
+        @RequestParam(required = false) Long from, @RequestParam(required = false) Long to,
+        @RequestParam(required = false) String departmentId, @RequestParam(required = false) Boolean includeChildren) {
+        try {
+            List<PortalDepartmentBillRecord> result = portalUsageStatsService.listDepartmentBills(from, to,
+                departmentId, includeChildren);
             return ControllerUtil.buildResponseEntity(result);
         } catch (IllegalStateException ex) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Response.failure(ex.getMessage()));

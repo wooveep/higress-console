@@ -77,7 +77,7 @@ public class PortalConsumerLevelAuthService {
             log.warn("Portal DB is unavailable when resolving consumers by level. levels={}", levels);
             return Collections.emptyList();
         }
-        int maxRank = levels.stream().mapToInt(this::levelRank).max().orElse(1);
+        int minRank = levels.stream().mapToInt(this::levelRank).min().orElse(1);
         List<PortalUserRecord> users = portalUserJdbcService.listAllUsers();
         if (CollectionUtils.isEmpty(users)) {
             return Collections.emptyList();
@@ -94,7 +94,7 @@ public class PortalConsumerLevelAuthService {
             if (STATUS_DISABLED.equalsIgnoreCase(StringUtils.trimToEmpty(user.getStatus()))) {
                 continue;
             }
-            if (levelRank(user.getUserLevel()) <= maxRank) {
+            if (levelRank(user.getUserLevel()) >= minRank) {
                 consumerNames.add(user.getConsumerName());
             }
         }

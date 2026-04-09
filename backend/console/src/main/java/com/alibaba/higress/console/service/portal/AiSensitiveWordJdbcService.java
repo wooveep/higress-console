@@ -3,6 +3,9 @@ package com.alibaba.higress.console.service.portal;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -15,8 +18,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
-import java.nio.charset.StandardCharsets;
 
 import javax.annotation.PostConstruct;
 
@@ -42,6 +45,8 @@ public class AiSensitiveWordJdbcService {
     private static final String REPLACE_TYPE_REPLACE = "replace";
     private static final long SYSTEM_CONFIG_ID = 1L;
     private static final String SYSTEM_UPDATED_BY = "system";
+    private static final String DETECT_SIGNATURE_INDEX = "uk_ai_sensitive_detect_rule_signature";
+    private static final String REPLACE_SIGNATURE_INDEX = "uk_ai_sensitive_replace_rule_signature";
 
     @Value("${higress.portal.db.url:}")
     private String dbUrl;
@@ -73,6 +78,7 @@ public class AiSensitiveWordJdbcService {
                     + "id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,"
                     + "pattern VARCHAR(1024) NOT NULL,"
                     + "match_type VARCHAR(32) NOT NULL DEFAULT 'contains',"
+                    + "signature_hash VARCHAR(64) NOT NULL DEFAULT '',"
                     + "description TEXT NULL,"
                     + "priority INT NOT NULL DEFAULT 0,"
                     + "is_enabled BOOLEAN NOT NULL DEFAULT TRUE,"
@@ -86,6 +92,7 @@ public class AiSensitiveWordJdbcService {
                     + "replace_type VARCHAR(32) NOT NULL DEFAULT 'replace',"
                     + "replace_value TEXT NULL,"
                     + "restore BOOLEAN NOT NULL DEFAULT FALSE,"
+                    + "signature_hash VARCHAR(64) NOT NULL DEFAULT '',"
                     + "description TEXT NULL,"
                     + "priority INT NOT NULL DEFAULT 0,"
                     + "is_enabled BOOLEAN NOT NULL DEFAULT TRUE,"
@@ -117,9 +124,124 @@ public class AiSensitiveWordJdbcService {
                     + "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
                     + "updated_by VARCHAR(255) NULL"
                     + ")");
+            ensureSignatureColumns(connection);
+            backfillSignatureHashes(connection);
+            deduplicateRules(connection);
+            ensureSignatureIndexes(connection);
             ensureDefaultSystemConfig(connection);
         } catch (SQLException ex) {
             log.warn("Failed to initialize AI sensitive word tables.", ex);
+        }
+    }
+
+    private void ensureSignatureColumns(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "ALTER TABLE ai_sensitive_detect_rule ADD COLUMN signature_hash VARCHAR(64) NOT NULL DEFAULT '' AFTER match_type")) {
+            statement.execute();
+        } catch (SQLException ex) {
+            if (!StringUtils.containsIgnoreCase(ex.getMessage(), "duplicate column")) {
+                throw ex;
+            }
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+            "ALTER TABLE ai_sensitive_replace_rule ADD COLUMN signature_hash VARCHAR(64) NOT NULL DEFAULT '' AFTER restore")) {
+            statement.execute();
+        } catch (SQLException ex) {
+            if (!StringUtils.containsIgnoreCase(ex.getMessage(), "duplicate column")) {
+                throw ex;
+            }
+        }
+    }
+
+    private void backfillSignatureHashes(Connection connection) throws SQLException {
+        try (PreparedStatement query = connection.prepareStatement(
+            "SELECT id, pattern, match_type FROM ai_sensitive_detect_rule");
+            ResultSet rs = query.executeQuery();
+            PreparedStatement update = connection.prepareStatement(
+                "UPDATE ai_sensitive_detect_rule SET signature_hash = ? WHERE id = ?")) {
+            while (rs.next()) {
+                update.setString(1, buildDetectSignatureHash(rs.getString("pattern"), rs.getString("match_type")));
+                update.setLong(2, rs.getLong("id"));
+                update.addBatch();
+            }
+            update.executeBatch();
+        }
+
+        try (PreparedStatement query = connection.prepareStatement(
+            "SELECT id, pattern, replace_type, replace_value, restore FROM ai_sensitive_replace_rule");
+            ResultSet rs = query.executeQuery();
+            PreparedStatement update = connection.prepareStatement(
+                "UPDATE ai_sensitive_replace_rule SET signature_hash = ? WHERE id = ?")) {
+            while (rs.next()) {
+                update.setString(1, buildReplaceSignatureHash(
+                    rs.getString("pattern"),
+                    rs.getString("replace_type"),
+                    rs.getString("replace_value"),
+                    rs.getBoolean("restore")));
+                update.setLong(2, rs.getLong("id"));
+                update.addBatch();
+            }
+            update.executeBatch();
+        }
+    }
+
+    private void deduplicateRules(Connection connection) throws SQLException {
+        deduplicateDetectRules(connection);
+        deduplicateReplaceRules(connection);
+    }
+
+    private void deduplicateDetectRules(Connection connection) throws SQLException {
+        LinkedHashSet<String> seenSignatures = new LinkedHashSet<>();
+        List<Long> duplicatedIds = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT id, signature_hash FROM ai_sensitive_detect_rule ORDER BY updated_at DESC, id DESC");
+            ResultSet rs = statement.executeQuery()) {
+            while (rs.next()) {
+                String signatureHash = StringUtils.defaultString(rs.getString("signature_hash"));
+                long id = rs.getLong("id");
+                if (!seenSignatures.add(signatureHash)) {
+                    duplicatedIds.add(id);
+                }
+            }
+        }
+        deleteDetectRuleIds(connection, duplicatedIds);
+    }
+
+    private void deduplicateReplaceRules(Connection connection) throws SQLException {
+        LinkedHashSet<String> seenSignatures = new LinkedHashSet<>();
+        List<Long> duplicatedIds = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT id, signature_hash FROM ai_sensitive_replace_rule ORDER BY updated_at DESC, id DESC");
+            ResultSet rs = statement.executeQuery()) {
+            while (rs.next()) {
+                String signatureHash = StringUtils.defaultString(rs.getString("signature_hash"));
+                long id = rs.getLong("id");
+                if (!seenSignatures.add(signatureHash)) {
+                    duplicatedIds.add(id);
+                }
+            }
+        }
+        deleteReplaceRuleIds(connection, duplicatedIds);
+    }
+
+    private void ensureSignatureIndexes(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "CREATE UNIQUE INDEX " + DETECT_SIGNATURE_INDEX + " ON ai_sensitive_detect_rule(signature_hash)")) {
+            statement.execute();
+        } catch (SQLException ex) {
+            if (!StringUtils.containsIgnoreCase(ex.getMessage(), "duplicate key name")
+                && !StringUtils.containsIgnoreCase(ex.getMessage(), "already exists")) {
+                throw ex;
+            }
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+            "CREATE UNIQUE INDEX " + REPLACE_SIGNATURE_INDEX + " ON ai_sensitive_replace_rule(signature_hash)")) {
+            statement.execute();
+        } catch (SQLException ex) {
+            if (!StringUtils.containsIgnoreCase(ex.getMessage(), "duplicate key name")
+                && !StringUtils.containsIgnoreCase(ex.getMessage(), "already exists")) {
+                throw ex;
+            }
         }
     }
 
@@ -258,17 +380,24 @@ public class AiSensitiveWordJdbcService {
             return null;
         }
         AiSensitiveDetectRule normalized = normalizeDetectRule(rule);
+        String signatureHash = buildDetectSignatureHash(normalized.getPattern(), normalized.getMatchType());
         try (Connection connection = openConnection()) {
+            Long existingId = findDetectRuleIdBySignature(connection, signatureHash);
+            if (existingId != null && (normalized.getId() == null || !existingId.equals(normalized.getId()))) {
+                deleteDetectRuleIds(connection, java.util.Collections.singletonList(normalized.getId()));
+                normalized.setId(existingId);
+            }
             if (normalized.getId() == null) {
                 String sql = "INSERT INTO ai_sensitive_detect_rule "
-                    + "(pattern, match_type, description, priority, is_enabled) VALUES (?, ?, ?, ?, ?)";
+                    + "(pattern, match_type, signature_hash, description, priority, is_enabled) VALUES (?, ?, ?, ?, ?, ?)";
                 try (PreparedStatement statement =
                     connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
                     statement.setString(1, normalized.getPattern());
                     statement.setString(2, normalized.getMatchType());
-                    statement.setString(3, normalized.getDescription());
-                    statement.setInt(4, normalized.getPriority());
-                    statement.setBoolean(5, Boolean.TRUE.equals(normalized.getEnabled()));
+                    statement.setString(3, signatureHash);
+                    statement.setString(4, normalized.getDescription());
+                    statement.setInt(5, normalized.getPriority());
+                    statement.setBoolean(6, Boolean.TRUE.equals(normalized.getEnabled()));
                     statement.executeUpdate();
                     try (ResultSet keys = statement.getGeneratedKeys()) {
                         if (keys.next()) {
@@ -277,15 +406,16 @@ public class AiSensitiveWordJdbcService {
                     }
                 }
             } else {
-                String sql = "UPDATE ai_sensitive_detect_rule SET pattern=?, match_type=?, description=?, priority=?, "
+                String sql = "UPDATE ai_sensitive_detect_rule SET pattern=?, match_type=?, signature_hash=?, description=?, priority=?, "
                     + "is_enabled=? WHERE id=?";
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
                     statement.setString(1, normalized.getPattern());
                     statement.setString(2, normalized.getMatchType());
-                    statement.setString(3, normalized.getDescription());
-                    statement.setInt(4, normalized.getPriority());
-                    statement.setBoolean(5, Boolean.TRUE.equals(normalized.getEnabled()));
-                    statement.setLong(6, normalized.getId());
+                    statement.setString(3, signatureHash);
+                    statement.setString(4, normalized.getDescription());
+                    statement.setInt(5, normalized.getPriority());
+                    statement.setBoolean(6, Boolean.TRUE.equals(normalized.getEnabled()));
+                    statement.setLong(7, normalized.getId());
                     statement.executeUpdate();
                 }
             }
@@ -357,20 +487,31 @@ public class AiSensitiveWordJdbcService {
             return null;
         }
         AiSensitiveReplaceRule normalized = normalizeReplaceRule(rule);
+        String signatureHash = buildReplaceSignatureHash(
+            normalized.getPattern(),
+            normalized.getReplaceType(),
+            normalized.getReplaceValue(),
+            Boolean.TRUE.equals(normalized.getRestore()));
         try (Connection connection = openConnection()) {
+            Long existingId = findReplaceRuleIdBySignature(connection, signatureHash);
+            if (existingId != null && (normalized.getId() == null || !existingId.equals(normalized.getId()))) {
+                deleteReplaceRuleIds(connection, java.util.Collections.singletonList(normalized.getId()));
+                normalized.setId(existingId);
+            }
             if (normalized.getId() == null) {
                 String sql = "INSERT INTO ai_sensitive_replace_rule "
-                    + "(pattern, replace_type, replace_value, restore, description, priority, is_enabled) "
-                    + "VALUES (?, ?, ?, ?, ?, ?, ?)";
+                    + "(pattern, replace_type, replace_value, restore, signature_hash, description, priority, is_enabled) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
                 try (PreparedStatement statement =
                     connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
                     statement.setString(1, normalized.getPattern());
                     statement.setString(2, normalized.getReplaceType());
                     statement.setString(3, normalized.getReplaceValue());
                     statement.setBoolean(4, Boolean.TRUE.equals(normalized.getRestore()));
-                    statement.setString(5, normalized.getDescription());
-                    statement.setInt(6, normalized.getPriority());
-                    statement.setBoolean(7, Boolean.TRUE.equals(normalized.getEnabled()));
+                    statement.setString(5, signatureHash);
+                    statement.setString(6, normalized.getDescription());
+                    statement.setInt(7, normalized.getPriority());
+                    statement.setBoolean(8, Boolean.TRUE.equals(normalized.getEnabled()));
                     statement.executeUpdate();
                     try (ResultSet keys = statement.getGeneratedKeys()) {
                         if (keys.next()) {
@@ -380,16 +521,17 @@ public class AiSensitiveWordJdbcService {
                 }
             } else {
                 String sql = "UPDATE ai_sensitive_replace_rule SET pattern=?, replace_type=?, replace_value=?, "
-                    + "restore=?, description=?, priority=?, is_enabled=? WHERE id=?";
+                    + "restore=?, signature_hash=?, description=?, priority=?, is_enabled=? WHERE id=?";
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
                     statement.setString(1, normalized.getPattern());
                     statement.setString(2, normalized.getReplaceType());
                     statement.setString(3, normalized.getReplaceValue());
                     statement.setBoolean(4, Boolean.TRUE.equals(normalized.getRestore()));
-                    statement.setString(5, normalized.getDescription());
-                    statement.setInt(6, normalized.getPriority());
-                    statement.setBoolean(7, Boolean.TRUE.equals(normalized.getEnabled()));
-                    statement.setLong(8, normalized.getId());
+                    statement.setString(5, signatureHash);
+                    statement.setString(6, normalized.getDescription());
+                    statement.setInt(7, normalized.getPriority());
+                    statement.setBoolean(8, Boolean.TRUE.equals(normalized.getEnabled()));
+                    statement.setLong(9, normalized.getId());
                     statement.executeUpdate();
                 }
             }
@@ -574,6 +716,66 @@ public class AiSensitiveWordJdbcService {
         return 0;
     }
 
+    private Long findDetectRuleIdBySignature(Connection connection, String signatureHash) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT id FROM ai_sensitive_detect_rule WHERE signature_hash = ? LIMIT 1")) {
+            statement.setString(1, signatureHash);
+            try (ResultSet rs = statement.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getLong("id");
+                }
+            }
+        }
+        return null;
+    }
+
+    private Long findReplaceRuleIdBySignature(Connection connection, String signatureHash) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT id FROM ai_sensitive_replace_rule WHERE signature_hash = ? LIMIT 1")) {
+            statement.setString(1, signatureHash);
+            try (ResultSet rs = statement.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getLong("id");
+                }
+            }
+        }
+        return null;
+    }
+
+    private void deleteDetectRuleIds(Connection connection, List<Long> ids) throws SQLException {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+            "DELETE FROM ai_sensitive_detect_rule WHERE id = ?")) {
+            for (Long id : ids) {
+                if (id == null || id <= 0) {
+                    continue;
+                }
+                statement.setLong(1, id);
+                statement.addBatch();
+            }
+            statement.executeBatch();
+        }
+    }
+
+    private void deleteReplaceRuleIds(Connection connection, List<Long> ids) throws SQLException {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+            "DELETE FROM ai_sensitive_replace_rule WHERE id = ?")) {
+            for (Long id : ids) {
+                if (id == null || id <= 0) {
+                    continue;
+                }
+                statement.setLong(1, id);
+                statement.addBatch();
+            }
+            statement.executeBatch();
+        }
+    }
+
     private void ensureDefaultSystemConfig(Connection connection) throws SQLException {
         if (systemConfigExists(connection)) {
             return;
@@ -599,11 +801,43 @@ public class AiSensitiveWordJdbcService {
         }
     }
 
+    private String buildDetectSignatureHash(String pattern, String matchType) {
+        return sha256Hex(String.join("::",
+            StringUtils.trimToEmpty(pattern),
+            StringUtils.lowerCase(StringUtils.defaultIfBlank(StringUtils.trimToNull(matchType), MATCH_TYPE_CONTAINS),
+                Locale.ROOT)));
+    }
+
+    private String buildReplaceSignatureHash(String pattern, String replaceType, String replaceValue, boolean restore) {
+        return sha256Hex(String.join("::",
+            StringUtils.trimToEmpty(pattern),
+            StringUtils.lowerCase(StringUtils.defaultIfBlank(StringUtils.trimToNull(replaceType), REPLACE_TYPE_REPLACE),
+                Locale.ROOT),
+            StringUtils.defaultString(replaceValue),
+            Boolean.toString(restore)));
+    }
+
+    private String sha256Hex(String text) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(StringUtils.defaultString(text).getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder(hash.length * 2);
+            for (byte item : hash) {
+                builder.append(String.format("%02x", item));
+            }
+            return builder.toString();
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is unavailable.", ex);
+        }
+    }
+
     private AiSensitiveDetectRule normalizeDetectRule(AiSensitiveDetectRule rule) {
         return AiSensitiveDetectRule.builder()
             .id(rule.getId())
             .pattern(StringUtils.trimToEmpty(rule.getPattern()))
-            .matchType(StringUtils.defaultIfBlank(StringUtils.trimToNull(rule.getMatchType()), MATCH_TYPE_CONTAINS))
+            .matchType(StringUtils.lowerCase(
+                StringUtils.defaultIfBlank(StringUtils.trimToNull(rule.getMatchType()), MATCH_TYPE_CONTAINS),
+                Locale.ROOT))
             .description(StringUtils.trimToNull(rule.getDescription()))
             .priority(rule.getPriority() == null ? 0 : rule.getPriority())
             .enabled(rule.getEnabled() == null ? Boolean.TRUE : rule.getEnabled())
@@ -614,8 +848,9 @@ public class AiSensitiveWordJdbcService {
         return AiSensitiveReplaceRule.builder()
             .id(rule.getId())
             .pattern(StringUtils.trimToEmpty(rule.getPattern()))
-            .replaceType(
-                StringUtils.defaultIfBlank(StringUtils.trimToNull(rule.getReplaceType()), REPLACE_TYPE_REPLACE))
+            .replaceType(StringUtils.lowerCase(
+                StringUtils.defaultIfBlank(StringUtils.trimToNull(rule.getReplaceType()), REPLACE_TYPE_REPLACE),
+                Locale.ROOT))
             .replaceValue(StringUtils.defaultString(rule.getReplaceValue()))
             .restore(rule.getRestore() == null ? Boolean.FALSE : rule.getRestore())
             .description(StringUtils.trimToNull(rule.getDescription()))

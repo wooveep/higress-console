@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import com.alibaba.higress.console.model.portal.PortalPasswordResetResult;
 import com.alibaba.higress.console.model.portal.PortalUserRecord;
 import com.alibaba.higress.sdk.exception.ValidationException;
+import com.alibaba.higress.sdk.service.consumer.ConsumerService;
 import com.alibaba.higress.sdk.model.CommonPageQuery;
 import com.alibaba.higress.sdk.model.PaginatedResult;
 import com.alibaba.higress.sdk.model.consumer.Consumer;
@@ -39,6 +40,8 @@ public class PortalConsumerService {
     private PortalUserJdbcService portalUserJdbcService;
     private PortalConsumerProjectionService portalConsumerProjectionService;
     private PortalConsumerLevelAuthReconcileService portalConsumerLevelAuthReconcileService;
+    private ConsumerService consumerService;
+    private PortalOrganizationJdbcService portalOrganizationJdbcService;
 
     @Resource
     public void setPortalUserJdbcService(PortalUserJdbcService portalUserJdbcService) {
@@ -54,6 +57,16 @@ public class PortalConsumerService {
     public void setPortalConsumerLevelAuthReconcileService(
         PortalConsumerLevelAuthReconcileService portalConsumerLevelAuthReconcileService) {
         this.portalConsumerLevelAuthReconcileService = portalConsumerLevelAuthReconcileService;
+    }
+
+    @Resource
+    public void setConsumerService(ConsumerService consumerService) {
+        this.consumerService = consumerService;
+    }
+
+    @Resource
+    public void setPortalOrganizationJdbcService(PortalOrganizationJdbcService portalOrganizationJdbcService) {
+        this.portalOrganizationJdbcService = portalOrganizationJdbcService;
     }
 
     public PaginatedResult<Consumer> list(CommonPageQuery query) {
@@ -134,20 +147,33 @@ public class PortalConsumerService {
     }
 
     public void softDelete(String consumerName) {
+        delete(consumerName);
+    }
+
+    public void delete(String consumerName) {
         ensurePortalDatabaseEnabled();
         if (StringUtils.isBlank(consumerName)) {
             throw new ValidationException("consumerName cannot be blank.");
         }
         ensureNotBuiltinAdministrator(consumerName, "deleted");
-        portalUserJdbcService.updateStatus(consumerName, STATUS_DISABLED);
-        portalUserJdbcService.disableAllApiKeys(consumerName);
+        PortalUserRecord record = portalUserJdbcService.queryByConsumerName(consumerName);
+        if (record == null) {
+            throw new ValidationException("Consumer not found: " + consumerName);
+        }
+        if (portalOrganizationJdbcService != null && portalOrganizationJdbcService.isDepartmentAdministrator(consumerName)) {
+            throw new ValidationException("Department administrator cannot be deleted. Please reassign the department administrator first.");
+        }
+        if (consumerService != null) {
+            consumerService.delete(consumerName);
+        }
+        portalUserJdbcService.logicalDelete(consumerName);
         portalConsumerProjectionService.syncNow();
         portalConsumerLevelAuthReconcileService.reconcileNow("consumer-delete");
     }
 
     public List<String> listDepartments() {
         ensurePortalDatabaseEnabled();
-        return portalUserJdbcService.listDistinctDepartments();
+        return Collections.emptyList();
     }
 
     public void addDepartmentCompat(String departmentName) {
@@ -167,8 +193,8 @@ public class PortalConsumerService {
         if (record == null || StringUtils.isBlank(record.getConsumerName())) {
             return null;
         }
-        Consumer consumer = Consumer.builder().name(record.getConsumerName()).department(record.getDepartment())
-            .credentials(buildMaskedCredentials(rawKeys)).build();
+        Consumer consumer = Consumer.builder().name(record.getConsumerName()).credentials(buildMaskedCredentials(rawKeys))
+            .build();
         consumer.setPortalStatus(record.getStatus());
         consumer.setPortalDisplayName(record.getDisplayName());
         consumer.setPortalEmail(record.getEmail());

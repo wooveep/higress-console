@@ -7,21 +7,26 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * @author Codex
+ */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class PortalUserRecord {
+public class OrgAccountRecord {
 
     private String consumerName;
     private String displayName;
     private String email;
-    private String departmentId;
-    private String parentConsumerName;
-    private String userLevel;
     private String status;
+    private String userLevel;
     private String source;
-    private Boolean deleted;
+    private String departmentId;
+    private String departmentName;
+    private String departmentPath;
+    private String parentConsumerName;
+    private Boolean isDepartmentAdmin;
     private LocalDateTime lastLoginAt;
     private String tempPassword;
 }

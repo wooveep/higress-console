@@ -141,7 +141,7 @@ public class ConsumersController {
     @ApiResponses(value = {@ApiResponse(responseCode = "204", description = "Consumer deleted successfully"),
         @ApiResponse(responseCode = "500", description = "Internal server error")})
     public ResponseEntity<Response<Consumer>> delete(@PathVariable("name") @NotBlank String name) {
-        portalConsumerService.softDelete(name);
+        portalConsumerService.delete(name);
         return ResponseEntity.noContent().build();
     }
 

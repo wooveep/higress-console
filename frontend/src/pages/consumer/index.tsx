@@ -1,65 +1,202 @@
 /* eslint-disable */
 // @ts-nocheck
-import { Consumer, CredentialType, InviteCodeRecord } from '@/interfaces/consumer';
+import { InviteCodeRecord } from '@/interfaces/consumer';
+import { OrgAccountRecord, OrgDepartmentNode } from '@/interfaces/org';
 import {
-  addConsumer,
-  addConsumerDepartment,
   createInviteCode,
+  deleteConsumer,
   disableInviteCode,
   enableInviteCode,
-  deleteConsumer,
-  getConsumerDepartments,
-  getConsumers,
   listInviteCodes,
   resetConsumerPassword,
-  updateConsumer,
-  updateConsumerStatus,
 } from '@/services/consumer';
+import {
+  createOrgAccount,
+  createOrgDepartment,
+  deleteOrgDepartment,
+  downloadOrgTemplate,
+  exportOrgWorkbook,
+  importOrgWorkbook,
+  listOrgAccounts,
+  listOrgDepartmentsTree,
+  moveOrgDepartment,
+  updateOrgAccount,
+  updateOrgAccountStatus,
+  updateOrgDepartment,
+} from '@/services/organization';
 import { formatDateTimeDisplay } from '@/utils/time';
-import { ApartmentOutlined, ExclamationCircleOutlined, RedoOutlined, UserOutlined } from '@ant-design/icons';
+import { ApartmentOutlined, BranchesOutlined, PlusOutlined, RedoOutlined, UserOutlined } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-layout';
 import { useRequest } from 'ahooks';
-import { Button, Drawer, Form, Input, message, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import React, { useEffect, useRef, useState } from 'react';
-import { Trans, useTranslation } from 'react-i18next';
-import ConsumerForm from './components/ConsumerForm';
+import {
+  Button,
+  Card,
+  Drawer,
+  Empty,
+  Form,
+  Input,
+  message,
+  Modal,
+  Select,
+  Space,
+  Table,
+  Tag,
+  TreeSelect,
+  Tree,
+  Typography,
+} from 'antd';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import ConsumerForm, { ConsumerFormRef } from './components/ConsumerForm';
 
 const { Text } = Typography;
-
-interface FormRef {
-  reset: () => void;
-  handleSubmit: () => Promise<Consumer>;
-}
-
-interface OrganizationRow {
-  key: string;
-  rowType: 'department' | 'user';
-  name: string;
-  department?: string;
-  credentials?: any[];
-  memberCount?: number;
-  consumer?: Consumer;
-  children?: OrganizationRow[];
-}
-
 const BUILTIN_ADMIN_CONSUMER = 'administrator';
-const USER_LEVEL_ORDER: Record<string, number> = {
-  normal: 1,
-  plus: 2,
-  pro: 3,
-  ultra: 4,
-};
+
+type DepartmentModalMode = 'create' | 'rename' | 'move' | null;
 
 const ConsumerList: React.FC = () => {
   const { t } = useTranslation();
+  const formRef = useRef<ConsumerFormRef>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [departmentForm] = Form.useForm();
+
+  const [departmentTree, setDepartmentTree] = useState<OrgDepartmentNode[]>([]);
+  const [accounts, setAccounts] = useState<OrgAccountRecord[]>([]);
+  const [keyword, setKeyword] = useState('');
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState<string>();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [currentAccount, setCurrentAccount] = useState<OrgAccountRecord | null>(null);
+  const [presetDepartmentId, setPresetDepartmentId] = useState<string>();
+  const [departmentModalMode, setDepartmentModalMode] = useState<DepartmentModalMode>(null);
+  const [departmentModalOpen, setDepartmentModalOpen] = useState(false);
+  const [departmentConfirmLoading, setDepartmentConfirmLoading] = useState(false);
+  const [currentDepartment, setCurrentDepartment] = useState<OrgDepartmentNode | null>(null);
+  const [openInviteCodeModal, setOpenInviteCodeModal] = useState(false);
   const [inviteCodes, setInviteCodes] = useState<InviteCodeRecord[]>([]);
   const [inviteCodeLoading, setInviteCodeLoading] = useState(false);
-  const [openInviteCodeModal, setOpenInviteCodeModal] = useState(false);
   const [inviteStatusFilter, setInviteStatusFilter] = useState<string | undefined>(undefined);
 
-  const formatDateTime = (value?: any) => {
-    return formatDateTimeDisplay(value);
+  const formatDateTime = (value?: any) => formatDateTimeDisplay(value);
+
+  const { loading, run: loadData } = useRequest(async () => {
+    const [departments, organizationAccounts] = await Promise.all([
+      listOrgDepartmentsTree(),
+      listOrgAccounts(),
+    ]);
+    return { departments, organizationAccounts };
+  }, {
+    manual: true,
+    onSuccess: (result) => {
+      setDepartmentTree(result?.departments || []);
+      setAccounts(result?.organizationAccounts || []);
+    },
+  });
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const departmentMap = useMemo(() => {
+    const result: Record<string, OrgDepartmentNode> = {};
+    const walk = (nodes: OrgDepartmentNode[]) => {
+      nodes.forEach((node) => {
+        result[node.departmentId] = node;
+        walk(node.children || []);
+      });
+    };
+    walk(departmentTree);
+    return result;
+  }, [departmentTree]);
+
+  const collectSubtreeIds = (departmentId?: string): string[] => {
+    if (!departmentId) {
+      return [];
+    }
+    const result: string[] = [];
+    const walk = (node?: OrgDepartmentNode) => {
+      if (!node) {
+        return;
+      }
+      result.push(node.departmentId);
+      (node.children || []).forEach(walk);
+    };
+    walk(departmentMap[departmentId]);
+    return result;
   };
+
+  const selectedDepartment = selectedDepartmentId ? departmentMap[selectedDepartmentId] : undefined;
+  const selectedDepartmentScope = useMemo(
+    () => new Set(collectSubtreeIds(selectedDepartmentId)),
+    [selectedDepartmentId, departmentMap],
+  );
+
+  const filteredAccounts = useMemo(() => {
+    const normalizedKeyword = keyword.trim().toLowerCase();
+    return accounts.filter((account) => {
+      if (!account?.consumerName || account.consumerName === BUILTIN_ADMIN_CONSUMER) {
+        return false;
+      }
+      if (selectedDepartmentScope.size && !selectedDepartmentScope.has(account.departmentId || '')) {
+        return false;
+      }
+      if (!normalizedKeyword) {
+        return true;
+      }
+      const searchable = [
+        account.consumerName,
+        account.displayName,
+        account.email,
+        account.departmentPath,
+        account.parentConsumerName,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return searchable.includes(normalizedKeyword);
+    });
+  }, [accounts, keyword, selectedDepartmentScope]);
+
+  const departmentTreeData = useMemo(() => {
+    const build = (nodes: OrgDepartmentNode[] = []) =>
+      nodes.map((node) => ({
+        key: node.departmentId,
+        title: (
+          <Space size={8}>
+            <ApartmentOutlined />
+            <span>{node.name}</span>
+            <Text type="secondary">({node.memberCount || 0})</Text>
+          </Space>
+        ),
+        children: build(node.children || []),
+      }));
+    return build(departmentTree);
+  }, [departmentTree]);
+
+  const departmentSelectTree = useMemo(() => {
+    const build = (nodes: OrgDepartmentNode[] = []) =>
+      nodes.map((node) => ({
+        title: node.name,
+        value: node.departmentId,
+        key: node.departmentId,
+        children: build(node.children || []),
+      }));
+    return build(departmentTree);
+  }, [departmentTree]);
+
+  const availableMoveTree = useMemo(() => {
+    if (!currentDepartment) {
+      return departmentSelectTree;
+    }
+    const excluded = new Set(collectSubtreeIds(currentDepartment.departmentId));
+    const filterTree = (nodes: any[] = []) =>
+      nodes
+        .filter((node) => !excluded.has(node.value))
+        .map((node) => ({
+          ...node,
+          children: filterTree(node.children || []),
+        }));
+    return filterTree(departmentSelectTree);
+  }, [currentDepartment, departmentSelectTree]);
 
   const renderInviteStatus = (status?: string) => {
     const normalizedStatus = (status || '').toLowerCase();
@@ -89,297 +226,98 @@ const ConsumerList: React.FC = () => {
     return <Tag>{t('consumer.userLevel.normal')}</Tag>;
   };
 
-  const extractMaskedKeys = (credentials?: any[]): string[] => {
-    if (!Array.isArray(credentials)) {
-      return [];
+  const renderStatus = (status?: string) => {
+    const normalized = (status || 'pending').toLowerCase();
+    if (normalized === 'active') {
+      return <Tag color="success">{t('misc.enabled')}</Tag>;
     }
-    const result: string[] = [];
-    credentials.forEach((credential) => {
-      if (credential?.type !== 'key-auth' || !Array.isArray(credential?.values)) {
+    if (normalized === 'disabled') {
+      return <Tag color="error">{t('misc.disabled')}</Tag>;
+    }
+    return <Tag>{t('consumer.portalStatus.pending')}</Tag>;
+  };
+
+  const onRefresh = async () => {
+    await loadData();
+  };
+
+  const saveWorkbook = (data: ArrayBuffer, filename: string) => {
+    const blob = new Blob([data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const onCreateAccount = (departmentId?: string) => {
+    setCurrentAccount(null);
+    setPresetDepartmentId(departmentId);
+    setDrawerOpen(true);
+  };
+
+  const onEditAccount = (account: OrgAccountRecord) => {
+    setCurrentAccount(account);
+    setPresetDepartmentId(undefined);
+    setDrawerOpen(true);
+  };
+
+  const onSubmitAccount = async () => {
+    try {
+      const payload = await formRef.current?.handleSubmit();
+      if (!payload) {
         return;
       }
-      credential.values.forEach((value: string) => {
-        if (typeof value === 'string' && value.trim()) {
-          result.push(value.trim());
-        }
-      });
-    });
-    return result;
-  };
-
-  const isBuiltinAdministrator = (consumer?: Consumer | null): boolean => {
-    if (!consumer?.name) {
-      return false;
-    }
-    const normalizedName = consumer.name.trim().toLowerCase();
-    const normalizedSource = (consumer.portalUserSource || '').trim().toLowerCase();
-    if (normalizedName !== BUILTIN_ADMIN_CONSUMER) {
-      return false;
-    }
-    return normalizedSource === 'system' || normalizedSource === '';
-  };
-
-  const columns = [
-    {
-      title: t('consumer.columns.organization'),
-      dataIndex: 'name',
-      key: 'name',
-      ellipsis: true,
-      render: (_, record: OrganizationRow) => {
-        if (record.rowType === 'department') {
-          return (
-            <Space>
-              <ApartmentOutlined />
-              <Text strong>{record.name}</Text>
-            </Space>
-          );
-        }
-        return (
-          <Space>
-            <UserOutlined />
-            <span>{record.name}</span>
-            {isBuiltinAdministrator(record.consumer) ? <Tag color="gold">{t('consumer.systemBuiltin')}</Tag> : null}
-          </Space>
-        );
-      },
-    },
-    {
-      title: t('consumer.columns.type'),
-      dataIndex: 'rowType',
-      key: 'rowType',
-      width: 120,
-      render: (_, record: OrganizationRow) => {
-        if (record.rowType === 'department') {
-          return <Tag color="processing">{t('consumer.type.department')}</Tag>;
-        }
-        return <Tag color="success">{t('consumer.type.user')}</Tag>;
-      },
-    },
-    {
-      title: t('consumer.columns.authMethods'),
-      dataIndex: 'credentials',
-      key: 'credentials',
-      render: (value, record: OrganizationRow) => {
-        if (record.rowType === 'department') {
-          return <Text type="secondary">{t('consumer.departmentSummary', { count: record.memberCount || 0 })}</Text>;
-        }
-        const maskedKeys = extractMaskedKeys(value);
-        if (!maskedKeys.length) {
-          return <Text type="secondary">{t('consumer.noActiveKeys')}</Text>;
-        }
-        const summaryText = `${maskedKeys.slice(0, 2).join(', ')}${maskedKeys.length > 2 ? ` +${maskedKeys.length - 2}` : ''}`;
-        return (
-          <Space size={8}>
-            <Tag color={CredentialType.KEY_AUTH.displayColor}>
-              {t('consumer.keyCount', { count: maskedKeys.length })}
-            </Tag>
-            <Text type="secondary">{summaryText}</Text>
-          </Space>
-        );
-      },
-    },
-    {
-      title: t('consumer.columns.portalStatus'),
-      dataIndex: 'portalStatus',
-      key: 'portalStatus',
-      width: 120,
-      render: (_, record: OrganizationRow) => {
-        if (record.rowType === 'department') {
-          return '-';
-        }
-        const status = (record.consumer?.portalStatus || 'pending').toLowerCase();
-        if (status === 'active') {
-          return <Tag color="success">{t('misc.enabled')}</Tag>;
-        }
-        if (status === 'disabled') {
-          return <Tag color="error">{t('misc.disabled')}</Tag>;
-        }
-        return <Tag color="default">{t('consumer.portalStatus.pending')}</Tag>;
-      },
-    },
-    {
-      title: t('consumer.columns.userLevel'),
-      dataIndex: 'portalUserLevel',
-      key: 'portalUserLevel',
-      width: 130,
-      render: (_, record: OrganizationRow) => {
-        if (record.rowType === 'department') {
-          return '-';
-        }
-        return renderUserLevel(record.consumer?.portalUserLevel);
-      },
-      sorter: (a: OrganizationRow, b: OrganizationRow) => {
-        const left = USER_LEVEL_ORDER[(a.consumer?.portalUserLevel || 'normal').toLowerCase()] || 1;
-        const right = USER_LEVEL_ORDER[(b.consumer?.portalUserLevel || 'normal').toLowerCase()] || 1;
-        return left - right;
-      },
-    },
-    {
-      title: t('misc.actions'),
-      dataIndex: 'action',
-      key: 'action',
-      width: 220,
-      align: 'center',
-      render: (_, record: OrganizationRow) => {
-        if (record.rowType === 'department') {
-          return (
-            <Space size="small">
-              <a onClick={() => onShowDrawer(record.department)}>{t('consumer.create')}</a>
-            </Space>
-          );
-        }
-        return (
-          <Space size="small">
-            {
-              isBuiltinAdministrator(record.consumer)
-                ? <Tag color="gold">{t('consumer.systemBuiltin')}</Tag>
-                : null
-            }
-            {
-              isBuiltinAdministrator(record.consumer)
-                ? null
-                : (
-                  <>
-            <a onClick={() => onEditDrawer(record.consumer)}>{t('misc.edit')}</a>
-            {
-              (record.consumer?.portalStatus || '').toLowerCase() === 'active'
-                ? <a onClick={() => onToggleConsumerStatus(record.consumer, 'disabled')}>{t('consumer.disable')}</a>
-                : <a onClick={() => onToggleConsumerStatus(record.consumer, 'active')}>{t('consumer.enable')}</a>
-            }
-            <a onClick={() => onResetConsumerPassword(record.consumer)}>{t('consumer.resetPassword')}</a>
-            <a onClick={() => onShowModal(record.consumer)}>{t('misc.delete')}</a>
-                  </>
-                )
-            }
-          </Space>
-        );
-      },
-    },
-  ];
-
-  const [form] = Form.useForm();
-  const [departmentForm] = Form.useForm();
-  const formRef = useRef<FormRef>(null);
-  const [allConsumers, setAllConsumers] = useState<Consumer[]>([]);
-  const [allDepartments, setAllDepartments] = useState<string[]>([]);
-  const [keyword, setKeyword] = useState('');
-  const [departmentKeyword, setDepartmentKeyword] = useState('');
-  const [keySearch, setKeySearch] = useState('');
-  const [currentConsumer, setCurrentConsumer] = useState<Consumer | null>(null);
-  const [openDrawer, setOpenDrawer] = useState(false);
-  const [openModal, setOpenModal] = useState(false);
-  const [openDepartmentModal, setOpenDepartmentModal] = useState(false);
-  const [confirmLoading, setConfirmLoading] = useState(false);
-  const [departmentConfirmLoading, setDepartmentConfirmLoading] = useState(false);
-  const [presetDepartment, setPresetDepartment] = useState<string>('');
-
-  const { loading, run, refresh } = useRequest(getConsumers, {
-    manual: true,
-    onSuccess: (result) => {
-      const consumers = (result || []) as Consumer[];
-      consumers.sort((i1, i2) => {
-        return i1.name.localeCompare(i2.name);
-      })
-      consumers.forEach(c => c.key = c.key || c.name);
-      setAllConsumers(consumers);
-    },
-  });
-
-  const { loading: departmentsLoading, run: loadDepartments } = useRequest(getConsumerDepartments, {
-    manual: true,
-    onSuccess: (result) => {
-      const departments = (result || []).filter(Boolean);
-      departments.sort((i1, i2) => i1.localeCompare(i2));
-      setAllDepartments(departments);
-    },
-  });
-
-  useEffect(() => {
-    run({});
-    loadDepartments();
-  }, []);
-
-  const onEditDrawer = (consumer: Consumer) => {
-    setCurrentConsumer(consumer);
-    setPresetDepartment('');
-    setOpenDrawer(true);
-  };
-
-  const onShowDrawer = (department?: string) => {
-    setOpenDrawer(true);
-    setCurrentConsumer(null);
-    setPresetDepartment(department || '');
-  };
-
-  const handleDrawerOK = async () => {
-    const values: Consumer = formRef.current ? await formRef.current.handleSubmit() : {} as Consumer;
-    if (!values) {
-      return;
-    };
-
-    try {
-      if (currentConsumer) {
-        await updateConsumer({ version: currentConsumer.version, ...values } as Consumer);
-        message.success('用户更新成功');
+      if (currentAccount?.consumerName) {
+        await updateOrgAccount(currentAccount.consumerName, payload);
+        message.success(t('misc.edit'));
       } else {
-        const created = await addConsumer({ ...values, version: 0 } as Consumer);
-        message.success('用户创建成功');
-        if (created?.portalTempPassword) {
+        const result = await createOrgAccount(payload);
+        message.success(t('consumer.create'));
+        if (result?.tempPassword) {
           Modal.info({
-            title: 'Portal 临时密码',
-            content: `用户 ${created.name} 的临时密码：${created.portalTempPassword}`,
+            title: '账号创建成功',
+            width: 520,
+            content: (
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <span>系统已为新账号生成默认密码，请妥善保存。</span>
+                <Input.TextArea value={result.tempPassword} autoSize={{ minRows: 2, maxRows: 4 }} readOnly />
+              </Space>
+            ),
           });
         }
       }
-      setOpenDrawer(false);
-      formRef.current && formRef.current.reset();
-      setPresetDepartment('');
-      refresh();
-      loadDepartments();
-    } catch (errInfo) {
-      console.log('Save failed: ', errInfo);
-    }
+      setDrawerOpen(false);
+      setCurrentAccount(null);
+      setPresetDepartmentId(undefined);
+      await loadData();
+    } catch (error) {}
   };
 
-  const handleDrawerCancel = () => {
-    setOpenDrawer(false);
-    formRef.current && formRef.current.reset();
-    setCurrentConsumer(null);
-    setPresetDepartment('');
-  };
-
-  const onShowModal = (consumer: Consumer) => {
-    setCurrentConsumer(consumer);
-    setOpenModal(true);
-  };
-
-  const onToggleConsumerStatus = async (consumer: Consumer, status: 'active' | 'disabled') => {
-    if (!consumer?.name) {
-      return;
-    }
+  const onToggleAccountStatus = async (account: OrgAccountRecord, status: 'active' | 'disabled') => {
     try {
-      await updateConsumerStatus(consumer.name, status);
+      await updateOrgAccountStatus(account.consumerName, status);
       message.success(status === 'active' ? t('consumer.enableSuccess') : t('consumer.disableSuccess'));
-      refresh();
-      loadDepartments();
+      await loadData();
     } catch (error) {
       message.error(t('consumer.statusUpdateFailed'));
     }
   };
 
-  const onResetConsumerPassword = async (consumer: Consumer) => {
-    if (!consumer?.name) {
-      return;
-    }
+  const onResetConsumerPassword = async (account: OrgAccountRecord) => {
     try {
-      const result = await resetConsumerPassword(consumer.name);
+      const result = await resetConsumerPassword(account.consumerName);
       message.success(t('consumer.resetPasswordSuccess'));
       Modal.info({
         title: t('consumer.resetPasswordTitle'),
+        width: 520,
         content: (
-          <Space direction="vertical" size={8}>
-            <span>{t('consumer.resetPasswordHint', { name: consumer.name })}</span>
-            <Text copyable>{result?.tempPassword || '-'}</Text>
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <span>{t('consumer.resetPasswordHint', { name: account.consumerName })}</span>
+            <Input.TextArea value={result.tempPassword} autoSize={{ minRows: 2, maxRows: 4 }} readOnly />
           </Space>
         ),
       });
@@ -388,31 +326,153 @@ const ConsumerList: React.FC = () => {
     }
   };
 
-  const loadInviteCodeList = async (status?: string) => {
+  const onDeleteAccount = (account: OrgAccountRecord) => {
+    if ((account.status || '').toLowerCase() === 'active') {
+      message.warning('请先禁用用户，再执行删除。');
+      return;
+    }
+    Modal.confirm({
+      title: t('misc.delete'),
+      content: `是否确认删除账号 ${account.consumerName}？`,
+      onOk: async () => {
+        await deleteConsumer(account.consumerName);
+        message.success(t('consumer.deleteSuccess'));
+        await loadData();
+      },
+    });
+  };
+
+  const openDepartmentModal = (mode: DepartmentModalMode) => {
+    setDepartmentModalMode(mode);
+    setDepartmentModalOpen(true);
+    if (mode === 'create') {
+      departmentForm.setFieldsValue({
+        name: '',
+        parentDepartmentId: currentDepartment?.departmentId,
+        adminUserLevel: 'normal',
+      });
+      return;
+    }
+    if (mode === 'rename') {
+      departmentForm.setFieldsValue({
+        name: currentDepartment?.name,
+        adminConsumerName: currentDepartment?.adminConsumerName,
+      });
+      return;
+    }
+    if (mode === 'move') {
+      departmentForm.setFieldsValue({
+        parentDepartmentId: currentDepartment?.parentDepartmentId,
+      });
+    }
+  };
+
+  const onSubmitDepartment = async () => {
     try {
-      setInviteCodeLoading(true);
-      const list = await listInviteCodes({ pageNum: 1, pageSize: 200, status });
-      setInviteCodes(list || []);
+      const values = await departmentForm.validateFields();
+      setDepartmentConfirmLoading(true);
+      if (departmentModalMode === 'create') {
+        await createOrgDepartment({
+          name: values.name,
+          parentDepartmentId: values.parentDepartmentId,
+          admin: {
+            consumerName: values.adminConsumerName,
+            displayName: values.adminDisplayName,
+            email: values.adminEmail,
+            userLevel: values.adminUserLevel,
+            password: values.adminPassword,
+          },
+        });
+        message.success('部门已创建');
+      } else if (departmentModalMode === 'rename' && currentDepartment?.departmentId) {
+        await updateOrgDepartment(currentDepartment.departmentId, {
+          name: values.name,
+          adminConsumerName: values.adminConsumerName,
+        });
+        message.success('部门信息已更新');
+      } else if (departmentModalMode === 'move' && currentDepartment?.departmentId) {
+        await moveOrgDepartment(currentDepartment.departmentId, {
+          parentDepartmentId: values.parentDepartmentId,
+        });
+        message.success('部门已移动');
+      }
+      setDepartmentModalOpen(false);
+      departmentForm.resetFields();
+      await loadData();
+    } catch (error) {
+    } finally {
+      setDepartmentConfirmLoading(false);
+    }
+  };
+
+  const onDownloadTemplate = async () => {
+    const data = await downloadOrgTemplate();
+    saveWorkbook(data, 'organization-template.xlsx');
+  };
+
+  const onExportOrganization = async () => {
+    const data = await exportOrgWorkbook();
+    saveWorkbook(data, 'organization-export.xlsx');
+  };
+
+  const onImportOrganization = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+    const result = await importOrgWorkbook(file);
+    message.success(
+      `导入完成：部门新增 ${result.createdDepartments}，部门更新 ${result.updatedDepartments}，账号新增 ${result.createdAccounts}，账号更新 ${result.updatedAccounts}`,
+    );
+    await loadData();
+  };
+
+  const onDeleteDepartment = () => {
+    if (!currentDepartment?.departmentId) {
+      return;
+    }
+    Modal.confirm({
+      title: '删除部门',
+      content: `确认删除部门 ${currentDepartment.name} 吗？`,
+      onOk: async () => {
+        await deleteOrgDepartment(currentDepartment.departmentId);
+        if (selectedDepartmentId === currentDepartment.departmentId) {
+          setSelectedDepartmentId(undefined);
+        }
+        setCurrentDepartment(null);
+        message.success('部门已删除');
+        await loadData();
+      },
+    });
+  };
+
+  const loadInviteCodeList = async (status?: string) => {
+    setInviteCodeLoading(true);
+    try {
+      const data = await listInviteCodes({ status });
+      setInviteCodes(data || []);
     } finally {
       setInviteCodeLoading(false);
     }
   };
 
-  const onOpenInviteCodeManager = () => {
+  const onOpenInviteCodeManager = async () => {
     setOpenInviteCodeModal(true);
-    loadInviteCodeList(inviteStatusFilter);
+    await loadInviteCodeList(inviteStatusFilter);
   };
 
   const onCreateInviteCode = async () => {
     try {
-      const created = await createInviteCode(7);
+      const result = await createInviteCode();
       message.success(t('consumer.inviteCode.createSuccess'));
       Modal.info({
         title: t('consumer.inviteCode.codeGeneratedTitle'),
+        width: 520,
         content: (
-          <Space direction="vertical" size={8}>
+          <Space direction="vertical" style={{ width: '100%' }}>
             <span>{t('consumer.inviteCode.codeGeneratedHint')}</span>
-            <Text copyable>{created?.inviteCode || '-'}</Text>
+            <Input.TextArea value={result.inviteCode} autoSize={{ minRows: 2, maxRows: 4 }} readOnly />
           </Space>
         ),
       });
@@ -422,12 +482,9 @@ const ConsumerList: React.FC = () => {
     }
   };
 
-  const onDisableInviteCode = async (code?: string) => {
-    if (!code) {
-      return;
-    }
+  const onDisableInviteCode = async (inviteCode: string) => {
     try {
-      await disableInviteCode(code);
+      await disableInviteCode(inviteCode);
       message.success(t('consumer.inviteCode.disableSuccess'));
       await loadInviteCodeList(inviteStatusFilter);
     } catch (error) {
@@ -435,12 +492,9 @@ const ConsumerList: React.FC = () => {
     }
   };
 
-  const onEnableInviteCode = async (code?: string) => {
-    if (!code) {
-      return;
-    }
+  const onEnableInviteCode = async (inviteCode: string) => {
     try {
-      await enableInviteCode(code);
+      await enableInviteCode(inviteCode);
       message.success(t('consumer.inviteCode.enableSuccess'));
       await loadInviteCodeList(inviteStatusFilter);
     } catch (error) {
@@ -448,351 +502,373 @@ const ConsumerList: React.FC = () => {
     }
   };
 
-  const handleModalOk = async () => {
-    setConfirmLoading(true);
-    try {
-      await deleteConsumer(currentConsumer.name);
-      message.success(t("consumer.deleteSuccess"));
-    } catch (error) { }
-    setConfirmLoading(false);
-    setOpenModal(false);
-    refresh();
-    loadDepartments();
-  };
-
-  const handleModalCancel = () => {
-    setOpenModal(false);
-    setCurrentConsumer(null);
-  };
-
-  const handleDepartmentModalOk = async () => {
-    try {
-      const values = await departmentForm.validateFields();
-      setDepartmentConfirmLoading(true);
-      await addConsumerDepartment(values.name);
-      message.success(t('consumer.departmentCreateSuccess'));
-      setOpenDepartmentModal(false);
-      departmentForm.resetFields();
-      loadDepartments();
-    } catch (error) {
-    } finally {
-      setDepartmentConfirmLoading(false);
-    }
-  };
-
-  const handleDepartmentModalCancel = () => {
-    setOpenDepartmentModal(false);
-    departmentForm.resetFields();
-  };
-
-  const handleReset = () => {
-    setKeyword('');
-    setDepartmentKeyword('');
-    setKeySearch('');
-    form.resetFields();
-  };
-
-  const dataSource = React.useMemo(() => {
-    const ungroupedKey = '__ungrouped__';
-    const groupedConsumers = {};
-    allConsumers.forEach((consumer) => {
-      const department = consumer.department || '';
-      groupedConsumers[department] = groupedConsumers[department] || [];
-      groupedConsumers[department].push(consumer);
-    });
-
-    const departmentSet = new Set(allDepartments);
-    allConsumers.forEach((consumer) => {
-      if (consumer.department) {
-        departmentSet.add(consumer.department);
-      }
-    });
-    if (groupedConsumers['']?.length) {
-      departmentSet.add(ungroupedKey);
-    }
-
-    const normalizedKeyword = keyword.trim().toLowerCase();
-    const normalizedDepartmentKeyword = departmentKeyword.trim().toLowerCase();
-    const normalizedKeySearch = keySearch.trim().toLowerCase();
-
-    return Array.from(departmentSet)
-      .sort((i1, i2) => i1.localeCompare(i2))
-      .map((department): OrganizationRow | null => {
-        const rawDepartment = department === ungroupedKey ? '' : department;
-        const departmentLabel = rawDepartment || t('consumer.ungrouped');
-        const users = (groupedConsumers[rawDepartment] || [])
-          .filter((item) => {
-            if (normalizedDepartmentKeyword && !departmentLabel.toLowerCase().includes(normalizedDepartmentKeyword)) {
-              return false;
-            }
-            if (normalizedKeyword && !item.name.toLowerCase().includes(normalizedKeyword)) {
-              return false;
-            }
-            const keySearchText = extractMaskedKeys(item.credentials).join(' ').toLowerCase();
-            if (normalizedKeySearch && !keySearchText.includes(normalizedKeySearch)) {
-              return false;
-            }
-            return true;
-          })
-          .sort((i1, i2) => i1.name.localeCompare(i2.name));
-
-        if (!users.length && (normalizedKeyword || normalizedKeySearch)) {
-          return null;
-        }
-        if (!users.length && normalizedDepartmentKeyword && !departmentLabel.toLowerCase().includes(normalizedDepartmentKeyword)) {
-          return null;
-        }
-
-        return {
-          key: `department-${rawDepartment || ungroupedKey}`,
-          rowType: 'department',
-          name: departmentLabel,
-          department: rawDepartment,
-          memberCount: users.length,
-          children: users.map((consumer) => ({
-            key: `user-${consumer.name}`,
-            rowType: 'user',
-            name: consumer.name,
-            department: consumer.department,
-            credentials: consumer.credentials,
-            consumer,
-          })),
-        };
-      })
-      .filter(Boolean);
-  }, [allConsumers, allDepartments, departmentKeyword, keySearch, keyword]);
+  const columns = [
+    {
+      title: '账号',
+      dataIndex: 'consumerName',
+      key: 'consumerName',
+          render: (_, record: OrgAccountRecord) => (
+        <Space direction="vertical" size={0}>
+          <Space>
+            <UserOutlined />
+            <Text strong>{record.consumerName}</Text>
+            {record.isDepartmentAdmin ? <Tag color="gold">部门管理员</Tag> : null}
+          </Space>
+          {record.displayName ? <Text type="secondary">{record.displayName}</Text> : null}
+        </Space>
+      ),
+    },
+    {
+      title: '所属部门',
+      dataIndex: 'departmentPath',
+      key: 'departmentPath',
+      render: (value) => value || <Text type="secondary">未分配</Text>,
+    },
+    {
+      title: '父账号',
+      dataIndex: 'parentConsumerName',
+      key: 'parentConsumerName',
+      render: (value) => value || <Text type="secondary">无</Text>,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 120,
+      render: (value) => renderStatus(value),
+    },
+    {
+      title: t('consumer.columns.userLevel'),
+      dataIndex: 'userLevel',
+      key: 'userLevel',
+      width: 140,
+      render: (value) => renderUserLevel(value),
+    },
+    {
+      title: '最近登录',
+      dataIndex: 'lastLoginAt',
+      key: 'lastLoginAt',
+      width: 180,
+      render: (value) => formatDateTime(value) || '-',
+    },
+    {
+      title: t('misc.actions'),
+      key: 'actions',
+      width: 260,
+      render: (_, record: OrgAccountRecord) => (
+        <Space size="small" wrap>
+          <a onClick={() => onEditAccount(record)}>{t('misc.edit')}</a>
+          {(record.status || '').toLowerCase() === 'active'
+            ? <a onClick={() => onToggleAccountStatus(record, 'disabled')}>{t('consumer.disable')}</a>
+            : <a onClick={() => onToggleAccountStatus(record, 'active')}>{t('consumer.enable')}</a>}
+          <a onClick={() => onResetConsumerPassword(record)}>{t('consumer.resetPassword')}</a>
+          <a onClick={() => onDeleteAccount(record)}>{t('misc.delete')}</a>
+        </Space>
+      ),
+    },
+  ];
 
   return (
     <PageContainer>
-      <Form
-        form={form}
-        style={{
-          background: '#fff',
-          padding: '24px',
-          marginBottom: 16,
-        }}
-        layout="inline"
-      >
-        <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
-          <Space wrap size={24}>
-            <Form.Item name="departmentKeyword" label={t('consumer.columns.department')} style={{ marginBottom: 0 }}>
+      <Space direction="vertical" style={{ width: '100%' }} size={16}>
+        <Card>
+          <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Space wrap>
               <Input
-                placeholder={t('consumer.consumerForm.departmentPlaceholder')}
-                value={departmentKeyword}
-                onChange={(e) => setDepartmentKeyword(e.target.value)}
                 allowClear
-              />
-            </Form.Item>
-            <Form.Item name="keyword" label={t('consumer.columns.name')} style={{ marginBottom: 0 }}>
-              <Input
-                placeholder={t('consumer.columns.name')}
                 value={keyword}
+                placeholder="搜索账号、邮箱、部门、父账号"
+                style={{ width: 280 }}
                 onChange={(e) => setKeyword(e.target.value)}
-                allowClear
               />
-            </Form.Item>
-            <Form.Item name="keySearch" label={t('consumer.key')} style={{ marginBottom: 0 }}>
-              <Input
-                placeholder={t('consumer.key')}
-                value={keySearch}
-                onChange={(e) => setKeySearch(e.target.value)}
-                allowClear
-              />
-            </Form.Item>
-            <Form.Item style={{ marginBottom: 0 }}>
-              <Space>
-                <Button onClick={handleReset}>{t('misc.reset')}</Button>
-              </Space>
-            </Form.Item>
+              <Button icon={<RedoOutlined />} onClick={onRefresh}>{t('misc.refresh')}</Button>
+            </Space>
+            <Space wrap>
+              <Button onClick={onOpenInviteCodeManager}>{t('consumer.inviteCode.manage')}</Button>
+              <Button onClick={onDownloadTemplate}>下载模板</Button>
+              <Button onClick={onExportOrganization}>导出组织</Button>
+              <Button onClick={() => importInputRef.current?.click()}>导入组织</Button>
+              <Button icon={<ApartmentOutlined />} onClick={() => openDepartmentModal('create')}>
+                新建部门
+              </Button>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => onCreateAccount(selectedDepartmentId)}>
+                新建账号
+              </Button>
+            </Space>
           </Space>
-          <Space>
-            <Button onClick={onOpenInviteCodeManager}>{t('consumer.inviteCode.manage')}</Button>
-            <Button
-              onClick={() => setOpenDepartmentModal(true)}
-            >
-              {t('consumer.createDepartment')}
-            </Button>
-            <Button
-              type="primary"
-              onClick={() => onShowDrawer()}
-            >
-              {t('consumer.create')}
-            </Button>
-            <Button
-              icon={<RedoOutlined />}
-              onClick={() => {
-                refresh();
-                loadDepartments();
-              }}
+        </Card>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 16 }}>
+          <Card
+            title="组织树"
+            extra={
+              <Button type="link" onClick={() => {
+                setSelectedDepartmentId(undefined);
+                setCurrentDepartment(null);
+              }}>
+                全部账号
+              </Button>
+            }
+          >
+            <Space direction="vertical" style={{ width: '100%' }}>
+              {departmentTreeData.length ? (
+                <Tree
+                  selectedKeys={selectedDepartmentId ? [selectedDepartmentId] : []}
+                  treeData={departmentTreeData}
+                  onSelect={(keys, info) => {
+                    const nextDepartmentId = keys?.[0] as string | undefined;
+                    setSelectedDepartmentId(nextDepartmentId);
+                    setCurrentDepartment(nextDepartmentId ? departmentMap[nextDepartmentId] : null);
+                  }}
+                />
+              ) : (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无部门" />
+              )}
+              {selectedDepartment ? (
+                <Card size="small" title={selectedDepartment.name}>
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Text type="secondary">
+                      部门管理员：{selectedDepartment.adminDisplayName || selectedDepartment.adminConsumerName || '未设置'}
+                    </Text>
+                    <Space wrap>
+                    <Button size="small" onClick={() => onCreateAccount(selectedDepartment.departmentId)}>
+                      新建账号
+                    </Button>
+                    <Button size="small" onClick={() => openDepartmentModal('create')}>
+                      新建子部门
+                    </Button>
+                    <Button size="small" onClick={() => openDepartmentModal('rename')}>
+                      编辑部门
+                    </Button>
+                    <Button size="small" icon={<BranchesOutlined />} onClick={() => openDepartmentModal('move')}>
+                      移动
+                    </Button>
+                    <Button size="small" danger onClick={onDeleteDepartment}>
+                      删除
+                    </Button>
+                    </Space>
+                  </Space>
+                </Card>
+              ) : null}
+            </Space>
+          </Card>
+
+          <Card title={`账号列表 (${filteredAccounts.length})`}>
+            <Table
+              rowKey="consumerName"
+              loading={loading}
+              dataSource={filteredAccounts}
+              columns={columns}
+              pagination={{ pageSize: 10, showSizeChanger: true }}
             />
-          </Space>
-        </Space>
-      </Form>
-      <Table
-        loading={loading || departmentsLoading}
-        dataSource={dataSource}
-        columns={columns}
-        pagination={false}
-        defaultExpandAllRows
-        expandable={{ defaultExpandAllRows: true }}
-        locale={{ emptyText: t('mcp.detail.noData') }}
-      />
+          </Card>
+        </div>
+      </Space>
+
       <Drawer
-        title={t(currentConsumer ? "consumer.edit" : "consumer.create")}
-        placement="right"
-        width={660}
-        onClose={handleDrawerCancel}
-        open={openDrawer}
-        extra={
-          <Space>
-            <Button onClick={handleDrawerCancel}>{t('misc.cancel')}</Button>
-            <Button type="primary" onClick={handleDrawerOK}>
-              {t('misc.confirm')}
+        title={currentAccount ? t('misc.edit') : t('consumer.create')}
+        width={520}
+        open={drawerOpen}
+        footer={(
+          <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+            <Button onClick={() => {
+              setDrawerOpen(false);
+              setCurrentAccount(null);
+              setPresetDepartmentId(undefined);
+            }}>
+              {t('misc.cancel')}
+            </Button>
+            <Button type="primary" onClick={onSubmitAccount}>
+              {t('misc.save')}
             </Button>
           </Space>
-        }
+        )}
+        onClose={() => {
+          setDrawerOpen(false);
+          setCurrentAccount(null);
+          setPresetDepartmentId(undefined);
+        }}
+        destroyOnClose
       >
         <ConsumerForm
           ref={formRef}
-          value={currentConsumer}
-          departments={allDepartments}
-          presetDepartment={presetDepartment}
+          value={currentAccount}
+          departments={departmentTree}
+          accounts={accounts}
+          presetDepartmentId={presetDepartmentId}
         />
       </Drawer>
+
       <Modal
-        title={<div><ExclamationCircleOutlined style={{ color: '#ffde5c', marginRight: 8 }} />{t('misc.delete')}</div>}
-        open={openModal}
-        onOk={handleModalOk}
-        confirmLoading={confirmLoading}
-        onCancel={handleModalCancel}
-        cancelText={t('misc.cancel')}
-        okText={t('misc.confirm')}
-      >
-        <p>
-          <Trans t={t} i18nKey="consumer.deleteConfirmation">
-            确定删除 <span style={{ color: '#0070cc' }}>{{ currentConsumerName: (currentConsumer && currentConsumer.name) || '' }}</span> 吗？
-          </Trans>
-        </p>
-      </Modal>
-      <Modal
-        title={t('consumer.createDepartment')}
-        open={openDepartmentModal}
-        onOk={handleDepartmentModalOk}
+        title={
+          departmentModalMode === 'create'
+            ? '新建部门'
+            : departmentModalMode === 'rename'
+              ? '重命名部门'
+              : '移动部门'
+        }
+        open={departmentModalOpen}
         confirmLoading={departmentConfirmLoading}
-        onCancel={handleDepartmentModalCancel}
-        cancelText={t('misc.cancel')}
-        okText={t('misc.confirm')}
+        destroyOnClose
+        onCancel={() => {
+          setDepartmentModalOpen(false);
+          departmentForm.resetFields();
+        }}
+        onOk={onSubmitDepartment}
       >
         <Form form={departmentForm} layout="vertical">
-          <Form.Item
-            label={t('consumer.departmentForm.name')}
-            name="name"
-            rules={[{ required: true, message: t('consumer.departmentForm.nameRequired') || '' }]}
-          >
-            <Input
-              showCount
-              allowClear
-              maxLength={63}
-              placeholder={t('consumer.departmentForm.namePlaceholder') || ''}
-            />
-          </Form.Item>
+          {departmentModalMode !== 'move' ? (
+            <Form.Item
+              label="部门名称"
+              name="name"
+              rules={departmentModalMode === 'rename' ? [] : [{ required: true, message: '请输入部门名称' }]}
+            >
+              <Input allowClear maxLength={128} placeholder="例如：华东销售部" />
+            </Form.Item>
+          ) : null}
+          {departmentModalMode === 'create' ? (
+            <>
+              <Typography.Title level={5} style={{ marginBottom: 12 }}>部门管理员</Typography.Title>
+              <Form.Item
+                label="管理员账号名"
+                name="adminConsumerName"
+                rules={[{ required: true, message: '请输入管理员账号名' }]}
+              >
+                <Input allowClear maxLength={63} placeholder="例如：sales-east-admin" />
+              </Form.Item>
+              <Form.Item label="显示名" name="adminDisplayName">
+                <Input allowClear maxLength={63} placeholder="可选，默认与账号名一致" />
+              </Form.Item>
+              <Form.Item label="邮箱" name="adminEmail">
+                <Input allowClear maxLength={128} placeholder="可选" />
+              </Form.Item>
+              <Form.Item label="用户等级" name="adminUserLevel" initialValue="normal">
+                <Select>
+                  <Select.Option value="normal">{t('consumer.userLevel.normal')}</Select.Option>
+                  <Select.Option value="plus">{t('consumer.userLevel.plus')}</Select.Option>
+                  <Select.Option value="pro">{t('consumer.userLevel.pro')}</Select.Option>
+                  <Select.Option value="ultra">{t('consumer.userLevel.ultra')}</Select.Option>
+                </Select>
+              </Form.Item>
+              <Form.Item label="初始密码" name="adminPassword">
+                <Input.Password placeholder="留空时使用系统默认密码" />
+              </Form.Item>
+            </>
+          ) : null}
+          {departmentModalMode === 'rename' ? (
+            <Form.Item label="部门管理员" name="adminConsumerName">
+              <Select
+                allowClear
+                showSearch
+                options={accounts.map((account) => ({
+                  label: `${account.consumerName}${account.displayName ? ` / ${account.displayName}` : ''}`,
+                  value: account.consumerName,
+                }))}
+                placeholder="留空则保持当前管理员"
+                optionFilterProp="label"
+              />
+            </Form.Item>
+          ) : null}
+          {departmentModalMode !== 'rename' ? (
+            <Form.Item label="父部门" name="parentDepartmentId">
+              <TreeSelect
+                allowClear
+                treeDefaultExpandAll
+                placeholder={departmentModalMode === 'create' ? '默认创建在当前部门下' : '移动到顶级时留空'}
+                treeData={availableMoveTree}
+              />
+            </Form.Item>
+          ) : null}
         </Form>
       </Modal>
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".xlsx"
+        style={{ display: 'none' }}
+        onChange={onImportOrganization}
+      />
+
       <Modal
         title={t('consumer.inviteCode.manage')}
         open={openInviteCodeModal}
-        onCancel={() => setOpenInviteCodeModal(false)}
         footer={null}
         width={920}
+        onCancel={() => setOpenInviteCodeModal(false)}
       >
-        <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 12 }} wrap>
-          <Space>
+        <Space direction="vertical" style={{ width: '100%' }} size={16}>
+          <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
             <Select
               allowClear
               style={{ width: 220 }}
-              placeholder={t('consumer.inviteCode.statusFilterPlaceholder') || ''}
               value={inviteStatusFilter}
-              onChange={(value) => {
+              placeholder={t('consumer.inviteCode.statusFilterPlaceholder') || ''}
+              onChange={async (value) => {
                 setInviteStatusFilter(value);
-                loadInviteCodeList(value);
+                await loadInviteCodeList(value);
               }}
-              options={[
-                { value: 'active', label: t('misc.enabled') },
-                { value: 'disabled', label: t('misc.disabled') },
-              ]}
-            />
-            <Button icon={<RedoOutlined />} onClick={() => loadInviteCodeList(inviteStatusFilter)} />
+            >
+              <Select.Option value="active">{t('misc.enabled')}</Select.Option>
+              <Select.Option value="disabled">{t('misc.disabled')}</Select.Option>
+              <Select.Option value="used">{t('consumer.inviteCode.status.used')}</Select.Option>
+            </Select>
+            <Button type="primary" onClick={onCreateInviteCode}>
+              {t('consumer.inviteCode.create')}
+            </Button>
           </Space>
-          <Button type="primary" onClick={onCreateInviteCode}>
-            {t('consumer.inviteCode.create')}
-          </Button>
-        </Space>
-        <Table
-          rowKey="inviteCode"
-          loading={inviteCodeLoading}
-          dataSource={inviteCodes}
-          pagination={false}
-          locale={{ emptyText: t('mcp.detail.noData') }}
-          columns={[
-            {
-              title: t('consumer.inviteCode.columns.code'),
-              dataIndex: 'inviteCode',
-              key: 'inviteCode',
-              render: (value: string) => <Text copyable>{value}</Text>,
-            },
-            {
-              title: t('consumer.inviteCode.columns.status'),
-              dataIndex: 'status',
-              key: 'status',
-              width: 120,
-              render: (value: string) => renderInviteStatus(value),
-            },
-            {
-              title: t('consumer.inviteCode.columns.expiresAt'),
-              dataIndex: 'expiresAt',
-              key: 'expiresAt',
-              width: 180,
-              render: (value: string) => formatDateTime(value),
-            },
-            {
-              title: t('consumer.inviteCode.columns.usedBy'),
-              dataIndex: 'usedByConsumer',
-              key: 'usedByConsumer',
-              width: 140,
-              render: (value: string) => value || '-',
-            },
-            {
-              title: t('consumer.inviteCode.columns.usedAt'),
-              dataIndex: 'usedAt',
-              key: 'usedAt',
-              width: 180,
-              render: (value: string) => formatDateTime(value),
-            },
-            {
-              title: t('consumer.inviteCode.columns.createdAt'),
-              dataIndex: 'createdAt',
-              key: 'createdAt',
-              width: 180,
-              render: (value: string) => formatDateTime(value),
-            },
-            {
-              title: t('misc.actions'),
-              dataIndex: 'action',
-              key: 'action',
-              width: 100,
-              render: (_, record: InviteCodeRecord) => {
-                const status = (record.status || '').toLowerCase();
-                if (status === 'active') {
-                  return <a onClick={() => onDisableInviteCode(record.inviteCode)}>{t('consumer.inviteCode.disable')}</a>;
-                }
-                if (status === 'disabled') {
-                  return <a onClick={() => onEnableInviteCode(record.inviteCode)}>{t('consumer.inviteCode.enable')}</a>;
-                }
-                return '-';
+          <Table
+            rowKey="inviteCode"
+            loading={inviteCodeLoading}
+            dataSource={inviteCodes}
+            pagination={{ pageSize: 8, showSizeChanger: false }}
+            columns={[
+              { title: t('consumer.inviteCode.columns.code'), dataIndex: 'inviteCode', key: 'inviteCode' },
+              {
+                title: t('consumer.inviteCode.columns.status'),
+                dataIndex: 'status',
+                key: 'status',
+                render: (value) => renderInviteStatus(value),
               },
-            },
-          ]}
-        />
+              {
+                title: t('consumer.inviteCode.columns.expiresAt'),
+                dataIndex: 'expiresAt',
+                key: 'expiresAt',
+                render: (value) => formatDateTime(value) || '-',
+              },
+              {
+                title: t('consumer.inviteCode.columns.usedBy'),
+                dataIndex: 'usedByConsumer',
+                key: 'usedByConsumer',
+                render: (value) => value || '-',
+              },
+              {
+                title: t('consumer.inviteCode.columns.usedAt'),
+                dataIndex: 'usedAt',
+                key: 'usedAt',
+                render: (value) => formatDateTime(value) || '-',
+              },
+              {
+                title: t('consumer.inviteCode.columns.createdAt'),
+                dataIndex: 'createdAt',
+                key: 'createdAt',
+                render: (value) => formatDateTime(value) || '-',
+              },
+              {
+                title: t('misc.actions'),
+                key: 'actions',
+                render: (_, record: InviteCodeRecord) => {
+                  if ((record.status || '').toLowerCase() === 'active') {
+                    return <a onClick={() => onDisableInviteCode(record.inviteCode)}>{t('consumer.inviteCode.disable')}</a>;
+                  }
+                  if ((record.status || '').toLowerCase() === 'disabled') {
+                    return <a onClick={() => onEnableInviteCode(record.inviteCode)}>{t('consumer.inviteCode.enable')}</a>;
+                  }
+                  return '-';
+                },
+              },
+            ]}
+          />
+        </Space>
       </Modal>
     </PageContainer>
   );

@@ -151,11 +151,6 @@ const ProviderForm: React.FC = forwardRef((props: { value: any }, ref) => {
     form.setFieldsValue({
       tokens: [""],
       proxyName: '',
-      rawConfigs: {
-        portalModelMeta: {
-          pricing: { currency: 'CNY' },
-        },
-      },
     });
     setFailoverEnabled(false);
     setProviderType(null);
@@ -266,14 +261,8 @@ const ProviderForm: React.FC = forwardRef((props: { value: any }, ref) => {
         proxyName: proxyName || '',
         rawConfigs: {
           ...rawConfigs,
-          portalModelMeta: {
-            ...rawConfigs.portalModelMeta,
-            pricing: hydratePricing(rawConfigs.portalModelMeta?.pricing),
-          },
         },
       });
-    } else {
-      form.setFieldValue(["rawConfigs", "portalModelMeta", "pricing", "currency"], 'CNY');
     }
 
     return () => {
@@ -296,7 +285,9 @@ const ProviderForm: React.FC = forwardRef((props: { value: any }, ref) => {
       if (providerConfig && typeof providerConfig.normalizeRawConfigs === 'function' && values.rawConfigs) {
         providerConfig.normalizeRawConfigs(values.rawConfigs);
       }
-      normalizePortalModelMeta(values.rawConfigs);
+      if (values.rawConfigs && typeof values.rawConfigs === 'object') {
+        delete values.rawConfigs.portalModelMeta;
+      }
 
       const result = {
         type: values.type,
@@ -1309,274 +1300,13 @@ const ProviderForm: React.FC = forwardRef((props: { value: any }, ref) => {
       }
 
       <Divider orientation="left">{t('llmProvider.providerForm.sections.portalModelMeta')}</Divider>
-
-      <Divider orientation="left">{t('llmProvider.providerForm.sections.modelPricing')}</Divider>
-      <Form.Item
-        name={["rawConfigs", "portalModelMeta", "pricing", "currency"]}
-        initialValue="CNY"
-        hidden
-      >
-        <Input />
-      </Form.Item>
-      <Form.Item
-        label={t('llmProvider.providerForm.label.pricingCurrency')}
-        extra={t('llmProvider.providerForm.help.pricingCurrency')}
-      >
-        <Input value={t('llmProvider.providerForm.fixedCurrencyValue')} disabled />
-      </Form.Item>
-      <Form.Item
-        label={t('llmProvider.providerForm.label.inputCostPerToken')}
-        name={["rawConfigs", "portalModelMeta", "pricing", "input_cost_per_token"]}
-        extra={t('llmProvider.providerForm.help.inputCostPerToken')}
-        rules={[
-          { required: true, message: t('llmProvider.providerForm.rules.inputCostPerTokenRequired') },
-        ]}
-      >
-        <InputNumber min={0} style={{ width: '100%' }} />
-      </Form.Item>
-      <Form.Item
-        label={t('llmProvider.providerForm.label.outputCostPerToken')}
-        name={["rawConfigs", "portalModelMeta", "pricing", "output_cost_per_token"]}
-        extra={t('llmProvider.providerForm.help.outputCostPerToken')}
-        rules={[
-          { required: true, message: t('llmProvider.providerForm.rules.outputCostPerTokenRequired') },
-        ]}
-      >
-        <InputNumber min={0} style={{ width: '100%' }} />
-      </Form.Item>
-      <Form.Item
-        label={t('llmProvider.providerForm.label.inputCostPerRequest')}
-        name={["rawConfigs", "portalModelMeta", "pricing", "input_cost_per_request"]}
-      >
-        <InputNumber min={0} style={{ width: '100%' }} />
-      </Form.Item>
-      <Form.Item
-        label={t('llmProvider.providerForm.label.inputCostPerTokenAbove200K')}
-        name={["rawConfigs", "portalModelMeta", "pricing", "input_cost_per_token_above_200k_tokens"]}
-      >
-        <InputNumber min={0} style={{ width: '100%' }} />
-      </Form.Item>
-      <Form.Item
-        label={t('llmProvider.providerForm.label.outputCostPerTokenAbove200K')}
-        name={["rawConfigs", "portalModelMeta", "pricing", "output_cost_per_token_above_200k_tokens"]}
-      >
-        <InputNumber min={0} style={{ width: '100%' }} />
-      </Form.Item>
-
-      {showCachePricing && (
-        <>
-          <Divider orientation="left">{t('llmProvider.providerForm.sections.cachePricing')}</Divider>
-          <Form.Item
-            label={t('llmProvider.providerForm.label.cacheCreationInputTokenCost')}
-            name={["rawConfigs", "portalModelMeta", "pricing", "cache_creation_input_token_cost"]}
-            extra={t('llmProvider.providerForm.help.cachePricingFallback')}
-          >
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item
-            label={t('llmProvider.providerForm.label.cacheCreationInputTokenCostAbove1hr')}
-            name={["rawConfigs", "portalModelMeta", "pricing", "cache_creation_input_token_cost_above_1hr"]}
-          >
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item
-            label={t('llmProvider.providerForm.label.cacheReadInputTokenCost')}
-            name={["rawConfigs", "portalModelMeta", "pricing", "cache_read_input_token_cost"]}
-          >
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item
-            label={t('llmProvider.providerForm.label.cacheCreationInputTokenCostAbove200K')}
-            name={["rawConfigs", "portalModelMeta", "pricing", "cache_creation_input_token_cost_above_200k_tokens"]}
-          >
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item
-            label={t('llmProvider.providerForm.label.cacheReadInputTokenCostAbove200K')}
-            name={["rawConfigs", "portalModelMeta", "pricing", "cache_read_input_token_cost_above_200k_tokens"]}
-          >
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
-        </>
-      )}
-
-      {showImagePricing && (
-        <>
-          <Divider orientation="left">{t('llmProvider.providerForm.sections.imagePricing')}</Divider>
-          <Form.Item
-            label={t('llmProvider.providerForm.label.outputCostPerImage')}
-            name={["rawConfigs", "portalModelMeta", "pricing", "output_cost_per_image"]}
-          >
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item
-            label={t('llmProvider.providerForm.label.outputCostPerImageToken')}
-            name={["rawConfigs", "portalModelMeta", "pricing", "output_cost_per_image_token"]}
-          >
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item
-            label={t('llmProvider.providerForm.label.inputCostPerImage')}
-            name={["rawConfigs", "portalModelMeta", "pricing", "input_cost_per_image"]}
-          >
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item
-            label={t('llmProvider.providerForm.label.inputCostPerImageToken')}
-            name={["rawConfigs", "portalModelMeta", "pricing", "input_cost_per_image_token"]}
-          >
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
-        </>
-      )}
-
-      <Form.Item
-        label={t('llmProvider.providerForm.label.modelIntro')}
-        name={["rawConfigs", "portalModelMeta", "intro"]}
-      >
-        <TextArea
-          allowClear
-          rows={3}
-          maxLength={1000}
-          placeholder={t('llmProvider.providerForm.placeholder.modelIntro')}
-        />
-      </Form.Item>
-
-      <Form.List name={["rawConfigs", "portalModelMeta", "tags"]} initialValue={[]}>
-        {(fields, { add, remove }, { errors }) => (
-          <>
-            {!fields.length ? <div style={{ marginBottom: '8px' }}>{t('llmProvider.providerForm.label.modelTags')}</div> : null}
-            {fields.map((field, index) => (
-              <Form.Item
-                label={index === 0 ? t('llmProvider.providerForm.label.modelTags') : ''}
-                required={false}
-                key={field.key}
-                style={{ marginBottom: '0.5rem' }}
-              >
-                <Form.Item {...field} noStyle>
-                  <Input
-                    allowClear
-                    style={{ width: '94%' }}
-                    placeholder={t('llmProvider.providerForm.placeholder.modelTag')}
-                    maxLength={64}
-                  />
-                </Form.Item>
-                <div style={{ display: "inline-block", width: '6%', textAlign: 'right' }}>
-                  <Button
-                    type="dashed"
-                    disabled={!(fields.length > 0)}
-                    onClick={() => remove(field.name)}
-                    icon={<MinusCircleOutlined />}
-                  />
-                </div>
-              </Form.Item>
-            ))}
-            <Form.Item>
-              <Button type="dashed" onClick={() => add()} icon={<PlusOutlined />}>
-                {t('llmProvider.providerForm.actions.addTag')}
-              </Button>
-              <Form.ErrorList errors={errors} />
-            </Form.Item>
-          </>
-        )}
-      </Form.List>
-
-      <Form.List name={["rawConfigs", "portalModelMeta", "capabilities", "modalities"]} initialValue={[]}>
-        {(fields, { add, remove }, { errors }) => (
-          <>
-            {!fields.length ? <div style={{ marginBottom: '8px' }}>{t('llmProvider.providerForm.label.modelModalities')}</div> : null}
-            {fields.map((field, index) => (
-              <Form.Item
-                label={index === 0 ? t('llmProvider.providerForm.label.modelModalities') : ''}
-                required={false}
-                key={field.key}
-                style={{ marginBottom: '0.5rem' }}
-              >
-                <Form.Item {...field} noStyle>
-                  <Input
-                    allowClear
-                    style={{ width: '94%' }}
-                    placeholder={t('llmProvider.providerForm.placeholder.modelModality')}
-                    maxLength={64}
-                  />
-                </Form.Item>
-                <div style={{ display: "inline-block", width: '6%', textAlign: 'right' }}>
-                  <Button
-                    type="dashed"
-                    disabled={!(fields.length > 0)}
-                    onClick={() => remove(field.name)}
-                    icon={<MinusCircleOutlined />}
-                  />
-                </div>
-              </Form.Item>
-            ))}
-            <Form.Item>
-              <Button type="dashed" onClick={() => add()} icon={<PlusOutlined />}>
-                {t('llmProvider.providerForm.actions.addModality')}
-              </Button>
-              <Form.ErrorList errors={errors} />
-            </Form.Item>
-          </>
-        )}
-      </Form.List>
-
-      <Form.List name={["rawConfigs", "portalModelMeta", "capabilities", "features"]} initialValue={[]}>
-        {(fields, { add, remove }, { errors }) => (
-          <>
-            {!fields.length ? <div style={{ marginBottom: '8px' }}>{t('llmProvider.providerForm.label.modelFeatures')}</div> : null}
-            {fields.map((field, index) => (
-              <Form.Item
-                label={index === 0 ? t('llmProvider.providerForm.label.modelFeatures') : ''}
-                required={false}
-                key={field.key}
-                style={{ marginBottom: '0.5rem' }}
-              >
-                <Form.Item {...field} noStyle>
-                  <Input
-                    allowClear
-                    style={{ width: '94%' }}
-                    placeholder={t('llmProvider.providerForm.placeholder.modelFeature')}
-                    maxLength={64}
-                  />
-                </Form.Item>
-                <div style={{ display: "inline-block", width: '6%', textAlign: 'right' }}>
-                  <Button
-                    type="dashed"
-                    disabled={!(fields.length > 0)}
-                    onClick={() => remove(field.name)}
-                    icon={<MinusCircleOutlined />}
-                  />
-                </div>
-              </Form.Item>
-            ))}
-            <Form.Item>
-              <Button type="dashed" onClick={() => add()} icon={<PlusOutlined />}>
-                {t('llmProvider.providerForm.actions.addFeature')}
-              </Button>
-              <Form.ErrorList errors={errors} />
-            </Form.Item>
-          </>
-        )}
-      </Form.List>
-
-      <Form.Item
-        label={t('llmProvider.providerForm.label.modelRpm')}
-        name={["rawConfigs", "portalModelMeta", "limits", "rpm"]}
-      >
-        <InputNumber min={0} precision={0} style={{ width: '100%' }} />
-      </Form.Item>
-      <Form.Item
-        label={t('llmProvider.providerForm.label.modelTpm')}
-        name={["rawConfigs", "portalModelMeta", "limits", "tpm"]}
-      >
-        <InputNumber min={0} precision={0} style={{ width: '100%' }} />
-      </Form.Item>
-      <Form.Item
-        label={t('llmProvider.providerForm.label.modelContextWindow')}
-        name={["rawConfigs", "portalModelMeta", "limits", "contextWindow"]}
-      >
-        <InputNumber min={0} precision={0} style={{ width: '100%' }} />
-      </Form.Item>
+      <div style={{ marginBottom: '16px' }}>
+        <Text type="secondary">
+          模型上架、展示元数据、价格、限制和发布状态已迁移到模型资产页管理。
+        </Text>
+        <br />
+        <Link href="/ai/model-assets">前往模型资产管理</Link>
+      </div>
 
       {/* 令牌降级 */}
       <Form.Item

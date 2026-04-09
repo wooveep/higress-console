@@ -3,6 +3,7 @@ import { addLlmProvider, deleteLlmProvider, getLlmProviders, updateLlmProvider }
 import { ExclamationCircleOutlined, EyeInvisibleTwoTone, EyeTwoTone, RedoOutlined } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-layout';
 import { useRequest } from 'ahooks';
+import { useNavigate } from 'ice';
 import { Button, Col, Drawer, Form, Modal, Row, Space, Table, Typography } from 'antd';
 import React, { useEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
@@ -52,6 +53,7 @@ const EllipsisMiddle: React.FC = (params: { value: String }) => {
 
 const LlmProviderList: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const columns = [
     {
       title: t('llmProvider.columns.type'),
@@ -231,12 +233,17 @@ const LlmProviderList: React.FC = () => {
       >
         <Row gutter={24}>
           <Col span={4}>
-            <Button
-              type="primary"
-              onClick={onShowDrawer}
-            >
-              {t('llmProvider.create')}
-            </Button>
+            <Space>
+              <Button
+                type="primary"
+                onClick={onShowDrawer}
+              >
+                {t('llmProvider.create')}
+              </Button>
+              <Button onClick={() => navigate('/ai/model-assets')}>
+                模型资产页
+              </Button>
+            </Space>
           </Col>
           <Col span={20} style={{ textAlign: 'right' }}>
             <Button
