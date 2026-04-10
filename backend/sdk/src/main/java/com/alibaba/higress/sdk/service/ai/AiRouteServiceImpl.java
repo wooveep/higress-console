@@ -74,6 +74,7 @@ public class AiRouteServiceImpl implements AiRouteService {
 
     private static final String AI_ROUTE_AUTO_ENABLE_AI_STATS_ENV_KEY = "AI_ROUTE_AUTO_ENABLE_AI_STATS";
     private static final String AI_ROUTE_AUTO_ENABLE_MODEL_ROUTER_ENV_KEY = "AI_ROUTE_AUTO_ENABLE_MODEL_ROUTER";
+    private static final String INTERNAL_AI_ROUTE_PATH_PREFIX = "/internal/ai-routes/";
 
     private static final String ROUTE_FALLBACK_ENVOY_FILTER_CONFIG_PATH = "/templates/envoyfilter-route-fallback.yaml";
 
@@ -244,9 +245,15 @@ public class AiRouteServiceImpl implements AiRouteService {
         Route route = buildRoute(routeName, aiRoute);
         setUpstreams(route, aiRoute.getUpstreams());
         saveRoute(route);
+        String internalRouteName = buildInternalRouteResourceName(aiRoute.getName());
+        Route internalRoute = buildInternalRoute(internalRouteName, aiRoute);
+        setUpstreams(internalRoute, aiRoute.getUpstreams());
+        saveRoute(internalRoute);
         writeModelRouterResources(aiRoute.getModelPredicates());
         writeModelMappingResources(routeName, aiRoute.getUpstreams());
+        writeModelMappingResources(internalRouteName, aiRoute.getUpstreams());
         writeAiStatisticsResources(routeName);
+        writeAiStatisticsResources(internalRouteName);
     }
 
     private void writeAiRouteFallbackResources(AiRoute aiRoute) {
@@ -257,20 +264,6 @@ public class AiRouteServiceImpl implements AiRouteService {
             return;
         }
 
-        final String originalRouteName = buildRouteResourceName(aiRoute.getName());
-
-        final String fallbackRouteName = buildFallbackRouteResourceName(aiRoute.getName());
-        Route route = buildRoute(fallbackRouteName, aiRoute);
-        KeyedRoutePredicate fallbackHeaderPredicate = new KeyedRoutePredicate(HigressConstants.FALLBACK_FROM_HEADER);
-        fallbackHeaderPredicate.setMatchType(RoutePredicateTypeEnum.EQUAL.name());
-        fallbackHeaderPredicate.setMatchValue(originalRouteName);
-        fallbackHeaderPredicate.setCaseSensitive(true);
-        if (route.getHeaders() == null) {
-            route.setHeaders(new ArrayList<>());
-        } else {
-            route.setHeaders(new ArrayList<>(route.getHeaders()));
-        }
-        route.getHeaders().add(fallbackHeaderPredicate);
         String fallbackStrategy = fallbackConfig.getFallbackStrategy();
         List<AiUpstream> fallbackUpStreams;
         if (StringUtils.isEmpty(fallbackStrategy) || AiRouteFallbackStrategy.RANDOM.equals(fallbackStrategy)) {
@@ -281,32 +274,26 @@ public class AiRouteServiceImpl implements AiRouteService {
         } else {
             throw new BusinessException("Unknown fallback strategy: " + fallbackStrategy);
         }
+        final String originalRouteName = buildRouteResourceName(aiRoute.getName());
+        final String fallbackRouteName = buildFallbackRouteResourceName(aiRoute.getName());
+        Route route = buildFallbackRoute(aiRoute, originalRouteName, fallbackRouteName);
         setUpstreams(route, fallbackUpStreams);
         saveRoute(route);
 
-        String fallbackEnvoyFilterConfig = getRouteFallbackEnvoyFilterConfig(fallbackConfig.getResponseCodes());
-        StringBuilder envoyFilterBuilder = new StringBuilder(fallbackEnvoyFilterConfig);
-        StringUtil.replace(envoyFilterBuilder, "${name}", originalRouteName);
-        StringUtil.replace(envoyFilterBuilder, "${routeName}", originalRouteName);
-        StringUtil.replace(envoyFilterBuilder, "${fallbackHeader}", HigressConstants.FALLBACK_FROM_HEADER);
-        V1alpha3EnvoyFilter envoyFilter =
-            kubernetesClientService.loadFromYaml(envoyFilterBuilder.toString(), V1alpha3EnvoyFilter.class);
-        try {
-            V1alpha3EnvoyFilter existedFilter =
-                kubernetesClientService.readEnvoyFilter(envoyFilter.getMetadata().getName());
-            if (existedFilter == null) {
-                kubernetesClientService.createEnvoyFilter(envoyFilter);
-            } else {
-                envoyFilter.getMetadata().setResourceVersion(existedFilter.getMetadata().getResourceVersion());
-                kubernetesClientService.replaceEnvoyFilter(envoyFilter);
-            }
-        } catch (ApiException e) {
-            throw new BusinessException(
-                "Error occurs when writing the fallback EnvoyFilter for AI route: " + aiRoute.getName(), e);
-        }
+        final String internalOriginalRouteName = buildInternalRouteResourceName(aiRoute.getName());
+        final String internalFallbackRouteName = buildInternalFallbackRouteResourceName(aiRoute.getName());
+        Route internalFallbackRoute =
+            buildInternalFallbackRoute(aiRoute, internalOriginalRouteName, internalFallbackRouteName);
+        setUpstreams(internalFallbackRoute, fallbackUpStreams);
+        saveRoute(internalFallbackRoute);
+
+        writeFallbackEnvoyFilter(originalRouteName, fallbackConfig.getResponseCodes());
+        writeFallbackEnvoyFilter(internalOriginalRouteName, fallbackConfig.getResponseCodes());
 
         writeModelMappingResources(fallbackRouteName, fallbackUpStreams);
+        writeModelMappingResources(internalFallbackRouteName, fallbackUpStreams);
         writeAiStatisticsResources(fallbackRouteName);
+        writeAiStatisticsResources(internalFallbackRouteName);
     }
 
     private void writeModelRouterResources(List<AiModelPredicate> modelPredicates) {
@@ -438,6 +425,40 @@ public class AiRouteServiceImpl implements AiRouteService {
         return route;
     }
 
+    private Route buildInternalRoute(String internalRouteName, AiRoute aiRoute) {
+        Route route = buildRoute(internalRouteName, aiRoute);
+        route.setDomains(new ArrayList<>());
+        route.setPath(new RoutePredicate(RoutePredicateTypeEnum.PRE.toString(),
+            buildInternalRoutePath(aiRoute.getName()), true));
+        return route;
+    }
+
+    private Route buildFallbackRoute(AiRoute aiRoute, String originalRouteName, String fallbackRouteName) {
+        Route route = buildRoute(fallbackRouteName, aiRoute);
+        attachFallbackHeaderPredicate(route, originalRouteName);
+        return route;
+    }
+
+    private Route buildInternalFallbackRoute(AiRoute aiRoute, String internalOriginalRouteName,
+        String internalFallbackRouteName) {
+        Route route = buildInternalRoute(internalFallbackRouteName, aiRoute);
+        attachFallbackHeaderPredicate(route, internalOriginalRouteName);
+        return route;
+    }
+
+    private void attachFallbackHeaderPredicate(Route route, String originalRouteName) {
+        KeyedRoutePredicate fallbackHeaderPredicate = new KeyedRoutePredicate(HigressConstants.FALLBACK_FROM_HEADER);
+        fallbackHeaderPredicate.setMatchType(RoutePredicateTypeEnum.EQUAL.name());
+        fallbackHeaderPredicate.setMatchValue(originalRouteName);
+        fallbackHeaderPredicate.setCaseSensitive(true);
+        if (route.getHeaders() == null) {
+            route.setHeaders(new ArrayList<>());
+        } else {
+            route.setHeaders(new ArrayList<>(route.getHeaders()));
+        }
+        route.getHeaders().add(fallbackHeaderPredicate);
+    }
+
     @VisibleForTesting
     String buildModelRoutingHeaderRegex(List<AiModelPredicate> modelPredicates) {
         StringBuilder regexBuilder = new StringBuilder();
@@ -492,13 +513,24 @@ public class AiRouteServiceImpl implements AiRouteService {
 
     private void deleteAiRouteResources(String aiRouteName) {
         String resourceName = buildRouteResourceName(aiRouteName);
-        routeService.delete(resourceName);
+        deleteRouteIfExists(resourceName);
+        deleteRouteIfExists(buildInternalRouteResourceName(aiRouteName));
 
         try {
             kubernetesClientService.deleteEnvoyFilter(resourceName);
         } catch (ApiException e) {
             if (e.getCode() != HttpStatus.NOT_FOUND) {
                 throw new BusinessException("Error occurs when deleting the EnvoyFilter with name: " + resourceName, e);
+            }
+        }
+        try {
+            kubernetesClientService.deleteEnvoyFilter(buildInternalRouteResourceName(aiRouteName));
+        } catch (ApiException e) {
+            if (e.getCode() != HttpStatus.NOT_FOUND) {
+                throw new BusinessException(
+                    "Error occurs when deleting the internal EnvoyFilter with name: "
+                        + buildInternalRouteResourceName(aiRouteName),
+                    e);
             }
         }
 
@@ -516,8 +548,8 @@ public class AiRouteServiceImpl implements AiRouteService {
             }
         }
 
-        String fallbackResourceName = buildFallbackRouteResourceName(aiRouteName);
-        routeService.delete(fallbackResourceName);
+        deleteRouteIfExists(buildFallbackRouteResourceName(aiRouteName));
+        deleteRouteIfExists(buildInternalFallbackRouteResourceName(aiRouteName));
     }
 
     private void saveRoute(Route route) {
@@ -530,12 +562,53 @@ public class AiRouteServiceImpl implements AiRouteService {
         }
     }
 
+    private void deleteRouteIfExists(String routeName) {
+        if (routeService.query(routeName) != null) {
+            routeService.delete(routeName);
+        }
+    }
+
+    private void writeFallbackEnvoyFilter(String routeName, List<String> responseCodes) {
+        String fallbackEnvoyFilterConfig = getRouteFallbackEnvoyFilterConfig(responseCodes);
+        StringBuilder envoyFilterBuilder = new StringBuilder(fallbackEnvoyFilterConfig);
+        StringUtil.replace(envoyFilterBuilder, "${name}", routeName);
+        StringUtil.replace(envoyFilterBuilder, "${routeName}", routeName);
+        StringUtil.replace(envoyFilterBuilder, "${fallbackHeader}", HigressConstants.FALLBACK_FROM_HEADER);
+        V1alpha3EnvoyFilter envoyFilter =
+            kubernetesClientService.loadFromYaml(envoyFilterBuilder.toString(), V1alpha3EnvoyFilter.class);
+        try {
+            V1alpha3EnvoyFilter existedFilter =
+                kubernetesClientService.readEnvoyFilter(envoyFilter.getMetadata().getName());
+            if (existedFilter == null) {
+                kubernetesClientService.createEnvoyFilter(envoyFilter);
+            } else {
+                envoyFilter.getMetadata().setResourceVersion(existedFilter.getMetadata().getResourceVersion());
+                kubernetesClientService.replaceEnvoyFilter(envoyFilter);
+            }
+        } catch (ApiException e) {
+            throw new BusinessException("Error occurs when writing the fallback EnvoyFilter for AI route: " + routeName,
+                e);
+        }
+    }
+
     private static String buildRouteResourceName(String routeName) {
         return CommonKey.AI_ROUTE_PREFIX + routeName + HigressConstants.INTERNAL_RESOURCE_NAME_SUFFIX;
+    }
+
+    private static String buildInternalRouteResourceName(String routeName) {
+        return buildRouteResourceName(routeName) + "-internal";
     }
 
     private static String buildFallbackRouteResourceName(String routeName) {
         return CommonKey.AI_ROUTE_PREFIX + routeName + HigressConstants.FALLBACK_ROUTE_NAME_SUFFIX
             + HigressConstants.INTERNAL_RESOURCE_NAME_SUFFIX;
+    }
+
+    private static String buildInternalFallbackRouteResourceName(String routeName) {
+        return buildFallbackRouteResourceName(routeName) + "-internal";
+    }
+
+    private static String buildInternalRoutePath(String routeName) {
+        return INTERNAL_AI_ROUTE_PATH_PREFIX + routeName;
     }
 }
