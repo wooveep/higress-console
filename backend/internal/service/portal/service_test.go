@@ -94,6 +94,8 @@ func expectSchema(mock sqlmock.Sqlmock) {
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS portal_ai_quota_balance").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS portal_ai_quota_schedule_rule").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS job_run_record").WillReturnResult(sqlmock.NewResult(0, 0))
+	expectSharedSchema(mock)
+	expectLegacyTablesAbsent(mock)
 }
 
 func expectSharedSchema(mock sqlmock.Sqlmock) {
@@ -116,5 +118,27 @@ func expectSharedSchema(mock sqlmock.Sqlmock) {
 		mock.ExpectQuery(query).
 			WithArgs(table).
 			WillReturnRows(sqlmock.NewRows([]string{"COUNT(1)"}).AddRow(1))
+	}
+}
+
+func expectLegacyTablesAbsent(mock sqlmock.Sqlmock) {
+	query := regexp.QuoteMeta(`
+		SELECT COUNT(1)
+		FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME = ?`)
+	for _, table := range []string{
+		"portal_users",
+		"portal_departments",
+		"portal_asset_grant",
+		"portal_ai_quota_user_policy",
+		"ai_sensitive_detect_rule",
+		"ai_sensitive_replace_rule",
+		"ai_sensitive_system_config",
+		"ai_sensitive_block_audit",
+	} {
+		mock.ExpectQuery(query).
+			WithArgs(table).
+			WillReturnRows(sqlmock.NewRows([]string{"COUNT(1)"}).AddRow(0))
 	}
 }

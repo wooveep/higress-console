@@ -3,10 +3,15 @@ package portal
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/wooveep/aigateway-console/backend/internal/dao"
+	"github.com/wooveep/aigateway-console/backend/internal/model/do"
+	"github.com/wooveep/aigateway-console/backend/internal/model/entity"
 )
 
 type AISensitiveMenuState struct {
@@ -39,20 +44,28 @@ type AISensitiveReplaceRule struct {
 }
 
 type AISensitiveBlockAudit struct {
-	ID                int64      `json:"id"`
-	RequestID         string     `json:"requestId,omitempty"`
-	RouteName         string     `json:"routeName,omitempty"`
-	ConsumerName      string     `json:"consumerName,omitempty"`
-	DisplayName       string     `json:"displayName,omitempty"`
-	BlockedAt         *time.Time `json:"blockedAt,omitempty"`
-	BlockedBy         string     `json:"blockedBy,omitempty"`
-	RequestPhase      string     `json:"requestPhase,omitempty"`
-	BlockedReasonJSON string     `json:"blockedReasonJson,omitempty"`
-	MatchType         string     `json:"matchType,omitempty"`
-	MatchedRule       string     `json:"matchedRule,omitempty"`
-	MatchedExcerpt    string     `json:"matchedExcerpt,omitempty"`
-	ProviderID        *int64     `json:"providerId,omitempty"`
-	CostUSD           string     `json:"costUsd,omitempty"`
+	ID                int64                      `json:"id"`
+	RequestID         string                     `json:"requestId,omitempty"`
+	RouteName         string                     `json:"routeName,omitempty"`
+	ConsumerName      string                     `json:"consumerName,omitempty"`
+	DisplayName       string                     `json:"displayName,omitempty"`
+	BlockedAt         *time.Time                 `json:"blockedAt,omitempty"`
+	BlockedBy         string                     `json:"blockedBy,omitempty"`
+	RequestPhase      string                     `json:"requestPhase,omitempty"`
+	BlockedReasonJSON string                     `json:"blockedReasonJson,omitempty"`
+	GuardCode         *int                       `json:"guardCode,omitempty"`
+	BlockedDetails    []AISensitiveBlockedDetail `json:"blockedDetails,omitempty"`
+	MatchType         string                     `json:"matchType,omitempty"`
+	MatchedRule       string                     `json:"matchedRule,omitempty"`
+	MatchedExcerpt    string                     `json:"matchedExcerpt,omitempty"`
+	ProviderID        *int64                     `json:"providerId,omitempty"`
+	CostUSD           string                     `json:"costUsd,omitempty"`
+}
+
+type AISensitiveBlockedDetail struct {
+	Type       string `json:"type,omitempty"`
+	Level      string `json:"level,omitempty"`
+	Suggestion string `json:"suggestion,omitempty"`
 }
 
 type AISensitiveSystemConfig struct {
@@ -102,24 +115,15 @@ func (s *Service) ListAISensitiveDetectRules(ctx context.Context) ([]AISensitive
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, `
-		SELECT id, pattern, match_type, description, priority, enabled, created_at, updated_at
-		FROM portal_ai_sensitive_detect_rule
-		ORDER BY priority DESC, id ASC`)
+	items, err := newPortalStore(db).listAISensitiveDetectRules(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	items := make([]AISensitiveDetectRule, 0)
-	for rows.Next() {
-		item, err := scanAISensitiveDetectRule(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
+	records := make([]AISensitiveDetectRule, 0, len(items))
+	for _, item := range items {
+		records = append(records, aiSensitiveDetectRuleFromEntity(item))
 	}
-	return items, rows.Err()
+	return records, nil
 }
 
 func (s *Service) SaveAISensitiveDetectRule(ctx context.Context, rule AISensitiveDetectRule) (*AISensitiveDetectRule, error) {
@@ -143,33 +147,13 @@ func (s *Service) SaveAISensitiveDetectRule(ctx context.Context, rule AISensitiv
 		enabled = 1
 	}
 
-	if rule.ID > 0 {
-		_, err = db.ExecContext(ctx, `
-			UPDATE portal_ai_sensitive_detect_rule
-			SET pattern = ?, match_type = ?, description = ?, priority = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
-			WHERE id = ?`,
-			rule.Pattern,
-			rule.MatchType,
-			trimOrNil(rule.Description),
-			rule.Priority,
-			enabled,
-			rule.ID,
-		)
-	} else {
-		result, execErr := db.ExecContext(ctx, `
-			INSERT INTO portal_ai_sensitive_detect_rule (pattern, match_type, description, priority, enabled)
-			VALUES (?, ?, ?, ?, ?)`,
-			rule.Pattern,
-			rule.MatchType,
-			trimOrNil(rule.Description),
-			rule.Priority,
-			enabled,
-		)
-		err = execErr
-		if execErr == nil {
-			rule.ID, _ = result.LastInsertId()
-		}
-	}
+	rule.ID, err = newPortalStore(db).saveAISensitiveDetectRule(ctx, do.PortalAISensitiveDetectRule{
+		Pattern:     rule.Pattern,
+		MatchType:   rule.MatchType,
+		Description: trimOrNil(rule.Description),
+		Priority:    rule.Priority,
+		Enabled:     enabled,
+	}, rule.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -181,12 +165,11 @@ func (s *Service) DeleteAISensitiveDetectRule(ctx context.Context, id int64) err
 	if err != nil {
 		return err
 	}
-	result, err := db.ExecContext(ctx, `DELETE FROM portal_ai_sensitive_detect_rule WHERE id = ?`, id)
+	deleted, err := newPortalStore(db).deleteAISensitiveDetectRule(ctx, id)
 	if err != nil {
 		return err
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if !deleted {
 		return fmt.Errorf("detect rule not found: %d", id)
 	}
 	return nil
@@ -197,24 +180,15 @@ func (s *Service) ListAISensitiveReplaceRules(ctx context.Context) ([]AISensitiv
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, `
-		SELECT id, pattern, replace_type, replace_value, restore, description, priority, enabled, created_at, updated_at
-		FROM portal_ai_sensitive_replace_rule
-		ORDER BY priority DESC, id ASC`)
+	items, err := newPortalStore(db).listAISensitiveReplaceRules(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	items := make([]AISensitiveReplaceRule, 0)
-	for rows.Next() {
-		item, err := scanAISensitiveReplaceRule(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
+	records := make([]AISensitiveReplaceRule, 0, len(items))
+	for _, item := range items {
+		records = append(records, aiSensitiveReplaceRuleFromEntity(item))
 	}
-	return items, rows.Err()
+	return records, nil
 }
 
 func (s *Service) SaveAISensitiveReplaceRule(ctx context.Context, rule AISensitiveReplaceRule) (*AISensitiveReplaceRule, error) {
@@ -242,38 +216,15 @@ func (s *Service) SaveAISensitiveReplaceRule(ctx context.Context, rule AISensiti
 		restore = 1
 	}
 
-	if rule.ID > 0 {
-		_, err = db.ExecContext(ctx, `
-			UPDATE portal_ai_sensitive_replace_rule
-			SET pattern = ?, replace_type = ?, replace_value = ?, restore = ?, description = ?, priority = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
-			WHERE id = ?`,
-			rule.Pattern,
-			rule.ReplaceType,
-			trimOrNil(rule.ReplaceValue),
-			restore,
-			trimOrNil(rule.Description),
-			rule.Priority,
-			enabled,
-			rule.ID,
-		)
-	} else {
-		result, execErr := db.ExecContext(ctx, `
-			INSERT INTO portal_ai_sensitive_replace_rule (
-				pattern, replace_type, replace_value, restore, description, priority, enabled
-			) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			rule.Pattern,
-			rule.ReplaceType,
-			trimOrNil(rule.ReplaceValue),
-			restore,
-			trimOrNil(rule.Description),
-			rule.Priority,
-			enabled,
-		)
-		err = execErr
-		if execErr == nil {
-			rule.ID, _ = result.LastInsertId()
-		}
-	}
+	rule.ID, err = newPortalStore(db).saveAISensitiveReplaceRule(ctx, do.PortalAISensitiveReplaceRule{
+		Pattern:      rule.Pattern,
+		ReplaceType:  rule.ReplaceType,
+		ReplaceValue: trimOrNil(rule.ReplaceValue),
+		Restore:      restore,
+		Description:  trimOrNil(rule.Description),
+		Priority:     rule.Priority,
+		Enabled:      enabled,
+	}, rule.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -285,12 +236,11 @@ func (s *Service) DeleteAISensitiveReplaceRule(ctx context.Context, id int64) er
 	if err != nil {
 		return err
 	}
-	result, err := db.ExecContext(ctx, `DELETE FROM portal_ai_sensitive_replace_rule WHERE id = ?`, id)
+	deleted, err := newPortalStore(db).deleteAISensitiveReplaceRule(ctx, id)
 	if err != nil {
 		return err
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if !deleted {
 		return fmt.Errorf("replace rule not found: %d", id)
 	}
 	return nil
@@ -301,58 +251,15 @@ func (s *Service) ListAISensitiveAudits(ctx context.Context, query AISensitiveAu
 	if err != nil {
 		return nil, err
 	}
-	statement := `
-		SELECT id, request_id, route_name, consumer_name, display_name, blocked_at, blocked_by, request_phase,
-			blocked_reason_json, match_type, matched_rule, matched_excerpt, provider_id, cost_usd
-		FROM portal_ai_sensitive_block_audit
-		WHERE 1 = 1`
-	args := make([]any, 0)
-	if strings.TrimSpace(query.ConsumerName) != "" {
-		statement += ` AND consumer_name = ?`
-		args = append(args, strings.TrimSpace(query.ConsumerName))
-	}
-	if strings.TrimSpace(query.DisplayName) != "" {
-		statement += ` AND display_name = ?`
-		args = append(args, strings.TrimSpace(query.DisplayName))
-	}
-	if strings.TrimSpace(query.RouteName) != "" {
-		statement += ` AND route_name = ?`
-		args = append(args, strings.TrimSpace(query.RouteName))
-	}
-	if strings.TrimSpace(query.MatchType) != "" {
-		statement += ` AND match_type = ?`
-		args = append(args, strings.TrimSpace(query.MatchType))
-	}
-	if strings.TrimSpace(query.StartTime) != "" {
-		statement += ` AND blocked_at >= ?`
-		args = append(args, strings.TrimSpace(query.StartTime))
-	}
-	if strings.TrimSpace(query.EndTime) != "" {
-		statement += ` AND blocked_at <= ?`
-		args = append(args, strings.TrimSpace(query.EndTime))
-	}
-	statement += ` ORDER BY blocked_at DESC`
-	limit := query.Limit
-	if limit <= 0 || limit > 200 {
-		limit = 100
-	}
-	statement += fmt.Sprintf(" LIMIT %d", limit)
-
-	rows, err := db.QueryContext(ctx, statement, args...)
+	items, err := newPortalStore(db).listAISensitiveAudits(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	items := make([]AISensitiveBlockAudit, 0)
-	for rows.Next() {
-		item, err := scanAISensitiveAudit(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
+	records := make([]AISensitiveBlockAudit, 0, len(items))
+	for _, item := range items {
+		records = append(records, aiSensitiveAuditFromEntity(item))
 	}
-	return items, rows.Err()
+	return records, nil
 }
 
 func (s *Service) GetAISensitiveSystemConfig(ctx context.Context) (*AISensitiveSystemConfig, error) {
@@ -360,29 +267,14 @@ func (s *Service) GetAISensitiveSystemConfig(ctx context.Context) (*AISensitiveS
 	if err != nil {
 		return nil, err
 	}
-	config := &AISensitiveSystemConfig{}
-	var (
-		enabledInt int
-		updatedBy  sql.NullString
-		updatedAt  sql.NullTime
-	)
-	err = db.QueryRowContext(ctx, `
-		SELECT system_deny_enabled, dictionary_text, updated_by, updated_at
-		FROM portal_ai_sensitive_system_config
-		WHERE config_key = 'default'`,
-	).Scan(&enabledInt, &config.DictionaryText, &updatedBy, &updatedAt)
+	item, err := newPortalStore(db).getAISensitiveSystemConfig(ctx)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return config, nil
-		}
 		return nil, err
 	}
-	config.SystemDenyEnabled = enabledInt > 0
-	config.UpdatedBy = updatedBy.String
-	if updatedAt.Valid {
-		config.UpdatedAt = &updatedAt.Time
+	if item == nil {
+		return &AISensitiveSystemConfig{}, nil
 	}
-	return config, nil
+	return aiSensitiveSystemConfigFromEntity(*item), nil
 }
 
 func (s *Service) SaveAISensitiveSystemConfig(ctx context.Context, config AISensitiveSystemConfig) (*AISensitiveSystemConfig, error) {
@@ -394,18 +286,11 @@ func (s *Service) SaveAISensitiveSystemConfig(ctx context.Context, config AISens
 	if config.SystemDenyEnabled {
 		enabledInt = 1
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO portal_ai_sensitive_system_config (config_key, system_deny_enabled, dictionary_text, updated_by)
-		VALUES ('default', ?, ?, ?)
-		ON DUPLICATE KEY UPDATE
-			system_deny_enabled = VALUES(system_deny_enabled),
-			dictionary_text = VALUES(dictionary_text),
-			updated_by = VALUES(updated_by),
-			updated_at = CURRENT_TIMESTAMP`,
-		enabledInt,
-		config.DictionaryText,
-		nullIfEmpty(config.UpdatedBy),
-	); err != nil {
+	if err := newPortalStore(db).saveAISensitiveSystemConfig(ctx, do.PortalAISensitiveSystemConfig{
+		SystemDenyEnabled: enabledInt,
+		DictionaryText:    config.DictionaryText,
+		UpdatedBy:         nullIfEmpty(config.UpdatedBy),
+	}); err != nil {
 		return nil, err
 	}
 	return s.GetAISensitiveSystemConfig(ctx)
@@ -422,9 +307,9 @@ func (s *Service) GetAISensitiveStatus(ctx context.Context) (*AISensitiveStatus,
 	}
 	status := &AISensitiveStatus{
 		DBEnabled:                 true,
-		DetectRuleCount:           queryCount(ctx, db, `SELECT COUNT(1) FROM portal_ai_sensitive_detect_rule`),
-		ReplaceRuleCount:          queryCount(ctx, db, `SELECT COUNT(1) FROM portal_ai_sensitive_replace_rule`),
-		AuditRecordCount:          queryCount(ctx, db, `SELECT COUNT(1) FROM portal_ai_sensitive_block_audit`),
+		DetectRuleCount:           newPortalStore(db).countTable(ctx, dao.PortalAISensitiveDetectRule.Name),
+		ReplaceRuleCount:          newPortalStore(db).countTable(ctx, dao.PortalAISensitiveReplaceRule.Name),
+		AuditRecordCount:          newPortalStore(db).countTable(ctx, dao.PortalAISensitiveBlockAudit.Name),
 		SystemDenyEnabled:         config.SystemDenyEnabled,
 		SystemDictionaryWordCount: countDictionaryLines(config.DictionaryText),
 		SystemDictionaryUpdatedAt: config.UpdatedAt,
@@ -484,7 +369,7 @@ func (s *Service) getAISensitiveDetectRule(ctx context.Context, id int64) (*AISe
 	}
 	row := db.QueryRowContext(ctx, `
 		SELECT id, pattern, match_type, description, priority, enabled, created_at, updated_at
-		FROM portal_ai_sensitive_detect_rule
+		FROM `+dao.PortalAISensitiveDetectRule.Name+`
 		WHERE id = ?`, id)
 	item, err := scanAISensitiveDetectRule(row)
 	if err != nil {
@@ -500,7 +385,7 @@ func (s *Service) getAISensitiveReplaceRule(ctx context.Context, id int64) (*AIS
 	}
 	row := db.QueryRowContext(ctx, `
 		SELECT id, pattern, replace_type, replace_value, restore, description, priority, enabled, created_at, updated_at
-		FROM portal_ai_sensitive_replace_rule
+		FROM `+dao.PortalAISensitiveReplaceRule.Name+`
 		WHERE id = ?`, id)
 	item, err := scanAISensitiveReplaceRule(row)
 	if err != nil {
@@ -538,6 +423,124 @@ func scanAISensitiveDetectRule(scanner interface{ Scan(...any) error }) (AISensi
 		item.UpdatedAt = &updatedAt.Time
 	}
 	return item, nil
+}
+
+func aiSensitiveDetectRuleFromEntity(item entity.PortalAISensitiveDetectRule) AISensitiveDetectRule {
+	record := AISensitiveDetectRule{
+		ID:          item.Id,
+		Pattern:     item.Pattern,
+		MatchType:   item.MatchType,
+		Description: item.Description,
+		Priority:    item.Priority,
+		Enabled:     item.Enabled > 0,
+	}
+	if item.CreatedAt != nil {
+		value := item.CreatedAt.Time
+		record.CreatedAt = &value
+	}
+	if item.UpdatedAt != nil {
+		value := item.UpdatedAt.Time
+		record.UpdatedAt = &value
+	}
+	return record
+}
+
+func aiSensitiveReplaceRuleFromEntity(item entity.PortalAISensitiveReplaceRule) AISensitiveReplaceRule {
+	record := AISensitiveReplaceRule{
+		ID:           item.Id,
+		Pattern:      item.Pattern,
+		ReplaceType:  item.ReplaceType,
+		ReplaceValue: item.ReplaceValue,
+		Restore:      item.Restore > 0,
+		Description:  item.Description,
+		Priority:     item.Priority,
+		Enabled:      item.Enabled > 0,
+	}
+	if item.CreatedAt != nil {
+		value := item.CreatedAt.Time
+		record.CreatedAt = &value
+	}
+	if item.UpdatedAt != nil {
+		value := item.UpdatedAt.Time
+		record.UpdatedAt = &value
+	}
+	return record
+}
+
+func aiSensitiveAuditFromEntity(item entity.PortalAISensitiveBlockAudit) AISensitiveBlockAudit {
+	record := AISensitiveBlockAudit{
+		ID:                item.Id,
+		RequestID:         item.RequestId,
+		RouteName:         item.RouteName,
+		ConsumerName:      item.ConsumerName,
+		DisplayName:       item.DisplayName,
+		BlockedBy:         item.BlockedBy,
+		RequestPhase:      item.RequestPhase,
+		BlockedReasonJSON: item.BlockedReasonJson,
+		MatchType:         item.MatchType,
+		MatchedRule:       item.MatchedRule,
+		MatchedExcerpt:    item.MatchedExcerpt,
+		CostUSD:           item.CostUsd,
+	}
+	if payload, ok := parseAISensitiveBlockedReason(item.BlockedReasonJson); ok {
+		if payload.RequestID != "" {
+			record.RequestID = payload.RequestID
+		}
+		if payload.GuardCode != nil {
+			record.GuardCode = payload.GuardCode
+		}
+		if len(payload.BlockedDetails) > 0 {
+			record.BlockedDetails = payload.BlockedDetails
+		}
+	}
+	if item.BlockedAt != nil {
+		value := item.BlockedAt.Time
+		record.BlockedAt = &value
+	}
+	if item.ProviderId > 0 {
+		value := item.ProviderId
+		record.ProviderID = &value
+	}
+	return record
+}
+
+type aiSensitiveBlockedReasonPayload struct {
+	RequestID      string                     `json:"requestId"`
+	GuardCode      *int                       `json:"guardCode"`
+	BlockedDetails []AISensitiveBlockedDetail `json:"blockedDetails"`
+}
+
+func parseAISensitiveBlockedReason(raw string) (aiSensitiveBlockedReasonPayload, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return aiSensitiveBlockedReasonPayload{}, false
+	}
+	var payload aiSensitiveBlockedReasonPayload
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return aiSensitiveBlockedReasonPayload{}, false
+	}
+	for index := range payload.BlockedDetails {
+		payload.BlockedDetails[index].Type = strings.TrimSpace(payload.BlockedDetails[index].Type)
+		payload.BlockedDetails[index].Level = strings.TrimSpace(payload.BlockedDetails[index].Level)
+		payload.BlockedDetails[index].Suggestion = strings.TrimSpace(payload.BlockedDetails[index].Suggestion)
+	}
+	if payload.GuardCode == nil && payload.RequestID == "" && len(payload.BlockedDetails) == 0 {
+		return aiSensitiveBlockedReasonPayload{}, false
+	}
+	return payload, true
+}
+
+func aiSensitiveSystemConfigFromEntity(item entity.PortalAISensitiveSystemConfig) *AISensitiveSystemConfig {
+	record := &AISensitiveSystemConfig{
+		SystemDenyEnabled: item.SystemDenyEnabled > 0,
+		DictionaryText:    item.DictionaryText,
+		UpdatedBy:         item.UpdatedBy,
+	}
+	if item.UpdatedAt != nil {
+		value := item.UpdatedAt.Time
+		record.UpdatedAt = &value
+	}
+	return record
 }
 
 func scanAISensitiveReplaceRule(scanner interface{ Scan(...any) error }) (AISensitiveReplaceRule, error) {

@@ -1,6 +1,6 @@
 # P4 Portal 业务域
 
-- 状态：`doing`（主链已完成，aftercare 持续中）
+- 状态：`done`
 - 依赖：`P1`, `P2`
 
 ## 目标
@@ -29,13 +29,13 @@
 - [x] Portal service sqlmock 测试。
 - [x] Model Assets / Grants / Agent Catalog 服务测试。
 - [x] MySQL testcontainers 集成测试。
-- [ ] Consumer / Org / Invite Code / Model Assets / Agent Catalog / AI Quota / AI Sensitive 契约测试。
+- [x] Consumer / Org / Invite Code / Model Assets / Agent Catalog / AI Quota / AI Sensitive 契约测试。
 
 ## Aftercare
 
-- [ ] `P4-AF-01`：继续把 `portal service` 从 raw SQL 向 `DAO / DO / Entity` 收口。
-- [ ] `P4-AF-02`：补齐 `Consumer / Org / Invite / Model Assets / Agent Catalog / AI Quota / AI Sensitive` 契约测试。
-- [ ] `P4-AF-03`：继续把 `Portal Stats` 从表格查询推进到更完整的图表/导出能力。
+- [x] `P4-AF-01`：继续把 `portal service` 从 raw SQL 向 `DAO / DO / Entity` 收口。
+- [x] `P4-AF-02`：补齐 `Consumer / Org / Invite / Model Assets / Agent Catalog / AI Quota / AI Sensitive` 契约测试。
+- [x] `P4-AF-03`：继续把 `Portal Stats` 从表格查询推进到更完整的图表/导出能力。
 
 ## 本轮说明
 
@@ -49,4 +49,8 @@
 - `Consumer / Org / Invite / Grant / Model Assets / Agent Catalog / AI Quota` 已切到 `portal_user / org_department / org_account_membership / asset_grant / quota_policy_user / portal_model_* / portal_agent_catalog` 这组 Portal 真表名。
 - 新增一次性 legacy 数据迁移命令 `backend/main.go portal-legacy-migrate`，用于把 `portal_users / portal_departments / portal_asset_grant / portal_ai_quota_user_policy` 搬迁到真表。
 - 已补共享 MySQL testcontainers 集成测试，并新增 Portal 侧兼容校验，验证 Console 写入共享表后 Portal 的用户、模型、Agent、Quota 读取链路可用。
-- 当前判断：`P4` 主链迁移已完成，剩余工作集中在 `DAO/DO/Entity` 实用化、契约测试补齐和 `Portal Stats` 能力增强。
+- 本轮完成 `P4-AF-01 ~ P4-AF-03`：
+  - `Invite / Asset Grant / AI Quota / AI Sensitive` 的高频写读路径已收口到统一持久化 helper，减少 service 层直接散落的表名和 SQL 片段。
+  - 新增 `Consumer / Org / Invite / Model Assets / Agent Catalog / AI Quota / AI Sensitive` HTTP 契约测试与 fixture，补齐 Portal 域回归基线。
+  - `Portal Stats` 新增 `usage-trend` 接口，并在 Dashboard 面板补上趋势图和 CSV 导出能力。
+- 当前判断：`P4` 已完成并进入维护态，后续仅保留常规缺陷修复与跨阶段联调配合。

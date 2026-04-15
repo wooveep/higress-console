@@ -84,6 +84,79 @@ func TestConfigMapToAIRouteReadsLegacyDataField(t *testing.T) {
 	require.Equal(t, "PRE", route["pathPredicate"].(map[string]any)["matchType"])
 }
 
+func TestBuildAIRouteIngressPayloadMapsFrontendContract(t *testing.T) {
+	data := map[string]any{
+		"domains":      []any{"api.example.com"},
+		"ingressClass": "aigateway",
+		"pathPredicate": map[string]any{
+			"matchType":     "PRE",
+			"matchValue":    "/v1/chat/completions",
+			"caseSensitive": true,
+		},
+		"headerPredicates": []any{
+			map[string]any{"key": "x-tenant", "matchType": "EQUAL", "matchValue": "team-a"},
+		},
+		"urlParamPredicates": []any{
+			map[string]any{"key": "model", "matchType": "PRE", "matchValue": "gpt-4"},
+		},
+		"modelPredicates": []any{
+			map[string]any{"matchType": "PRE", "matchValue": "gpt-4"},
+		},
+		"methods": []any{"GET", "POST"},
+		"authConfig": map[string]any{
+			"enabled":          true,
+			"allowedConsumers": []any{"consumer-a"},
+		},
+	}
+	services := []map[string]any{
+		{"name": "llm-openai.internal.dns", "port": 443, "weight": 100},
+	}
+
+	publicPayload := buildAIRouteIngressPayload("chat-demo", aiRouteIngressName("chat-demo"), data, services, false)
+	publicAnnotations := routeAnnotations(publicPayload)
+
+	require.Equal(t, []string{"api.example.com"}, publicPayload["domains"])
+	require.Equal(t, "/v1/chat/completions", mapValue(publicPayload["path"])["matchValue"])
+	require.Len(t, toMapSlice(publicPayload["headers"]), 2)
+	require.Equal(t, "team-a", publicAnnotations["higress.io/exact-match-header-x-tenant"])
+	require.Equal(t, "gpt-4", publicAnnotations["higress.io/prefix-match-header-x-higress-llm-model"])
+	require.Equal(t, "gpt-4", publicAnnotations["higress.io/prefix-match-query-model"])
+	require.Equal(t, "GET POST", publicAnnotations[higressAnnotationMatchMethod])
+
+	internalPayload := buildAIRouteIngressPayload("chat-demo", aiRouteInternalIngressName("chat-demo"), data, services, true)
+	require.Equal(t, []string{}, internalPayload["domains"])
+	require.Equal(t, higressAIRouteInternalPathPrefix+"chat-demo", mapValue(internalPayload["path"])["matchValue"])
+}
+
+func TestBuildAIRouteFallbackIngressPayloadAddsFallbackHeader(t *testing.T) {
+	data := map[string]any{
+		"pathPredicate": map[string]any{
+			"matchType":  "PRE",
+			"matchValue": "/v1/chat/completions",
+		},
+		"headerPredicates": []any{
+			map[string]any{"key": "x-tenant", "matchType": "EQUAL", "matchValue": "team-a"},
+		},
+	}
+	services := []map[string]any{
+		{"name": "llm-openai.internal.dns", "port": 443, "weight": 100},
+	}
+
+	payload := buildAIRouteFallbackIngressPayload(
+		"chat-demo",
+		aiRouteFallbackIngressName("chat-demo"),
+		aiRouteIngressName("chat-demo"),
+		data,
+		services,
+		false,
+	)
+	annotations := routeAnnotations(payload)
+
+	require.Equal(t, "/v1/chat/completions", mapValue(payload["path"])["matchValue"])
+	require.Equal(t, "team-a", annotations["higress.io/exact-match-header-x-tenant"])
+	require.Equal(t, aiRouteIngressName("chat-demo"), annotations["higress.io/exact-match-header-x-higress-fallback-from"])
+}
+
 func TestWasmPluginToProvidersExposesTokensProtocolAndModels(t *testing.T) {
 	item := map[string]any{
 		"spec": map[string]any{
@@ -112,6 +185,42 @@ func TestWasmPluginToProvidersExposesTokensProtocolAndModels(t *testing.T) {
 	require.Equal(t, "openai/v1", providers[0]["protocol"])
 	require.Equal(t, []string{"token-a", "token-b"}, providers[0]["tokens"])
 	require.NotEmpty(t, providers[0]["models"])
+}
+
+func TestProviderPayloadRoundTripPreservesFailoverAndTokens(t *testing.T) {
+	resource := map[string]any{
+		"type":     "openai",
+		"protocol": "openai/v1",
+		"tokens":   []any{"token-a"},
+		"rawConfigs": map[string]any{
+			"openaiCustomUrl": "https://api.openai.com/v1",
+			"note":            "keep-me",
+		},
+		"tokenFailoverConfig": map[string]any{
+			"strategy": "random",
+		},
+	}
+
+	item := map[string]any{
+		"spec": map[string]any{
+			"defaultConfig": map[string]any{
+				"providers": []any{
+					providerPayloadFromResource("openai-demo", resource),
+				},
+			},
+		},
+	}
+
+	providers := wasmPluginToProviders(item)
+	require.Len(t, providers, 1)
+	require.Equal(t, "openai-demo", providers[0]["name"])
+	require.Equal(t, "openai/v1", providers[0]["protocol"])
+	require.Equal(t, []string{"token-a"}, providers[0]["tokens"])
+	require.Equal(t, "random", mapValue(providers[0]["tokenFailoverConfig"])["strategy"])
+	rawConfigs := mapValue(providers[0]["rawConfigs"])
+	require.Equal(t, "openai-demo", rawConfigs["id"])
+	require.Equal(t, "https://api.openai.com/v1", rawConfigs["openaiCustomUrl"])
+	require.Equal(t, "keep-me", rawConfigs["note"])
 }
 
 func TestRouteAnnotationsRenderMCPMetadataAndRuntimeFields(t *testing.T) {
@@ -210,7 +319,36 @@ func TestDeriveProviderRuntimePlanAddsVertexExtraRegistry(t *testing.T) {
 	require.Equal(t, "llm-vertex-demo.internal.dns", plan.primaryServiceRef["name"])
 	require.Len(t, plan.extraRegistries, 1)
 	require.Equal(t, "vertex-auth.internal", plan.extraRegistries[0]["name"])
+	require.Equal(t, []string{"vertex-auth.internal"}, plan.deletableExtraRegistryNames)
+}
+
+func TestDeriveProviderRuntimePlanUsesGlobalVertexEndpointForExpressMode(t *testing.T) {
+	plan, err := deriveProviderRuntimePlan("vertex-express", map[string]any{
+		"type":   "vertex",
+		"tokens": []any{"api-key"},
+		"rawConfigs": map[string]any{
+			"vertexRegion": "asia-east1",
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "aiplatform.googleapis.com", plan.primaryRegistry["domain"])
+	require.Equal(t, "llm-vertex-express.internal.dns", plan.primaryServiceRef["name"])
+	require.Empty(t, plan.extraRegistries)
 	require.Empty(t, plan.deletableExtraRegistryNames)
+}
+
+func TestDeriveProviderRuntimePlanUsesProviderDomainOverride(t *testing.T) {
+	plan, err := deriveProviderRuntimePlan("claude-demo", map[string]any{
+		"type": "claude",
+		"rawConfigs": map[string]any{
+			"providerDomain": "proxy.example.com",
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "proxy.example.com", plan.primaryRegistry["domain"])
+	require.Equal(t, "llm-claude-demo.internal.dns", plan.primaryServiceRef["name"])
 }
 
 func TestBuildMCPDirectRouteRewriteMatchesLegacySemantics(t *testing.T) {
@@ -396,4 +534,41 @@ func TestUpsertNamedMapItemPreservesExistingUnknownFields(t *testing.T) {
 	require.Equal(t, "new", config["dsn"])
 	require.Equal(t, "postgresql", config["dbType"])
 	require.Empty(t, config["extra"])
+}
+
+func TestServiceSourceRegistryRoundTripPreservesCoreFieldsAndProperties(t *testing.T) {
+	registry := map[string]any{
+		"name":          "bravesearch",
+		"type":          "dns",
+		"domain":        "api.search.brave.com",
+		"port":          443,
+		"protocol":      "https",
+		"proxyName":     "default-http-proxy",
+		"sni":           "api.search.brave.com",
+		"nacosGroups":   "DEFAULT_GROUP",
+		"consulTag":     "blue",
+		"refreshPeriod": "10s",
+	}
+
+	resource := serviceSourceFromRegistry(registry)
+	require.Equal(t, "bravesearch", resource["name"])
+	require.Equal(t, "dns", resource["type"])
+	require.Equal(t, "api.search.brave.com", resource["domain"])
+	require.Equal(t, 443, resource["port"])
+	require.Equal(t, "https", resource["protocol"])
+	require.Equal(t, "default-http-proxy", resource["proxyName"])
+	require.Equal(t, "api.search.brave.com", resource["sni"])
+	require.Equal(t, "DEFAULT_GROUP", mapValue(resource["properties"])["nacosGroups"])
+	require.Equal(t, "blue", mapValue(resource["properties"])["consulTag"])
+
+	roundTrip := serviceSourceToRegistry("bravesearch", resource)
+	require.Equal(t, "bravesearch", roundTrip["name"])
+	require.Equal(t, "dns", roundTrip["type"])
+	require.Equal(t, "api.search.brave.com", roundTrip["domain"])
+	require.Equal(t, 443, roundTrip["port"])
+	require.Equal(t, "https", roundTrip["protocol"])
+	require.Equal(t, "default-http-proxy", roundTrip["proxyName"])
+	require.Equal(t, "api.search.brave.com", roundTrip["sni"])
+	require.Equal(t, "DEFAULT_GROUP", roundTrip["nacosGroups"])
+	require.Equal(t, "blue", roundTrip["consulTag"])
 }

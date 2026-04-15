@@ -52,6 +52,12 @@ export interface AiSensitiveBlockAudit {
   blockedBy?: string;
   requestPhase?: string;
   blockedReasonJson?: string;
+  guardCode?: number;
+  blockedDetails?: Array<{
+    type?: string;
+    level?: string;
+    suggestion?: string;
+  }>;
   matchType?: AiSensitiveMatchType;
   matchedRule?: string;
   matchedExcerpt?: string;

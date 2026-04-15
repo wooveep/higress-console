@@ -73,6 +73,61 @@ func TestEnsureSchemaAndMigrateLegacyDataAgainstSharedPortalSchema(t *testing.T)
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`)
 	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS ai_sensitive_detect_rule (
+			id BIGINT PRIMARY KEY AUTO_INCREMENT,
+			pattern VARCHAR(1024) NOT NULL,
+			match_type VARCHAR(32) NOT NULL DEFAULT 'contains',
+			signature_hash VARCHAR(64) NOT NULL DEFAULT '',
+			description TEXT NULL,
+			priority INT NOT NULL DEFAULT 0,
+			is_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS ai_sensitive_replace_rule (
+			id BIGINT PRIMARY KEY AUTO_INCREMENT,
+			pattern VARCHAR(1024) NOT NULL,
+			replace_type VARCHAR(32) NOT NULL DEFAULT 'replace',
+			replace_value TEXT NULL,
+			restore TINYINT(1) NOT NULL DEFAULT 0,
+			signature_hash VARCHAR(64) NOT NULL DEFAULT '',
+			description TEXT NULL,
+			priority INT NOT NULL DEFAULT 0,
+			is_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS ai_sensitive_system_config (
+			id BIGINT PRIMARY KEY,
+			system_deny_enabled TINYINT(1) NOT NULL DEFAULT 0,
+			dictionary_text LONGTEXT NULL,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_by VARCHAR(255) NULL
+		)`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS ai_sensitive_block_audit (
+			id BIGINT PRIMARY KEY AUTO_INCREMENT,
+			request_id VARCHAR(128) NULL,
+			route_name VARCHAR(255) NULL,
+			consumer_name VARCHAR(255) NULL,
+			display_name VARCHAR(255) NULL,
+			blocked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			blocked_by VARCHAR(64) NOT NULL DEFAULT 'sensitive_word',
+			request_phase VARCHAR(32) NULL,
+			blocked_reason_json TEXT NULL,
+			match_type VARCHAR(32) NULL,
+			matched_rule VARCHAR(1024) NULL,
+			matched_excerpt TEXT NULL,
+			provider_id BIGINT NOT NULL DEFAULT 0,
+			cost_usd DECIMAL(18,6) NOT NULL DEFAULT 0.000000
+		)`)
+	require.NoError(t, err)
 
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO portal_departments (department_id, name, parent_department_id, admin_consumer_name, deleted)
@@ -91,6 +146,26 @@ func TestEnsureSchemaAndMigrateLegacyDataAgainstSharedPortalSchema(t *testing.T)
 		INSERT INTO portal_ai_quota_user_policy (
 			route_name, consumer_name, limit_total, limit_5h, limit_daily, daily_reset_mode, daily_reset_time, limit_weekly, limit_monthly, cost_reset_at
 		) VALUES ('route-a', 'demo', 1000, 200, 300, 'fixed', '08:00', 400, 500, NULL)`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO ai_sensitive_detect_rule (
+			id, pattern, match_type, signature_hash, description, priority, is_enabled
+		) VALUES (7, '南京', 'contains', 'detect-7', 'legacy detect', 2, 1)`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO ai_sensitive_replace_rule (
+			id, pattern, replace_type, replace_value, restore, signature_hash, description, priority, is_enabled
+		) VALUES (8, '%{MOBILE}', 'replace', '***', 0, 'replace-8', 'legacy replace', 3, 1)`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO ai_sensitive_system_config (
+			id, system_deny_enabled, dictionary_text, updated_by
+		) VALUES (1, 1, 'alpha\nbeta', 'tester')`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO ai_sensitive_block_audit (
+			id, request_id, route_name, consumer_name, display_name, blocked_by, request_phase, blocked_reason_json, match_type, matched_rule, matched_excerpt, provider_id, cost_usd
+		) VALUES (9, 'req-9', 'route-a', 'demo', 'Demo', 'ai-security-guard', 'request', '{}', 'contains', 'rule-a', '南京', 12, 0.120000)`)
 	require.NoError(t, err)
 
 	client := NewFromDB(Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db)
@@ -139,6 +214,42 @@ func TestEnsureSchemaAndMigrateLegacyDataAgainstSharedPortalSchema(t *testing.T)
 		WHERE consumer_name = 'demo'`).Scan(&quotaTotal)
 	require.NoError(t, err)
 	require.EqualValues(t, 1000, quotaTotal)
+
+	var detectCount int
+	err = db.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM portal_ai_sensitive_detect_rule
+		WHERE id = 7 AND pattern = '南京' AND enabled = 1`).Scan(&detectCount)
+	require.NoError(t, err)
+	require.Equal(t, 1, detectCount)
+
+	var replaceCount int
+	err = db.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM portal_ai_sensitive_replace_rule
+		WHERE id = 8 AND pattern = '%{MOBILE}' AND enabled = 1`).Scan(&replaceCount)
+	require.NoError(t, err)
+	require.Equal(t, 1, replaceCount)
+
+	var (
+		systemDeny int
+		dictText   string
+	)
+	err = db.QueryRowContext(ctx, `
+		SELECT system_deny_enabled, dictionary_text
+		FROM portal_ai_sensitive_system_config
+		WHERE config_key = 'default'`).Scan(&systemDeny, &dictText)
+	require.NoError(t, err)
+	require.Equal(t, 1, systemDeny)
+	require.Equal(t, "alpha\nbeta", dictText)
+
+	var auditCount int
+	err = db.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM portal_ai_sensitive_block_audit
+		WHERE id = 9 AND request_id = 'req-9'`).Scan(&auditCount)
+	require.NoError(t, err)
+	require.Equal(t, 1, auditCount)
 }
 
 func openMySQLForTest(t *testing.T, ctx context.Context, databaseName string) *sql.DB {

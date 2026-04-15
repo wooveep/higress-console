@@ -112,7 +112,7 @@
 | Wasm Plugins | `PUT` | `/v1/wasm-plugins/:name` | `plugin.ts` | 已对齐 |
 | Wasm Plugins | `DELETE` | `/v1/wasm-plugins/:name` | `plugin.ts` | 已对齐 |
 | Wasm Plugins | `GET` | `/v1/wasm-plugins/:name/config` | `plugin.ts` | 已对齐 |
-| Wasm Plugins | `GET` | `/v1/wasm-plugins/:name/readme` | 前端当前未接 | 后端已提供 |
+| Wasm Plugins | `GET` | `/v1/wasm-plugins/:name/readme` | 前端当前未接 | 后端已提供，builtin metadata 优先读 `backend/resource/public/plugin` 快照 |
 
 ### 3.3 Plugin Instance 配置
 
@@ -206,7 +206,7 @@
 | AI Sensitive | `POST` | `/v1/ai/sensitive-words/replace-rules` | `ai-sensitive.ts` | 已对齐 |
 | AI Sensitive | `PUT` | `/v1/ai/sensitive-words/replace-rules/:id` | `ai-sensitive.ts` | 已对齐 |
 | AI Sensitive | `DELETE` | `/v1/ai/sensitive-words/replace-rules/:id` | `ai-sensitive.ts` | 已对齐 |
-| AI Sensitive | `GET` | `/v1/ai/sensitive-words/audits` | `ai-sensitive.ts` | 已对齐 |
+| AI Sensitive | `GET` | `/v1/ai/sensitive-words/audits` | `ai-sensitive.ts` | 已对齐；当前响应已新增 `guardCode`、`blockedDetails[]`，并保留 `blockedReasonJson` |
 | AI Sensitive | `GET` | `/v1/ai/sensitive-words/system-config` | `ai-sensitive.ts` | 已对齐 |
 | AI Sensitive | `PUT` | `/v1/ai/sensitive-words/system-config` | `ai-sensitive.ts` | 已对齐 |
 
@@ -248,6 +248,12 @@
    legacy `McpServerController#addOrUpdateMcpInstance` 使用 `PUT /v1/mcpServer`；当前 Go 使用 `PUT /v1/mcpServer/:name`，前端已改为跟随当前契约。
 3. `列表接口的分页包装需要显式消费`
    `/v1/ai/routes`、`/v1/mcpServer`、`/v1/mcpServer/consumers` 当前都返回分页包装对象，页面层应显式读取 `.data`，而不是把响应直接当数组。
+4. `AI Provider 2.2.1 rawConfigs 已补齐`
+   `/v1/ai/providers` 现支持 `providerDomain`、`providerBasePath`、`promoteThinkingOnEmpty`、`hiclawMode`、`bedrockPromptCachePointPositions`、`promptCacheRetention`，其中 `vertex` 支持 `tokens[]` 驱动的 Express Mode，不再强制 `vertexAuthKey`。
+5. `Wasm builtin metadata 已切到新快照优先`
+   `/v1/wasm-plugins/:name/config` 与 `/readme` 现优先读取 `backend/resource/public/plugin`，`ai-statistics` 的 `value_length_limit` 默认值已更新为 `32000`，`ai-security-guard` README 也同步到结构化拦截结果说明。
+6. `AI Sensitive 审计返回结构化阻断结果`
+   `/v1/ai/sensitive-words/audits` 当前除原 `blockedReasonJson` 外，还会解析返回 `requestId`、`guardCode` 与 `blockedDetails[]`，前端可以直接展示首条风险详情。
 
 ### B. 本轮已补齐的前端接线
 

@@ -1,0 +1,1 @@
+import{d as r,a as p,o as c,q as u,B as i,w as _,i as l}from"./index-DEHBknFx.js";const k=r({__name:"StrategyLink",props:{path:{}},setup(o){const e=o,n=p();function s(){n.push(e.path)}return(m,t)=>{const a=i;return c(),u(a,{type:"link",size:"small",onClick:s},{default:_(()=>[...t[0]||(t[0]=[l(" 策略 ",-1)])]),_:1})}}});export{k as _};

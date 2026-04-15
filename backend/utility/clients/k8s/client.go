@@ -103,11 +103,45 @@ func NewMemoryClient(configs ...Config) *MemoryClient {
 		namespace:    firstNonEmpty(cfg.Namespace, defaultK8sNamespace),
 		ingressClass: firstNonEmpty(cfg.IngressClass, "aigateway"),
 	}
-	client.configMaps[consts.DefaultConfigMapName] = map[string]string{
+	client.configMaps[consts.DefaultHigressConfigMapName] = map[string]string{
 		"resourceVersion": "1",
-		"aigateway":       "enabled: true\n",
-		"mesh":            "defaultConfig: {}\n",
-		"meshNetworks":    "networks: {}\n",
+		consts.DefaultHigressConfigDataKey: `tracing:
+  enable: false
+  sampling: 100
+  timeout: 500
+gzip:
+  enable: true
+  minContentLength: 1024
+  contentType:
+    - text/html
+    - text/css
+    - text/plain
+    - text/xml
+    - application/json
+    - application/javascript
+    - application/xhtml+xml
+    - image/svg+xml
+  disableOnEtagHeader: true
+  memoryLevel: 5
+  windowBits: 12
+  chunkSize: 4096
+  compressionLevel: BEST_COMPRESSION
+  compressionStrategy: DEFAULT_STRATEGY
+downstream:
+  idleTimeout: 180
+  maxRequestHeadersKb: 60
+  connectionBufferLimits: 32768
+  http2:
+    maxConcurrentStreams: 100
+    initialStreamWindowSize: 65535
+    initialConnectionWindowSize: 1048576
+  routeTimeout: 0
+upstream:
+  idleTimeout: 10
+  connectionBufferLimits: 10485760
+addXRealIpHeader: false
+disableXEnvoyHeaders: false
+`,
 	}
 	return client
 }

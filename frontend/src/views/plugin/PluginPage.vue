@@ -101,6 +101,19 @@ function isBuiltInPlugin(name: string) {
   return BUILTIN_ROUTE_PLUGIN_LIST.some((item) => item.key === name);
 }
 
+function getBuiltInPluginReadme(record: any) {
+  const detailByName: Record<string, string> = {
+    rewrite: '内置路由能力，用于修改请求的 Host 与 Path。请通过“配置”直接编辑路由上的重写规则。',
+    headerModify: '内置路由能力，用于修改请求头和响应头。AI 路由场景下会直接写入路由的 Header 配置，不依赖 wasm 插件资源。',
+    cors: '内置路由能力，用于配置跨域访问规则。请通过“配置”直接编辑路由上的跨域策略。',
+    retries: '内置路由能力，用于配置后端重试策略。请通过“配置”直接编辑路由上的重试规则。',
+  };
+
+  return detailByName[record.name]
+    || record.description
+    || '内置路由能力，请通过“配置”直接编辑该策略。';
+}
+
 function getBuiltInEnabled(name: string) {
   if (name === 'rewrite') {
     return Boolean(targetDetail.value?.rewrite?.enabled);
@@ -209,6 +222,11 @@ async function loadPluginDetail(record: any | null) {
 
   detailLoading.value = true;
   try {
+    if (record.builtIn || isBuiltInPlugin(record.name)) {
+      selectedPluginReadme.value = getBuiltInPluginReadme(record);
+      return;
+    }
+
     const [configData, readme] = await Promise.all([
       getWasmPluginsConfig(record.name).catch(() => null),
       getWasmPluginReadme(record.name).catch(() => ''),

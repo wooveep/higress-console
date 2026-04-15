@@ -3,7 +3,11 @@ package platform
 import (
 	"context"
 	"database/sql"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
@@ -147,41 +151,347 @@ func TestServiceSetAndGetAIGatewayConfig(t *testing.T) {
 
 	current, err := svc.GetAIGatewayConfig(context.Background())
 	require.NoError(t, err)
-	require.Contains(t, current, "ConfigMap")
-	require.Contains(t, current, "aigateway:")
+	require.Contains(t, current, "gzip:")
+	require.Contains(t, current, "downstream:")
+	require.NotContains(t, current, "ConfigMap")
 
 	updated, err := svc.SetAIGatewayConfig(context.Background(), `
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: aigateway-console
-  resourceVersion: "2"
-data:
-  aigateway: |
-    enabled: true
-  mesh: |
-    defaultConfig: {}
-  meshNetworks: |
-    networks: {}
+tracing:
+  enable: true
+  sampling: 100
+  timeout: 500
+  zipkin:
+    service: zipkin.default.svc.cluster.local
+    port: "9411"
+gzip:
+  enable: true
+  minContentLength: 1024
+  contentType:
+    - text/html
+    - application/json
+  disableOnEtagHeader: true
+  memoryLevel: 5
+  windowBits: 12
+  chunkSize: 4096
+  compressionLevel: BEST_COMPRESSION
+  compressionStrategy: DEFAULT_STRATEGY
+downstream:
+  idleTimeout: 180
+  maxRequestHeadersKb: 60
+  connectionBufferLimits: 32768
+  http2:
+    maxConcurrentStreams: 100
+    initialStreamWindowSize: 65535
+    initialConnectionWindowSize: 1048576
+  routeTimeout: 0
+upstream:
+  idleTimeout: 10
+  connectionBufferLimits: 10485760
+addXRealIpHeader: false
+disableXEnvoyHeaders: false
 `)
 	require.NoError(t, err)
-	require.Contains(t, updated, "resourceVersion: \"2\"")
+	require.Contains(t, updated, "zipkin:")
+	require.NotContains(t, updated, "ConfigMap")
 }
 
-func TestServiceMigratesLegacyConfigKey(t *testing.T) {
+func TestServiceGetAIGatewayConfigUsesDefaultWhenKeyMissing(t *testing.T) {
 	client := k8sclient.NewMemoryClient()
+	require.NoError(t, client.UpsertConfigMap(context.Background(), consts.DefaultHigressConfigMapName, map[string]string{
+		"mesh":         "defaultConfig: {}\n",
+		"meshNetworks": "networks: {}\n",
+		"mcpServer":    "enable: true\n",
+	}))
 	svc := New(client, grafanaclient.New(grafanaclient.Config{}), portaldbclient.New(portaldbclient.Config{}))
 
 	current, err := svc.GetAIGatewayConfig(context.Background())
 
 	require.NoError(t, err)
-	require.Contains(t, current, "aigateway:")
-	require.NotContains(t, current, "higress:")
+	require.Contains(t, current, "gzip:")
+	require.Contains(t, current, "upstream:")
+	require.Contains(t, current, "connectionBufferLimits: 10485760")
+}
 
-	stored, err := client.ReadConfigMap(context.Background(), consts.DefaultConfigMapName)
+func TestServiceSetAIGatewayConfigPreservesOtherConfigMapKeys(t *testing.T) {
+	client := k8sclient.NewMemoryClient()
+	require.NoError(t, client.UpsertConfigMap(context.Background(), consts.DefaultHigressConfigMapName, map[string]string{
+		consts.DefaultHigressConfigDataKey: "gzip:\n  enable: true\n",
+		"mesh":                             "defaultConfig: {}\n",
+		"meshNetworks":                     "networks: {}\n",
+		"mcpServer":                        "enable: true\n",
+	}))
+	svc := New(client, grafanaclient.New(grafanaclient.Config{}), portaldbclient.New(portaldbclient.Config{}))
+
+	updated, err := svc.SetAIGatewayConfig(context.Background(), `
+tracing:
+  enable: false
+  sampling: 100
+  timeout: 500
+gzip:
+  enable: true
+  minContentLength: 1024
+  contentType:
+    - text/html
+    - application/json
+  disableOnEtagHeader: true
+  memoryLevel: 5
+  windowBits: 12
+  chunkSize: 4096
+  compressionLevel: BEST_COMPRESSION
+  compressionStrategy: DEFAULT_STRATEGY
+downstream:
+  idleTimeout: 180
+  maxRequestHeadersKb: 60
+  connectionBufferLimits: 32768
+  http2:
+    maxConcurrentStreams: 100
+    initialStreamWindowSize: 65535
+    initialConnectionWindowSize: 1048576
+  routeTimeout: 0
+upstream:
+  idleTimeout: 10
+  connectionBufferLimits: 10485760
+mcpServer:
+  enable: true
+  sse_path_suffix: /sse
+`)
 	require.NoError(t, err)
-	require.Equal(t, "enabled: true\n", stored["aigateway"])
-	require.Empty(t, stored["higress"])
+	require.Contains(t, updated, "mcpServer:")
+
+	stored, err := client.ReadConfigMap(context.Background(), consts.DefaultHigressConfigMapName)
+	require.NoError(t, err)
+	require.Equal(t, "defaultConfig: {}\n", stored["mesh"])
+	require.Equal(t, "networks: {}\n", stored["meshNetworks"])
+	require.Equal(t, "enable: true\n", stored["mcpServer"])
+	require.Contains(t, stored[consts.DefaultHigressConfigDataKey], "mcpServer:")
+}
+
+func TestServiceSetAIGatewayConfigRejectsInvalidConfig(t *testing.T) {
+	svc := New(k8sclient.NewMemoryClient(), grafanaclient.New(grafanaclient.Config{}), portaldbclient.New(portaldbclient.Config{}))
+
+	_, err := svc.SetAIGatewayConfig(context.Background(), `
+tracing:
+  enable: true
+  sampling: 101
+  timeout: 500
+  skywalking:
+    service: skywalking.default.svc.cluster.local
+    port: "11800"
+gzip:
+  enable: true
+  minContentLength: 1024
+  contentType:
+    - text/html
+  disableOnEtagHeader: true
+  memoryLevel: 5
+  windowBits: 12
+  chunkSize: 4096
+  compressionLevel: BEST_COMPRESSION
+  compressionStrategy: DEFAULT_STRATEGY
+`)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tracing.sampling")
+}
+
+func TestServiceSetAIGatewayConfigRejectsInvalidHTTP2Window(t *testing.T) {
+	svc := New(k8sclient.NewMemoryClient(), grafanaclient.New(grafanaclient.Config{}), portaldbclient.New(portaldbclient.Config{}))
+
+	_, err := svc.SetAIGatewayConfig(context.Background(), `
+downstream:
+  http2:
+    initialConnectionWindowSize: 1
+`)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "downstream.http2.initialConnectionWindowSize")
+}
+
+func TestNativeDashboardBuildsRows(t *testing.T) {
+	server := newNativeDashboardPrometheusServer()
+	defer server.Close()
+	t.Setenv("AIGATEWAY_CONSOLE_PROMETHEUS_BASE_URL", server.URL)
+
+	client := k8sclient.NewMemoryClient()
+	_, err := client.UpsertResource(context.Background(), "routes", "default", map[string]any{})
+	require.NoError(t, err)
+	_, err = client.UpsertResource(context.Background(), "domains", "default", map[string]any{})
+	require.NoError(t, err)
+	_, err = client.UpsertResource(context.Background(), "wasm-plugins", "default", map[string]any{})
+	require.NoError(t, err)
+
+	svc := New(
+		client,
+		grafanaclient.New(grafanaclient.Config{Enabled: true, BaseURL: "http://grafana.local/grafana"}),
+		portaldbclient.New(portaldbclient.Config{}),
+	)
+
+	data, err := svc.NativeDashboard(context.Background(), "MAIN", time.Now().Add(-24*time.Hour).UnixMilli(), time.Now().UnixMilli(), "", "")
+	require.NoError(t, err)
+	require.Len(t, data.Rows, 5)
+	require.Equal(t, "Platform", data.Rows[0].Title)
+	require.Equal(t, "Gateway Request", data.Rows[1].Title)
+	require.Equal(t, "Upstream Health", data.Rows[2].Title)
+	require.Equal(t, "Exceptions", data.Rows[3].Title)
+	require.Equal(t, "Resource Scale", data.Rows[4].Title)
+	require.Equal(t, "Gateway Pod Count", data.Rows[0].Panels[3].Title)
+	require.Equal(t, "Downstream Request Count", data.Rows[1].Panels[0].Title)
+	require.Equal(t, "Routes", data.Rows[4].Panels[0].Title)
+}
+
+func TestNativeDashboardBuildsAIRows(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	expectNativeDashboardAIQueries(mock, 10, 8, 345, 2500000)
+
+	server := newNativeDashboardPrometheusServer()
+	defer server.Close()
+	t.Setenv("AIGATEWAY_CONSOLE_PROMETHEUS_BASE_URL", server.URL)
+
+	svc := New(
+		k8sclient.NewMemoryClient(),
+		grafanaclient.New(grafanaclient.Config{Enabled: true, BaseURL: "http://grafana.local/grafana"}),
+		portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql"}, db),
+	)
+
+	from := time.Now().Add(-time.Hour).UnixMilli()
+	to := time.Now().UnixMilli()
+	data, err := svc.NativeDashboard(context.Background(), "AI", from, to, "", "")
+	require.NoError(t, err)
+	require.Len(t, data.Rows, 4)
+	require.Equal(t, "AI Overview", data.Rows[0].Title)
+	require.Equal(t, "Token Runtime", data.Rows[1].Title)
+	require.Equal(t, "AI Request", data.Rows[2].Title)
+	require.Equal(t, "AI Exceptions", data.Rows[3].Title)
+	require.Equal(t, "Total Tokens", data.Rows[0].Panels[2].Title)
+	require.NotNil(t, data.Rows[0].Panels[2].Stat)
+	require.NotNil(t, data.Rows[0].Panels[2].Stat.Value)
+	require.Equal(t, 345.0, *data.Rows[0].Panels[2].Stat.Value)
+	require.Equal(t, "Failed Requests", data.Rows[3].Panels[0].Title)
+	require.Equal(t, "Slow Requests", data.Rows[3].Panels[1].Title)
+	require.Equal(t, "Error Code TopN", data.Rows[3].Panels[2].Title)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestNativeDashboardRequestCountFallsBackToPrometheus(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	expectNativeDashboardAIQueries(mock, 0, 0, 0, 0)
+
+	server := newNativeDashboardPrometheusServer()
+	defer server.Close()
+	t.Setenv("AIGATEWAY_CONSOLE_PROMETHEUS_BASE_URL", server.URL)
+
+	svc := New(
+		k8sclient.NewMemoryClient(),
+		grafanaclient.New(grafanaclient.Config{Enabled: true, BaseURL: "http://grafana.local/grafana"}),
+		portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql"}, db),
+	)
+
+	from := time.Now().Add(-time.Hour).UnixMilli()
+	to := time.Now().UnixMilli()
+	data, err := svc.NativeDashboard(context.Background(), "AI", from, to, "", "")
+	require.NoError(t, err)
+	require.NotNil(t, data.Rows[0].Panels[0].Stat)
+	require.NotNil(t, data.Rows[0].Panels[0].Stat.Value)
+	require.Equal(t, 42.0, *data.Rows[0].Panels[0].Stat.Value)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func expectNativeDashboardAIQueries(mock sqlmock.Sqlmock, requestCount, successCount, totalTokens, costMicroYuan int64) {
+	mock.ExpectQuery("SELECT\\s+COALESCE\\(SUM\\(CASE WHEN request_count > 0 THEN request_count ELSE 1 END\\), 0\\) AS request_count").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"request_count", "success_count", "total_tokens", "cost_micro_yuan",
+		}).AddRow(requestCount, successCount, totalTokens, costMicroYuan))
+	mock.ExpectQuery("COALESCE\\(NULLIF\\(TRIM\\(request_path\\), ''\\), NULLIF\\(TRIM\\(route_name\\), ''\\), '-'\\) AS dimension_value").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"bucket_label", "dimension_value", "weighted_request",
+		}).AddRow("2026-04-15 10:00:00", "/v1/chat/completions", 12))
+	mock.ExpectQuery("WHERE occurred_at >= \\? AND occurred_at < \\? AND \\(http_status < 200 OR http_status >= 300 OR request_status <> 'success'\\)").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), 10).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"occurred_at", "request_id", "trace_id", "consumer_name", "request_path", "route_name", "model_id",
+			"request_status", "http_status", "error_code", "error_message", "total_tokens", "cost_micro_yuan", "service_duration_ms",
+		}).AddRow(time.Now(), "req-failed", "trace-failed", "alice", "/v1/chat/completions", "chat-route", "qwen", "failed", 500, "upstream_error", "boom", 123, 4500, 0))
+	mock.ExpectQuery("TIMESTAMPDIFF\\(MICROSECOND, started_at, finished_at\\) > 5000000").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), 10).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"occurred_at", "request_id", "trace_id", "consumer_name", "request_path", "route_name", "model_id",
+			"request_status", "http_status", "error_code", "error_message", "total_tokens", "cost_micro_yuan", "service_duration_ms",
+		}).AddRow(time.Now(), "req-slow", "trace-slow", "bob", "/v1/chat/completions", "chat-route", "qwen", "success", 200, "", "", 456, 7800, 6200))
+	mock.ExpectQuery("SELECT COALESCE\\(NULLIF\\(TRIM\\(error_code\\), ''\\), 'unknown'\\) AS error_code").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), 10).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"error_code", "request_count",
+		}).AddRow("upstream_error", 3))
+}
+
+func newNativeDashboardPrometheusServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+		if strings.Contains(r.URL.Path, "/api/v1/query_range") {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case strings.Contains(query, "by (cluster_name)"):
+				_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"cluster_name":"outbound_443__svc-a.default.svc.cluster.local"},"values":[[1713168000,"2"],[1713168060,"3"]]},{"metric":{"cluster_name":"outbound_443__svc-b.default.svc.cluster.local"},"values":[[1713168000,"1"],[1713168060,"1.5"]]}]}}`))
+			default:
+				_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[[1713168000,"1"],[1713168060,"2"]]}]}}`))
+			}
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.TrimSpace(query) == "envoy_server_live":
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{"app":"aigateway-gateway"},"value":[1713168000,"1"]}]}}`))
+		case strings.Contains(query, "container_cpu_usage_seconds_total"):
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1713168000,"23.5"]}]}}`))
+		case strings.Contains(query, "container_memory_working_set_bytes"):
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1713168000,"1048576"]}]}}`))
+		case strings.Contains(query, "envoy_cluster_upstream_cx_active"):
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1713168000,"7"]}]}}`))
+		case strings.Contains(query, "route_upstream_model_consumer_metric_total_token"):
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1713168000,"987"]}]}}`))
+		case strings.Contains(query, "route_upstream_model_consumer_metric_request_count"):
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1713168000,"42"]}]}}`))
+		case strings.Contains(query, `response_code_class="2xx"`):
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1713168000,"0.75"]}]}}`))
+		default:
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1713168000,"1"]}]}}`))
+		}
+	}))
+}
+
+func TestResolveNativeDashboardUsageBucketExprMariaDBCompatible(t *testing.T) {
+	expr := resolveNativeDashboardUsageBucketExpr(
+		time.Now().Add(-2*time.Hour).UnixMilli(),
+		time.Now().UnixMilli(),
+	)
+
+	require.Contains(t, expr, "FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(occurred_at) / 300) * 300)")
+	require.NotContains(t, expr, "% 5 MINUTE")
+}
+
+func TestResolveNativeDashboardPrometheusRateRange(t *testing.T) {
+	now := time.Now()
+
+	shortRange := resolveNativeDashboardPrometheusRateRange(
+		now.Add(-5*time.Minute).UnixMilli(),
+		now.UnixMilli(),
+	)
+	longRange := resolveNativeDashboardPrometheusRateRange(
+		now.Add(-7*24*time.Hour).UnixMilli(),
+		now.UnixMilli(),
+	)
+
+	require.Equal(t, "300s", shortRange)
+	require.Equal(t, "14400s", longRange)
 }
 
 func TestBootstrapDefaultResourcesLockedDoesNotOverwriteExistingResources(t *testing.T) {

@@ -26,16 +26,47 @@ export interface PortalUsageEventRecord {
   modelId?: string;
   priceVersionId?: number;
   routeName?: string;
+  requestPath?: string;
   requestKind?: string;
   requestStatus?: string;
   usageStatus?: string;
   httpStatus?: number;
+  errorCode?: string;
+  errorMessage?: string;
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
   requestCount?: number;
   costMicroYuan?: number;
+  startedAt?: string;
+  finishedAt?: string;
+  serviceDurationMs?: number;
   occurredAt?: string;
+}
+
+export interface PortalUsageTrendPoint {
+  bucketLabel: string;
+  requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costMicroYuan: number;
+  activeConsumers: number;
+}
+
+export interface PortalStatsSelectOption {
+  label: string;
+  value: string;
+}
+
+export interface PortalUsageEventFilterOptions {
+  consumers: PortalStatsSelectOption[];
+  departments: PortalStatsSelectOption[];
+  apiKeys: PortalStatsSelectOption[];
+  models: PortalStatsSelectOption[];
+  routes: PortalStatsSelectOption[];
+  requestStatuses: PortalStatsSelectOption[];
+  usageStatuses: PortalStatsSelectOption[];
 }
 
 export interface PortalDepartmentBillRecord {
@@ -51,14 +82,14 @@ export interface PortalDepartmentBillRecord {
 export interface PortalUsageEventsQuery {
   from?: number;
   to?: number;
-  consumerName?: string;
-  departmentId?: string;
+  consumerNames?: string[];
+  departmentIds?: string[];
   includeChildren?: boolean;
-  apiKeyId?: string;
-  modelId?: string;
-  routeName?: string;
-  requestStatus?: string;
-  usageStatus?: string;
+  apiKeyIds?: string[];
+  modelIds?: string[];
+  routeNames?: string[];
+  requestStatuses?: string[];
+  usageStatuses?: string[];
   pageNum?: number;
   pageSize?: number;
 }
@@ -66,6 +97,17 @@ export interface PortalUsageEventsQuery {
 export interface PortalDepartmentBillsQuery {
   from?: number;
   to?: number;
+  departmentIds?: string[];
+  includeChildren?: boolean;
+}
+
+export interface PortalUsageTrendQuery {
+  from?: number;
+  to?: number;
+  bucket?: '5m' | 'hour' | 'day';
+  consumerName?: string;
   departmentId?: string;
   includeChildren?: boolean;
+  modelId?: string;
+  routeName?: string;
 }

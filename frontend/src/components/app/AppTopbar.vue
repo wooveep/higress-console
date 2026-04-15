@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { MenuFoldOutlined, MenuUnfoldOutlined, UserOutlined } from '@ant-design/icons-vue';
+import { DownOutlined, MenuFoldOutlined, MenuUnfoldOutlined, UserOutlined } from '@ant-design/icons-vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import LanguageSwitcher from '@/components/app/LanguageSwitcher.vue';
@@ -62,8 +62,16 @@ function jumpHome() {
 
     <div class="app-topbar__right">
       <LanguageSwitcher />
-      <a-dropdown :menu="{ items: dropdownItems, onClick: handleMenuClick }" trigger="click">
-        <button class="app-topbar__account" type="button">
+      <a-dropdown
+        :menu="{ items: dropdownItems, onClick: handleMenuClick }"
+        :trigger="['click']"
+        placement="bottomRight"
+      >
+        <button
+          class="app-topbar__account"
+          type="button"
+          :aria-label="t('user.changePassword.title')"
+        >
           <span class="app-topbar__avatar">
             <UserOutlined />
           </span>
@@ -71,6 +79,7 @@ function jumpHome() {
             <span class="app-topbar__account-name">{{ appStore.displayName }}</span>
             <span class="app-topbar__account-meta">{{ appStore.currentUser?.username || 'admin' }}</span>
           </span>
+          <DownOutlined class="app-topbar__account-arrow" />
         </button>
       </a-dropdown>
     </div>
@@ -124,6 +133,11 @@ function jumpHome() {
   border-radius: 999px;
   background: #fff;
   cursor: pointer;
+}
+
+.app-topbar__account-arrow {
+  color: var(--portal-text-muted);
+  font-size: 12px;
 }
 
 .app-topbar__avatar {

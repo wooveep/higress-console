@@ -110,6 +110,21 @@ async function saveSystemConfig() {
   showSuccess(t('misc.save'));
 }
 
+function formatBlockedDetail(record: any) {
+  const first = record?.blockedDetails?.[0];
+  if (!first) {
+    return '-';
+  }
+  return [first.type, first.level, first.suggestion].filter(Boolean).join(' / ');
+}
+
+function formatGuardCode(record: any) {
+  if (typeof record?.guardCode === 'number') {
+    return String(record.guardCode);
+  }
+  return '-';
+}
+
 onMounted(async () => {
   await load();
   await queryAudits();
@@ -184,12 +199,33 @@ onMounted(async () => {
               <a-input v-model:value="auditQuery.routeName" :placeholder="t('aiSensitive.placeholders.routeName')" />
               <a-button type="primary" @click="queryAudits">{{ t('misc.search') }}</a-button>
             </div>
-            <a-table :data-source="audits" row-key="id" size="small" :scroll="{ x: 980 }">
-              <a-table-column key="requestId" data-index="requestId" :title="t('aiSensitive.fields.requestId')" />
+            <a-table :data-source="audits" row-key="id" size="small" :scroll="{ x: 1420 }">
+              <a-table-column key="requestId" data-index="requestId" :title="t('aiSensitive.fields.requestId')" width="220" />
               <a-table-column key="consumerName" data-index="consumerName" :title="t('aiSensitive.fields.consumerName')" />
               <a-table-column key="routeName" data-index="routeName" :title="t('aiSensitive.fields.routeName')" />
+              <a-table-column key="guardCode" title="Guard Code" width="120">
+                <template #default="{ record }">
+                  <span>{{ formatGuardCode(record) }}</span>
+                </template>
+              </a-table-column>
               <a-table-column key="matchedRule" data-index="matchedRule" :title="t('aiSensitive.fields.matchedRule')" />
-              <a-table-column key="matchedExcerpt" data-index="matchedExcerpt" :title="t('aiSensitive.fields.matchedExcerpt')" />
+              <a-table-column key="matchedExcerpt" data-index="matchedExcerpt" :title="t('aiSensitive.fields.matchedExcerpt')" width="240" />
+              <a-table-column key="blockedDetails" title="Blocked Details" width="240">
+                <template #default="{ record }">
+                  <span>{{ formatBlockedDetail(record) }}</span>
+                </template>
+              </a-table-column>
+              <a-table-column key="blockedReasonJson" title="原始结果" width="120">
+                <template #default="{ record }">
+                  <a-popover v-if="record.blockedReasonJson" placement="left">
+                    <template #content>
+                      <pre class="ai-sensitive-page__audit-json">{{ record.blockedReasonJson }}</pre>
+                    </template>
+                    <a-button type="link" size="small">查看 JSON</a-button>
+                  </a-popover>
+                  <span v-else>-</span>
+                </template>
+              </a-table-column>
             </a-table>
           </a-tab-pane>
 
@@ -255,6 +291,15 @@ onMounted(async () => {
   justify-content: flex-end;
   gap: 12px;
   margin-top: 18px;
+}
+
+.ai-sensitive-page__audit-json {
+  max-width: 420px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 @media (max-width: 1023px) {

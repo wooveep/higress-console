@@ -463,6 +463,31 @@
 
 ### 阶段 / 任务
 
+- `P4 aftercare` 收口：`P4-AF-01 ~ P4-AF-03`
+
+### 改动摘要
+
+- `portal` 域新增统一持久化 helper，把 `Invite / Asset Grant / AI Quota / AI Sensitive` 的高频写读路径从散落 raw SQL 收到 `DAO / DO / Entity` 风格入口。
+- 新增 `Consumer / Org / Invite / Model Assets / Agent Catalog / AI Quota / AI Sensitive` 的 HTTP 契约测试与 fixture，形成 Portal 域回归基线。
+- `Portal Stats` 新增 `/v1/portal/stats/usage-trend`，Dashboard 面板补上趋势图、汇总卡片和 CSV 导出。
+- `TASK/README.md` 与 `P4-portal-domain.md` 已同步更新，`P4` 状态切为 `done`。
+
+### 关键文件 / 接口
+
+- `backend/internal/service/portal/{store.go,service.go,assets.go,ai_quota.go,ai_sensitive.go,stats.go,contracts_test.go}`
+- `backend/internal/controller/portal/http.go`
+- `backend/test/contracts/{consumers,org,portal-invite,model-assets,agent-catalog,ai-quota,ai-sensitive}`
+- `frontend/src/features/dashboard/{PortalStatsPanel.vue,portal-stats/PortalStatsTrendChart.vue}`
+- `frontend/src/{interfaces/services}/portal-stats.ts`
+- `/v1/portal/stats/usage-trend`
+
+### 验证结果
+
+- `cd aigateway-console/backend && go test ./internal/service/portal ./internal/service/platform` 通过。
+- `cd aigateway-console/frontend && npm run build` 通过。
+
+### 阶段 / 任务
+
 - `P3 / P4 / P5` 功能闭环补齐
 
 ### 改动摘要

@@ -2,14 +2,17 @@ package portal
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/google/uuid"
+
+	"github.com/wooveep/aigateway-console/backend/internal/model/do"
+	"github.com/wooveep/aigateway-console/backend/internal/model/entity"
 )
 
 const builtinQuotaAdminConsumer = "administrator"
@@ -102,31 +105,15 @@ func (s *Service) ListAIQuotaRoutes(ctx context.Context) ([]AIQuotaRouteSummary,
 
 	scheduleCounts := map[string]int{}
 	if db, err := s.db(ctx); err == nil {
-		rows, queryErr := db.QueryContext(ctx, `
-			SELECT route_name, COUNT(1)
-			FROM portal_ai_quota_schedule_rule
-			GROUP BY route_name`)
+		items, queryErr := newPortalStore(db).listAIQuotaScheduleCounts(ctx)
 		if queryErr == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var (
-					routeName string
-					count     int
-				)
-				if scanErr := rows.Scan(&routeName, &count); scanErr != nil {
-					return nil, scanErr
-				}
-				scheduleCounts[routeName] = count
-			}
-			if rows.Err() != nil {
-				return nil, rows.Err()
-			}
+			scheduleCounts = items
 		}
 	}
 
 	items := make([]AIQuotaRouteSummary, 0, len(rawRoutes))
 	for _, item := range rawRoutes {
-		name := strings.TrimSpace(fmt.Sprint(item["name"]))
+		name := stringValue(item["name"])
 		if name == "" {
 			continue
 		}
@@ -134,10 +121,10 @@ func (s *Service) ListAIQuotaRoutes(ctx context.Context) ([]AIQuotaRouteSummary,
 			RouteName:         name,
 			Domains:           readStringSlice(item["domains"]),
 			Path:              firstNonEmpty(extractMatchValue(item["pathPredicate"]), extractMatchValue(item["path"]), "/"+name),
-			RedisKeyPrefix:    firstNonEmpty(strings.TrimSpace(fmt.Sprint(item["redisKeyPrefix"])), "aigateway:quota:"+name),
-			AdminConsumer:     firstNonEmpty(strings.TrimSpace(fmt.Sprint(item["adminConsumer"])), builtinQuotaAdminConsumer),
-			AdminPath:         firstNonEmpty(strings.TrimSpace(fmt.Sprint(item["adminPath"])), "/v1/ai/quotas/routes/"+name+"/consumers"),
-			QuotaUnit:         firstNonEmpty(strings.TrimSpace(fmt.Sprint(item["quotaUnit"])), "amount"),
+			RedisKeyPrefix:    firstNonEmpty(stringValue(item["redisKeyPrefix"]), "aigateway:quota:"+name),
+			AdminConsumer:     firstNonEmpty(stringValue(item["adminConsumer"]), builtinQuotaAdminConsumer),
+			AdminPath:         firstNonEmpty(stringValue(item["adminPath"]), "/v1/ai/quotas/routes/"+name+"/consumers"),
+			QuotaUnit:         firstNonEmpty(stringValue(item["quotaUnit"]), "amount"),
 			ScheduleRuleCount: scheduleCounts[name],
 		}
 		items = append(items, summary)
@@ -158,52 +145,24 @@ func (s *Service) ListAIQuotaConsumers(ctx context.Context, routeName string) ([
 		return nil, errors.New("routeName cannot be blank")
 	}
 
-	balanceRows, err := db.QueryContext(ctx, `
-		SELECT consumer_name, quota
-		FROM portal_ai_quota_balance
-		WHERE route_name = ?`, routeName)
+	balances := map[string]int64{}
+	balanceItems, err := newPortalStore(db).listAIQuotaBalances(ctx, routeName)
 	if err != nil {
 		return nil, err
 	}
-	defer balanceRows.Close()
-
-	balances := map[string]int64{}
-	for balanceRows.Next() {
-		var (
-			consumerName string
-			quota        int64
-		)
-		if err := balanceRows.Scan(&consumerName, &quota); err != nil {
-			return nil, err
-		}
-		balances[consumerName] = quota
-	}
-	if err := balanceRows.Err(); err != nil {
-		return nil, err
+	for _, item := range balanceItems {
+		balances[item.ConsumerName] = item.Quota
 	}
 
 	names := map[string]struct{}{
 		builtinQuotaAdminConsumer: {},
 	}
-	rows, err := db.QueryContext(ctx, `
-		SELECT consumer_name
-		FROM portal_user
-		WHERE COALESCE(is_deleted, 0) = 0
-		ORDER BY consumer_name ASC`)
+	users, err := newPortalStore(db).listActivePortalUsers(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var consumerName string
-		if err := rows.Scan(&consumerName); err != nil {
-			return nil, err
-		}
-		names[consumerName] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	for _, item := range users {
+		names[item.ConsumerName] = struct{}{}
 	}
 	for consumerName := range balances {
 		names[consumerName] = struct{}{}
@@ -232,12 +191,11 @@ func (s *Service) RefreshAIQuota(ctx context.Context, routeName, consumerName st
 	if routeName == "" || consumerName == "" {
 		return nil, errors.New("routeName and consumerName are required")
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO portal_ai_quota_balance (route_name, consumer_name, quota)
-		VALUES (?, ?, ?)
-		ON DUPLICATE KEY UPDATE quota = VALUES(quota), updated_at = CURRENT_TIMESTAMP`,
-		routeName, consumerName, value,
-	); err != nil {
+	if err := newPortalStore(db).saveAIQuotaBalance(ctx, do.PortalAIQuotaBalance{
+		RouteName:    routeName,
+		ConsumerName: consumerName,
+		Quota:        value,
+	}); err != nil {
 		return nil, err
 	}
 	return &AIQuotaConsumerQuota{ConsumerName: consumerName, Quota: value}, nil
@@ -263,31 +221,23 @@ func (s *Service) GetAIQuotaUserPolicy(ctx context.Context, routeName, consumerN
 	}
 
 	policy := defaultAIQuotaPolicy(consumerName)
-	var costResetAt sql.NullTime
-	err = db.QueryRowContext(ctx, `
-		SELECT limit_total_micro_yuan, limit_5h_micro_yuan, limit_daily_micro_yuan, daily_reset_mode, daily_reset_time,
-			limit_weekly_micro_yuan, limit_monthly_micro_yuan, cost_reset_at
-		FROM quota_policy_user
-		WHERE consumer_name = ?`,
-		consumerName,
-	).Scan(
-		&policy.LimitTotal,
-		&policy.Limit5h,
-		&policy.LimitDaily,
-		&policy.DailyResetMode,
-		&policy.DailyResetTime,
-		&policy.LimitWeekly,
-		&policy.LimitMonthly,
-		&costResetAt,
-	)
+	item, err := newPortalStore(db).getAIQuotaUserPolicy(ctx, consumerName)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return policy, nil
-		}
 		return nil, err
 	}
-	if costResetAt.Valid {
-		policy.CostResetAt = &costResetAt.Time
+	if item == nil {
+		return policy, nil
+	}
+	policy.LimitTotal = item.LimitTotalMicroYuan
+	policy.Limit5h = item.Limit5hMicroYuan
+	policy.LimitDaily = item.LimitDailyMicroYuan
+	policy.DailyResetMode = item.DailyResetMode
+	policy.DailyResetTime = item.DailyResetTime
+	policy.LimitWeekly = item.LimitWeeklyMicroYuan
+	policy.LimitMonthly = item.LimitMonthlyMicroYuan
+	if item.CostResetAt != nil {
+		value := item.CostResetAt.Time
+		policy.CostResetAt = &value
 	}
 	return policy, nil
 }
@@ -309,31 +259,21 @@ func (s *Service) SaveAIQuotaUserPolicy(
 
 	mode := firstNonEmpty(strings.TrimSpace(request.DailyResetMode), "fixed")
 	resetTime := firstNonEmpty(strings.TrimSpace(request.DailyResetTime), "00:00")
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO quota_policy_user (
-			consumer_name, limit_total_micro_yuan, limit_5h_micro_yuan, limit_daily_micro_yuan,
-			daily_reset_mode, daily_reset_time, limit_weekly_micro_yuan, limit_monthly_micro_yuan, cost_reset_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE
-			limit_total_micro_yuan = VALUES(limit_total_micro_yuan),
-			limit_5h_micro_yuan = VALUES(limit_5h_micro_yuan),
-			limit_daily_micro_yuan = VALUES(limit_daily_micro_yuan),
-			daily_reset_mode = VALUES(daily_reset_mode),
-			daily_reset_time = VALUES(daily_reset_time),
-			limit_weekly_micro_yuan = VALUES(limit_weekly_micro_yuan),
-			limit_monthly_micro_yuan = VALUES(limit_monthly_micro_yuan),
-			cost_reset_at = VALUES(cost_reset_at),
-			updated_at = CURRENT_TIMESTAMP`,
-		consumerName,
-		request.LimitTotal,
-		request.Limit5h,
-		request.LimitDaily,
-		mode,
-		resetTime,
-		request.LimitWeekly,
-		request.LimitMonthly,
-		request.CostResetAt,
-	); err != nil {
+	var costResetAt *gtime.Time
+	if request.CostResetAt != nil {
+		costResetAt = wrapGTime(*request.CostResetAt)
+	}
+	if err := newPortalStore(db).saveAIQuotaUserPolicy(ctx, do.QuotaPolicyUser{
+		ConsumerName:          consumerName,
+		LimitTotalMicroYuan:   request.LimitTotal,
+		Limit5hMicroYuan:      request.Limit5h,
+		LimitDailyMicroYuan:   request.LimitDaily,
+		DailyResetMode:        mode,
+		DailyResetTime:        resetTime,
+		LimitWeeklyMicroYuan:  request.LimitWeekly,
+		LimitMonthlyMicroYuan: request.LimitMonthly,
+		CostResetAt:           costResetAt,
+	}); err != nil {
 		return nil, err
 	}
 	return s.GetAIQuotaUserPolicy(ctx, routeName, consumerName)
@@ -349,61 +289,15 @@ func (s *Service) ListAIQuotaScheduleRules(ctx context.Context, routeName, consu
 		return nil, errors.New("routeName cannot be blank")
 	}
 
-	statement := `
-		SELECT id, consumer_name, action, cron, value, enabled, created_at, updated_at, last_applied_at, last_error
-		FROM portal_ai_quota_schedule_rule
-		WHERE route_name = ?`
-	args := []any{routeName}
-	if strings.TrimSpace(consumerName) != "" {
-		statement += ` AND consumer_name = ?`
-		args = append(args, strings.TrimSpace(consumerName))
-	}
-	statement += ` ORDER BY consumer_name ASC, created_at DESC`
-
-	rows, err := db.QueryContext(ctx, statement, args...)
+	rows, err := newPortalStore(db).listAIQuotaScheduleRules(ctx, routeName, strings.TrimSpace(consumerName))
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	items := make([]AIQuotaScheduleRule, 0)
-	for rows.Next() {
-		var (
-			item          AIQuotaScheduleRule
-			enabled       int
-			createdAt     sql.NullTime
-			updatedAt     sql.NullTime
-			lastAppliedAt sql.NullTime
-			lastError     sql.NullString
-		)
-		if err := rows.Scan(
-			&item.ID,
-			&item.ConsumerName,
-			&item.Action,
-			&item.Cron,
-			&item.Value,
-			&enabled,
-			&createdAt,
-			&updatedAt,
-			&lastAppliedAt,
-			&lastError,
-		); err != nil {
-			return nil, err
-		}
-		item.Enabled = enabled > 0
-		if createdAt.Valid {
-			item.CreatedAt = &createdAt.Time
-		}
-		if updatedAt.Valid {
-			item.UpdatedAt = &updatedAt.Time
-		}
-		if lastAppliedAt.Valid {
-			item.LastAppliedAt = &lastAppliedAt.Time
-		}
-		item.LastError = lastError.String
-		items = append(items, item)
+	items := make([]AIQuotaScheduleRule, 0, len(rows))
+	for _, item := range rows {
+		items = append(items, aiQuotaScheduleRuleFromEntity(item))
 	}
-	return items, rows.Err()
+	return items, nil
 }
 
 func (s *Service) SaveAIQuotaScheduleRule(
@@ -441,19 +335,15 @@ func (s *Service) SaveAIQuotaScheduleRule(
 		enabledValue = 1
 	}
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO portal_ai_quota_schedule_rule (
-			id, route_name, consumer_name, action, cron, value, enabled
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE
-			consumer_name = VALUES(consumer_name),
-			action = VALUES(action),
-			cron = VALUES(cron),
-			value = VALUES(value),
-			enabled = VALUES(enabled),
-			updated_at = CURRENT_TIMESTAMP`,
-		ruleID, routeName, consumerName, action, cron, request.Value, enabledValue,
-	); err != nil {
+	if err := newPortalStore(db).saveAIQuotaScheduleRule(ctx, do.PortalAIQuotaScheduleRule{
+		Id:           ruleID,
+		RouteName:    routeName,
+		ConsumerName: consumerName,
+		Action:       action,
+		Cron:         cron,
+		Value:        request.Value,
+		Enabled:      enabledValue,
+	}); err != nil {
 		return nil, err
 	}
 	return s.getAIQuotaScheduleRule(ctx, routeName, ruleID)
@@ -469,16 +359,11 @@ func (s *Service) DeleteAIQuotaScheduleRule(ctx context.Context, routeName, rule
 	if routeName == "" || ruleID == "" {
 		return errors.New("routeName and ruleId are required")
 	}
-	result, err := db.ExecContext(ctx, `
-		DELETE FROM portal_ai_quota_schedule_rule
-		WHERE route_name = ? AND id = ?`,
-		routeName, ruleID,
-	)
+	deleted, err := newPortalStore(db).deleteAIQuotaScheduleRule(ctx, routeName, ruleID)
 	if err != nil {
 		return err
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if !deleted {
 		return fmt.Errorf("schedule rule not found: %s", ruleID)
 	}
 	return nil
@@ -489,21 +374,7 @@ func (s *Service) getAIQuotaBalance(ctx context.Context, routeName, consumerName
 	if err != nil {
 		return 0, err
 	}
-	var quota int64
-	err = db.QueryRowContext(ctx, `
-		SELECT quota
-		FROM portal_ai_quota_balance
-		WHERE route_name = ? AND consumer_name = ?`,
-		strings.TrimSpace(routeName),
-		strings.TrimSpace(consumerName),
-	).Scan(&quota)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	return quota, nil
+	return newPortalStore(db).getAIQuotaBalance(ctx, strings.TrimSpace(routeName), strings.TrimSpace(consumerName))
 }
 
 func (s *Service) getAIQuotaScheduleRule(ctx context.Context, routeName, ruleID string) (*AIQuotaScheduleRule, error) {
@@ -532,7 +403,7 @@ func extractMatchValue(value any) string {
 	if !ok {
 		return ""
 	}
-	return strings.TrimSpace(fmt.Sprint(record["matchValue"]))
+	return stringValue(record["matchValue"])
 }
 
 func readStringSlice(value any) []string {
@@ -555,4 +426,40 @@ func readStringSlice(value any) []string {
 	default:
 		return []string{}
 	}
+}
+
+func stringValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	trimmed := strings.TrimSpace(fmt.Sprint(value))
+	if trimmed == "" || trimmed == "<nil>" {
+		return ""
+	}
+	return trimmed
+}
+
+func aiQuotaScheduleRuleFromEntity(item entity.PortalAIQuotaScheduleRule) AIQuotaScheduleRule {
+	record := AIQuotaScheduleRule{
+		ID:           item.Id,
+		ConsumerName: item.ConsumerName,
+		Action:       item.Action,
+		Cron:         item.Cron,
+		Value:        item.Value,
+		Enabled:      item.Enabled > 0,
+		LastError:    item.LastError,
+	}
+	if item.CreatedAt != nil {
+		value := item.CreatedAt.Time
+		record.CreatedAt = &value
+	}
+	if item.UpdatedAt != nil {
+		value := item.UpdatedAt.Time
+		record.UpdatedAt = &value
+	}
+	if item.LastAppliedAt != nil {
+		value := item.LastAppliedAt.Time
+		record.LastAppliedAt = &value
+	}
+	return record
 }

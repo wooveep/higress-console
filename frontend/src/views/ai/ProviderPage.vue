@@ -34,6 +34,45 @@ const filtered = computed(() => rows.value.filter((item) => {
   return [item.name, item.type, item.protocol, item.proxyName].some((value) => String(value || '').toLowerCase().includes(keyword));
 }));
 
+const rawConfigsGuide = `常用 rawConfigs 字段：
+- providerDomain: 统一覆写上游域名
+- providerBasePath: 统一追加上游基础路径，必须以 / 开头
+- promoteThinkingOnEmpty: 在 content 为空时提升 reasoning_content
+- hiclawMode: 开启后联动思维补齐能力
+- bedrockPromptCachePointPositions: Bedrock Prompt Cache 注入位置
+- promptCacheRetention: Bedrock 默认 prompt_cache_retention，支持 in_memory / 24h`;
+
+const rawConfigsExamples = `Vertex OAuth
+{
+  "vertexRegion": "asia-east1",
+  "vertexProjectId": "demo-project",
+  "vertexAuthKey": "{\\"type\\":\\"service_account\\",\\"client_email\\":\\"demo@example.com\\",\\"private_key_id\\":\\"key-id\\",\\"private_key\\":\\"-----BEGIN PRIVATE KEY-----\\\\n...\\\\n-----END PRIVATE KEY-----\\\\n\\",\\"token_uri\\":\\"https://oauth2.googleapis.com/token\\"}"
+}
+
+Vertex Express Mode(API Key)
+{
+  "vertexRegion": "asia-east1",
+  "providerBasePath": "/v1beta1"
+}
+
+Claude / Gemini 自定义域名
+{
+  "providerDomain": "llm-proxy.example.com",
+  "providerBasePath": "/anthropic"
+}
+
+Bedrock Prompt Cache
+{
+  "awsRegion": "us-west-2",
+  "awsAccessKey": "AKIA...",
+  "awsSecretKey": "secret",
+  "promptCacheRetention": "in_memory",
+  "bedrockPromptCachePointPositions": {
+    "systemPrompt": true,
+    "lastUserMessage": true
+  }
+}`;
+
 async function load() {
   loading.value = true;
   try {
@@ -120,7 +159,14 @@ onMounted(load);
         <a-form-item label="协议"><a-input v-model:value="formState.protocol" /></a-form-item>
         <a-form-item label="代理服务"><a-input v-model:value="formState.proxyName" /></a-form-item>
         <a-form-item label="Tokens（一行一个）"><a-textarea v-model:value="formState.tokensText" :rows="6" /></a-form-item>
-        <a-form-item label="rawConfigs(JSON)"><a-textarea v-model:value="formState.rawConfigsJson" :rows="10" /></a-form-item>
+        <a-form-item label="rawConfigs(JSON)">
+          <a-textarea v-model:value="formState.rawConfigsJson" :rows="10" spellcheck="false" />
+          <a-alert type="info" show-icon style="margin-top: 12px" message="rawConfigs 补充说明" :description="rawConfigsGuide" />
+          <div class="provider-page__examples">
+            <div class="provider-page__examples-title">示例</div>
+            <pre>{{ rawConfigsExamples }}</pre>
+          </div>
+        </a-form-item>
       </a-form>
       <DrawerFooter @cancel="drawerOpen = false" @confirm="submit" />
     </a-drawer>
@@ -133,5 +179,28 @@ onMounted(load);
 .provider-page__tokens {
   display: grid;
   gap: 6px;
+}
+
+.provider-page__examples {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--portal-border);
+  border-radius: 12px;
+  background: var(--portal-surface-soft);
+}
+
+.provider-page__examples-title {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--portal-text-soft);
+}
+
+.provider-page__examples pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.6;
 }
 </style>

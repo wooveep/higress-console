@@ -53,6 +53,7 @@ global:
         grpc: 9095
       storage: 1Gi
       pvc:
+        enabled: true
         storageClassName: ""
       securityContext: {}
 
@@ -70,6 +71,8 @@ imagePullSecrets: []
 name: "aigateway-console"
 
 podEnvs:
+  AIGATEWAY_CONSOLE_K8S_ENABLED: "true"
+  AIGATEWAY_CONSOLE_PORTALDB_AUTO_MIGRATE: "true"
   HIGRESS_PORTAL_CONSUMER_PROJECTION_WRITE_ENABLED: "false"
 
 podAnnotations: {}
@@ -159,6 +162,7 @@ portalDatabase:
   host: ""
   port: 3306
   database: aigateway_portal
+  params: "parseTime=true&charset=utf8mb4&loc=Asia%2FShanghai"
   jdbcParams: "useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai"
   # Default secret is "<release>-aigateway-core-db" when empty.
   secretName: ""

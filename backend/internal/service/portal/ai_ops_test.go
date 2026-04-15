@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/xuri/excelize/v2"
 
+	k8sclient "github.com/wooveep/aigateway-console/backend/utility/clients/k8s"
 	portaldbclient "github.com/wooveep/aigateway-console/backend/utility/clients/portaldb"
 )
 
@@ -82,4 +83,27 @@ func TestSaveAISensitiveSystemConfigAndStatus(t *testing.T) {
 	require.True(t, item.SystemDenyEnabled)
 	require.Equal(t, "alpha\nbeta", item.DictionaryText)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestListAIQuotaRoutesFallsBackForNilFields(t *testing.T) {
+	k8s := k8sclient.NewMemoryClient()
+	_, err := k8s.UpsertResource(context.Background(), "ai-routes", "doubao", map[string]any{
+		"domains":        []any{"ai.local"},
+		"pathPredicate":  map[string]any{"matchValue": "/doubao"},
+		"redisKeyPrefix": nil,
+		"adminConsumer":  nil,
+		"adminPath":      nil,
+		"quotaUnit":      nil,
+	})
+	require.NoError(t, err)
+
+	svc := New(&portaldbclient.FakeClient{}, k8s)
+	items, err := svc.ListAIQuotaRoutes(context.Background())
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, "doubao", items[0].RouteName)
+	require.Equal(t, "aigateway:quota:doubao", items[0].RedisKeyPrefix)
+	require.Equal(t, builtinQuotaAdminConsumer, items[0].AdminConsumer)
+	require.Equal(t, "/v1/ai/quotas/routes/doubao/consumers", items[0].AdminPath)
+	require.Equal(t, "amount", items[0].QuotaUnit)
 }

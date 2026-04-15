@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wooveep/aigateway-console/backend/internal/model/do"
 	k8sclient "github.com/wooveep/aigateway-console/backend/utility/clients/k8s"
 )
 
@@ -157,25 +158,20 @@ func (s *Service) ListAssetGrants(ctx context.Context, assetType, assetID string
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, `
-		SELECT asset_type, asset_id, subject_type, subject_id
-		FROM asset_grant
-		WHERE asset_type = ? AND asset_id = ?
-		ORDER BY subject_type, subject_id`, strings.TrimSpace(assetType), strings.TrimSpace(assetID))
+	items, err := newPortalStore(db).listAssetGrants(ctx, strings.TrimSpace(assetType), strings.TrimSpace(assetID))
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	items := make([]AssetGrantRecord, 0)
-	for rows.Next() {
-		var item AssetGrantRecord
-		if err := rows.Scan(&item.AssetType, &item.AssetID, &item.SubjectType, &item.SubjectID); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
+	records := make([]AssetGrantRecord, 0, len(items))
+	for _, item := range items {
+		records = append(records, AssetGrantRecord{
+			AssetType:   item.AssetType,
+			AssetID:     item.AssetId,
+			SubjectType: item.SubjectType,
+			SubjectID:   item.SubjectId,
+		})
 	}
-	return items, rows.Err()
+	return records, nil
 }
 
 func (s *Service) ReplaceAssetGrants(ctx context.Context, assetType, assetID string, grants []AssetGrantRecord) ([]AssetGrantRecord, error) {
@@ -189,15 +185,7 @@ func (s *Service) ReplaceAssetGrants(ctx context.Context, assetType, assetID str
 		return nil, errors.New("assetType and assetId are required")
 	}
 
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx, `DELETE FROM asset_grant WHERE asset_type = ? AND asset_id = ?`, normalizedType, normalizedID); err != nil {
-		return nil, err
-	}
+	normalizedGrants := make([]do.AssetGrant, 0, len(grants))
 	for _, item := range grants {
 		record := AssetGrantRecord{
 			AssetType:   normalizedType,
@@ -208,15 +196,14 @@ func (s *Service) ReplaceAssetGrants(ctx context.Context, assetType, assetID str
 		if !isSupportedGrantSubject(record.SubjectType) || record.SubjectID == "" {
 			return nil, fmt.Errorf("invalid grant subject: %s/%s", record.SubjectType, record.SubjectID)
 		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO asset_grant (asset_type, asset_id, subject_type, subject_id)
-			VALUES (?, ?, ?, ?)`,
-			record.AssetType, record.AssetID, record.SubjectType, record.SubjectID,
-		); err != nil {
-			return nil, err
-		}
+		normalizedGrants = append(normalizedGrants, do.AssetGrant{
+			AssetType:   record.AssetType,
+			AssetId:     record.AssetID,
+			SubjectType: record.SubjectType,
+			SubjectId:   record.SubjectID,
+		})
 	}
-	if err := tx.Commit(); err != nil {
+	if err := newPortalStore(db).replaceAssetGrants(ctx, normalizedType, normalizedID, normalizedGrants); err != nil {
 		return nil, err
 	}
 	if err := s.hook.AfterWrite(ctx, "asset-grants-replace"); err != nil {

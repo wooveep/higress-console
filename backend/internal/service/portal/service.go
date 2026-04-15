@@ -11,9 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/wooveep/aigateway-console/backend/internal/model/do"
+	"github.com/wooveep/aigateway-console/backend/internal/model/entity"
 	k8sclient "github.com/wooveep/aigateway-console/backend/utility/clients/k8s"
 	portaldbclient "github.com/wooveep/aigateway-console/backend/utility/clients/portaldb"
 )
@@ -42,8 +45,8 @@ type Service struct {
 	k8sClient k8sclient.Client
 	hook      Hook
 
-	schemaOnce sync.Once
-	schemaErr  error
+	schemaMu      sync.Mutex
+	schemaChecked bool
 }
 
 type ConsumerRecord struct {
@@ -1022,14 +1025,11 @@ func (s *Service) CreateInviteCode(ctx context.Context, expiresInDays int) (*Inv
 	}
 	expiresAt := time.Now().Add(time.Duration(expiresInDays) * 24 * time.Hour)
 	record.ExpiresAt = &expiresAt
-	_, err = db.ExecContext(ctx, `
-		INSERT INTO portal_invite_code (invite_code, status, expires_at)
-		VALUES (?, ?, ?)`,
-		record.InviteCode,
-		record.Status,
-		expiresAt,
-	)
-	if err != nil {
+	if err := newPortalStore(db).insertInviteCode(ctx, do.PortalInviteCode{
+		InviteCode: record.InviteCode,
+		Status:     record.Status,
+		ExpiresAt:  wrapGTime(expiresAt),
+	}); err != nil {
 		return nil, err
 	}
 	return s.getInviteCode(ctx, record.InviteCode)
@@ -1040,29 +1040,19 @@ func (s *Service) ListInviteCodes(ctx context.Context, query InviteCodeQuery) ([
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, `
-		SELECT invite_code, status, expires_at, used_by_consumer, used_at, created_at
-		FROM portal_invite_code
-		ORDER BY created_at DESC`)
+	items, err := newPortalStore(db).listInviteCodes(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	items := make([]InviteCodeRecord, 0)
+	records := make([]InviteCodeRecord, 0, len(items))
 	filter := strings.TrimSpace(strings.ToLower(query.Status))
-	for rows.Next() {
-		item, err := scanInviteCode(rows)
-		if err != nil {
-			return nil, err
-		}
+	for _, item := range items {
+		record := inviteCodeRecordFromEntity(item)
 		if filter != "" && strings.ToLower(item.Status) != filter {
 			continue
 		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+		records = append(records, record)
 	}
 
 	pageNum := query.PageNum
@@ -1071,14 +1061,14 @@ func (s *Service) ListInviteCodes(ctx context.Context, query InviteCodeQuery) ([
 		pageNum = 1
 	}
 	if pageSize <= 0 {
-		pageSize = len(items)
+		pageSize = len(records)
 	}
 	start := (pageNum - 1) * pageSize
-	if start >= len(items) {
+	if start >= len(records) {
 		return []InviteCodeRecord{}, nil
 	}
-	end := min(start+pageSize, len(items))
-	return items[start:end], nil
+	end := min(start+pageSize, len(records))
+	return records[start:end], nil
 }
 
 func (s *Service) UpdateInviteCodeStatus(ctx context.Context, inviteCode, status string) (*InviteCodeRecord, error) {
@@ -1095,14 +1085,11 @@ func (s *Service) UpdateInviteCodeStatus(ctx context.Context, inviteCode, status
 		return nil, errors.New("status must be 'active' or 'disabled'")
 	}
 
-	result, err := db.ExecContext(ctx, `
-		UPDATE portal_invite_code SET status = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE invite_code = ?`, normalized, code)
+	updated, err := newPortalStore(db).updateInviteCodeStatus(ctx, code, normalized)
 	if err != nil {
 		return nil, err
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if !updated {
 		return nil, fmt.Errorf("invite code not found: %s", code)
 	}
 	return s.getInviteCode(ctx, code)
@@ -1112,11 +1099,13 @@ func (s *Service) db(ctx context.Context) (*sql.DB, error) {
 	if s.client == nil || !s.client.Enabled() || s.client.DB() == nil {
 		return nil, errPortalUnavailable
 	}
-	s.schemaOnce.Do(func() {
-		s.schemaErr = s.client.EnsureSchema(ctx)
-	})
-	if s.schemaErr != nil {
-		return nil, s.schemaErr
+	s.schemaMu.Lock()
+	defer s.schemaMu.Unlock()
+	if !s.schemaChecked {
+		if err := s.client.EnsureSchema(ctx); err != nil {
+			return nil, err
+		}
+		s.schemaChecked = true
 	}
 	return s.client.DB(), nil
 }
@@ -1316,17 +1305,14 @@ func (s *Service) getInviteCode(ctx context.Context, inviteCode string) (*Invite
 	if err != nil {
 		return nil, err
 	}
-	row := db.QueryRowContext(ctx, `
-		SELECT invite_code, status, expires_at, used_by_consumer, used_at, created_at
-		FROM portal_invite_code
-		WHERE invite_code = ?`, inviteCode)
-	record, err := scanInviteCode(row)
+	item, err := newPortalStore(db).getInviteCode(ctx, inviteCode)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
 		return nil, err
 	}
+	if item == nil {
+		return nil, nil
+	}
+	record := inviteCodeRecordFromEntity(*item)
 	return &record, nil
 }
 
@@ -1362,6 +1348,27 @@ func scanInviteCode(scanner interface {
 	return item, nil
 }
 
+func inviteCodeRecordFromEntity(item entity.PortalInviteCode) InviteCodeRecord {
+	record := InviteCodeRecord{
+		InviteCode:     item.InviteCode,
+		Status:         item.Status,
+		UsedByConsumer: item.UsedByConsumer,
+	}
+	if item.ExpiresAt != nil {
+		value := item.ExpiresAt.Time
+		record.ExpiresAt = &value
+	}
+	if item.UsedAt != nil {
+		value := item.UsedAt.Time
+		record.UsedAt = &value
+	}
+	if item.CreatedAt != nil {
+		value := item.CreatedAt.Time
+		record.CreatedAt = &value
+	}
+	return record
+}
+
 func normalizeStatus(status string, create bool) string {
 	normalized := strings.ToLower(strings.TrimSpace(status))
 	if normalized == "" {
@@ -1390,6 +1397,10 @@ func trimOrNil(value string) any {
 		return nil
 	}
 	return trimmed
+}
+
+func wrapGTime(value time.Time) *gtime.Time {
+	return gtime.NewFromTime(value)
 }
 
 func nullIfEmpty(value string) any {

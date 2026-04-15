@@ -43,6 +43,41 @@ func TestListUsageEventsUnavailable(t *testing.T) {
 	require.Contains(t, err.Error(), "unavailable")
 }
 
+func TestListUsageEventsIncludesAlignedFields(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	expectSchema(mock)
+	startedAt := time.Now().Add(-6 * time.Second)
+	finishedAt := startedAt.Add(5500 * time.Millisecond)
+	mock.ExpectQuery("SELECT event_id, request_id, trace_id, consumer_name, department_id").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), 50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"event_id", "request_id", "trace_id", "consumer_name", "department_id", "department_path", "api_key_id",
+			"model_id", "price_version_id", "route_name", "request_path", "request_kind", "request_status",
+			"usage_status", "http_status", "error_code", "error_message", "input_tokens", "output_tokens",
+			"total_tokens", "request_count", "cost_micro_yuan", "started_at", "finished_at", "occurred_at",
+		}).AddRow(
+			"evt-1", "req-1", "trace-1", "alice", "dept-a", "root/dept-a", "ak-1",
+			"qwen", 9, "chat-route", "/v1/chat/completions", "chat", "failed",
+			"parsed", 500, "upstream_error", "timeout", 10, 5,
+			15, 1, 3200, startedAt, finishedAt, finishedAt,
+		))
+
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	items, err := svc.ListUsageEvents(context.Background(), UsageEventsQuery{})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, "/v1/chat/completions", items[0].RequestPath)
+	require.Equal(t, "upstream_error", items[0].ErrorCode)
+	require.Equal(t, "timeout", items[0].ErrorMessage)
+	require.Equal(t, int64(5500), items[0].ServiceDurationMs)
+	require.NotEmpty(t, items[0].StartedAt)
+	require.NotEmpty(t, items[0].FinishedAt)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestListDepartmentBillsWithDepartmentScope(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -55,7 +90,7 @@ func TestListDepartmentBillsWithDepartmentScope(t *testing.T) {
 	mock.ExpectQuery("SELECT department_id FROM org_department").
 		WithArgs("dept-a", "root/dept-a", "root/dept-a/%").
 		WillReturnRows(sqlmock.NewRows([]string{"department_id"}).AddRow("dept-a").AddRow("dept-b"))
-	mock.ExpectQuery("FROM portal_usage_daily").
+	mock.ExpectQuery("FROM billing_usage_event e").
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "dept-a", "dept-b").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"department_id", "department_name", "department_path", "request_count", "total_tokens", "total_cost", "active_consumers",
@@ -64,12 +99,122 @@ func TestListDepartmentBillsWithDepartmentScope(t *testing.T) {
 	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
 	includeChildren := true
 	items, err := svc.ListDepartmentBills(context.Background(), DepartmentBillsQuery{
-		DepartmentID:    "dept-a",
+		DepartmentIDs:   []string{"dept-a"},
 		IncludeChildren: &includeChildren,
 	})
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.Equal(t, int64(3), items[0].ActiveConsumers)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestListUsageTrend(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	expectSchema(mock)
+	now := time.Now()
+	from := now.Add(-time.Hour).UnixMilli()
+	to := now.UnixMilli()
+	mock.ExpectQuery("FROM_UNIXTIME\\(FLOOR\\(UNIX_TIMESTAMP\\(occurred_at\\) / 300\\) \\* 300\\)").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"bucket_label", "request_count", "input_tokens", "output_tokens", "total_tokens", "cost_micro_yuan", "active_consumers",
+		}).AddRow("2026-04-14 10:05:00", 12, 2400, 800, 3650, 3200, 3))
+
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	items, err := svc.ListUsageTrend(context.Background(), UsageTrendQuery{
+		From: &from,
+		To:   &to,
+	})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, int64(3200), items[0].CostMicroYuan)
+	require.Equal(t, int64(3650), items[0].TotalTokens)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestListUsageEventFilterOptions(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	expectSchema(mock)
+	mock.ExpectQuery("SELECT DISTINCT e.department_id").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"department_id", "label"}).AddRow("dept-a", "Dept A"))
+	mock.ExpectQuery("SELECT DISTINCT consumer_name AS value").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("alice"))
+	mock.ExpectQuery("SELECT DISTINCT api_key_id AS value").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("ak-1"))
+	mock.ExpectQuery("SELECT DISTINCT model_id AS value").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("qwen"))
+	mock.ExpectQuery("SELECT DISTINCT route_name AS value").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("chat-route"))
+	mock.ExpectQuery("SELECT DISTINCT request_status AS value").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("failed"))
+	mock.ExpectQuery("SELECT DISTINCT usage_status AS value").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("parsed"))
+
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	item, err := svc.ListUsageEventFilterOptions(context.Background(), UsageEventsQuery{})
+	require.NoError(t, err)
+	require.Equal(t, "alice", item.Consumers[0].Value)
+	require.Equal(t, "Dept A", item.Departments[0].Label)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestListUsageEventFilterOptionsNarrowByDepartmentScope(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	expectSchema(mock)
+	mock.ExpectQuery("SELECT path FROM org_department WHERE department_id = \\? LIMIT 1").
+		WithArgs("dept-a").
+		WillReturnRows(sqlmock.NewRows([]string{"path"}).AddRow("root/dept-a"))
+	mock.ExpectQuery("SELECT department_id FROM org_department").
+		WithArgs("dept-a", "root/dept-a", "root/dept-a/%").
+		WillReturnRows(sqlmock.NewRows([]string{"department_id"}).AddRow("dept-a").AddRow("dept-b"))
+	mock.ExpectQuery("SELECT DISTINCT e.department_id").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "alice").
+		WillReturnRows(sqlmock.NewRows([]string{"department_id", "label"}).AddRow("dept-a", "Dept A"))
+	mock.ExpectQuery("SELECT DISTINCT consumer_name AS value").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "dept-a", "dept-b").
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("alice"))
+	mock.ExpectQuery("SELECT DISTINCT api_key_id AS value").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "alice", "dept-a", "dept-b").
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("ak-1"))
+	mock.ExpectQuery("SELECT DISTINCT model_id AS value").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "alice", "dept-a", "dept-b").
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("qwen"))
+	mock.ExpectQuery("SELECT DISTINCT route_name AS value").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "alice", "dept-a", "dept-b").
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("chat-route"))
+	mock.ExpectQuery("SELECT DISTINCT request_status AS value").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "alice", "dept-a", "dept-b").
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("success"))
+	mock.ExpectQuery("SELECT DISTINCT usage_status AS value").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "alice", "dept-a", "dept-b").
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("parsed"))
+
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	includeChildren := true
+	item, err := svc.ListUsageEventFilterOptions(context.Background(), UsageEventsQuery{
+		ConsumerNames:   []string{"alice"},
+		DepartmentIDs:   []string{"dept-a"},
+		IncludeChildren: &includeChildren,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "alice", item.Consumers[0].Value)
+	require.Equal(t, "Dept A", item.Departments[0].Label)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

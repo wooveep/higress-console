@@ -3,11 +3,12 @@ import { computed } from 'vue';
 import NativeDashboardLineChart from '@/features/dashboard/NativeDashboardLineChart.vue';
 import { formatTableValue, formatValue, panelHasData } from '@/features/dashboard/dashboard-native';
 import type { NativeDashboardPanel } from '@/interfaces/dashboard';
+import { formatDateTimeDisplay } from '@/utils/time';
 
 const props = defineProps<{
   panel: NativeDashboardPanel;
   rangeMs: number;
-  translateText: (group: 'titles' | 'series' | 'columns', value?: string) => string;
+  translateText: (group: 'titles' | 'series' | 'columns' | 'values', value?: string) => string;
 }>();
 
 const cardHeight = computed(() => Math.max(props.panel.type === 'stat' ? 184 : 252, props.panel.gridPos.h * 34));
@@ -17,6 +18,19 @@ const tableColumns = computed(() => (props.panel.table?.columns || []).map((colu
   key: column.key,
 })));
 const hasContent = computed(() => panelHasData(props.panel));
+
+function formatBodyCellValue(columnKey: string, value: string | number | null) {
+  if (typeof value === 'string' && columnKey === 'requestStatus') {
+    return props.translateText('values', value);
+  }
+  if (typeof value === 'string' && /At$/.test(columnKey)) {
+    return formatDateTimeDisplay(value);
+  }
+  if (typeof value === 'number' && /(duration|latency|rt)/i.test(columnKey)) {
+    return formatValue(value, 'ms');
+  }
+  return formatTableValue(value);
+}
 </script>
 
 <template>
@@ -58,7 +72,7 @@ const hasContent = computed(() => panelHasData(props.panel));
           :data-source="panel.table?.rows || []"
         >
           <template #bodyCell="{ column, text }">
-            <span :data-column="column.key">{{ formatTableValue(text as string | number | null) }}</span>
+            <span :data-column="column.key">{{ formatBodyCellValue(String(column.key || ''), text as string | number | null) }}</span>
           </template>
         </a-table>
         <a-empty v-else />

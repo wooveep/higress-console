@@ -191,4 +191,33 @@ func expectJobSchema(mock sqlmock.Sqlmock) {
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS portal_ai_quota_balance").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS portal_ai_quota_schedule_rule").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS job_run_record").WillReturnResult(sqlmock.NewResult(0, 0))
+	for _, table := range []string{
+		"portal_user",
+		"portal_invite_code",
+		"org_department",
+		"org_account_membership",
+		"asset_grant",
+		"quota_policy_user",
+		"portal_model_asset",
+		"portal_model_binding",
+		"portal_agent_catalog",
+	} {
+		mock.ExpectQuery(query).
+			WithArgs(table).
+			WillReturnRows(sqlmock.NewRows([]string{"COUNT(1)"}).AddRow(1))
+	}
+	for _, table := range []string{
+		"portal_users",
+		"portal_departments",
+		"portal_asset_grant",
+		"portal_ai_quota_user_policy",
+		"ai_sensitive_detect_rule",
+		"ai_sensitive_replace_rule",
+		"ai_sensitive_system_config",
+		"ai_sensitive_block_audit",
+	} {
+		mock.ExpectQuery(query).
+			WithArgs(table).
+			WillReturnRows(sqlmock.NewRows([]string{"COUNT(1)"}).AddRow(0))
+	}
 }

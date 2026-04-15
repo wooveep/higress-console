@@ -219,7 +219,7 @@ func (c *SQLClient) EnsureSchema(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+	return c.MigrateLegacyData(ctx)
 }
 
 func (c *SQLClient) MigrateLegacyData(ctx context.Context) error {
@@ -255,6 +255,34 @@ func (c *SQLClient) MigrateLegacyData(ctx context.Context) error {
 		return err
 	} else if exists {
 		if err := c.migrateLegacyQuotaPolicies(ctx); err != nil {
+			return err
+		}
+	}
+	if exists, err := c.tableExists(ctx, "ai_sensitive_detect_rule"); err != nil {
+		return err
+	} else if exists {
+		if err := c.migrateLegacyAISensitiveDetectRules(ctx); err != nil {
+			return err
+		}
+	}
+	if exists, err := c.tableExists(ctx, "ai_sensitive_replace_rule"); err != nil {
+		return err
+	} else if exists {
+		if err := c.migrateLegacyAISensitiveReplaceRules(ctx); err != nil {
+			return err
+		}
+	}
+	if exists, err := c.tableExists(ctx, "ai_sensitive_system_config"); err != nil {
+		return err
+	} else if exists {
+		if err := c.migrateLegacyAISensitiveSystemConfig(ctx); err != nil {
+			return err
+		}
+	}
+	if exists, err := c.tableExists(ctx, "ai_sensitive_block_audit"); err != nil {
+		return err
+	} else if exists {
+		if err := c.migrateLegacyAISensitiveAudits(ctx); err != nil {
 			return err
 		}
 	}
@@ -393,6 +421,127 @@ func (c *SQLClient) migrateLegacyQuotaPolicies(ctx context.Context) error {
 			updated_at = CURRENT_TIMESTAMP`
 	_, err := c.db.ExecContext(ctx, statement)
 	return WrapExecError("migrate legacy quota policies", err)
+}
+
+func (c *SQLClient) migrateLegacyAISensitiveDetectRules(ctx context.Context) error {
+	statement := `
+		INSERT INTO portal_ai_sensitive_detect_rule (
+			id, pattern, match_type, description, priority, enabled, created_at, updated_at
+		)
+		SELECT
+			id,
+			pattern,
+			match_type,
+			description,
+			priority,
+			COALESCE(is_enabled, 1),
+			created_at,
+			updated_at
+		FROM ai_sensitive_detect_rule
+		ON DUPLICATE KEY UPDATE
+			pattern = VALUES(pattern),
+			match_type = VALUES(match_type),
+			description = VALUES(description),
+			priority = VALUES(priority),
+			enabled = VALUES(enabled),
+			created_at = VALUES(created_at),
+			updated_at = VALUES(updated_at)`
+	_, err := c.db.ExecContext(ctx, statement)
+	return WrapExecError("migrate legacy ai sensitive detect rules", err)
+}
+
+func (c *SQLClient) migrateLegacyAISensitiveReplaceRules(ctx context.Context) error {
+	statement := `
+		INSERT INTO portal_ai_sensitive_replace_rule (
+			id, pattern, replace_type, replace_value, restore, description, priority, enabled, created_at, updated_at
+		)
+		SELECT
+			id,
+			pattern,
+			replace_type,
+			replace_value,
+			restore,
+			description,
+			priority,
+			COALESCE(is_enabled, 1),
+			created_at,
+			updated_at
+		FROM ai_sensitive_replace_rule
+		ON DUPLICATE KEY UPDATE
+			pattern = VALUES(pattern),
+			replace_type = VALUES(replace_type),
+			replace_value = VALUES(replace_value),
+			restore = VALUES(restore),
+			description = VALUES(description),
+			priority = VALUES(priority),
+			enabled = VALUES(enabled),
+			created_at = VALUES(created_at),
+			updated_at = VALUES(updated_at)`
+	_, err := c.db.ExecContext(ctx, statement)
+	return WrapExecError("migrate legacy ai sensitive replace rules", err)
+}
+
+func (c *SQLClient) migrateLegacyAISensitiveSystemConfig(ctx context.Context) error {
+	statement := `
+		INSERT INTO portal_ai_sensitive_system_config (
+			config_key, system_deny_enabled, dictionary_text, updated_by, updated_at
+		)
+		SELECT
+			'default',
+			system_deny_enabled,
+			COALESCE(dictionary_text, ''),
+			updated_by,
+			updated_at
+		FROM ai_sensitive_system_config
+		ORDER BY updated_at DESC, id DESC
+		LIMIT 1
+		ON DUPLICATE KEY UPDATE
+			system_deny_enabled = VALUES(system_deny_enabled),
+			dictionary_text = VALUES(dictionary_text),
+			updated_by = VALUES(updated_by),
+			updated_at = VALUES(updated_at)`
+	_, err := c.db.ExecContext(ctx, statement)
+	return WrapExecError("migrate legacy ai sensitive system config", err)
+}
+
+func (c *SQLClient) migrateLegacyAISensitiveAudits(ctx context.Context) error {
+	statement := `
+		INSERT INTO portal_ai_sensitive_block_audit (
+			id, request_id, route_name, consumer_name, display_name, blocked_at, blocked_by, request_phase,
+			blocked_reason_json, match_type, matched_rule, matched_excerpt, provider_id, cost_usd
+		)
+		SELECT
+			id,
+			request_id,
+			route_name,
+			consumer_name,
+			display_name,
+			blocked_at,
+			blocked_by,
+			request_phase,
+			blocked_reason_json,
+			match_type,
+			matched_rule,
+			matched_excerpt,
+			provider_id,
+			CAST(cost_usd AS CHAR)
+		FROM ai_sensitive_block_audit
+		ON DUPLICATE KEY UPDATE
+			request_id = VALUES(request_id),
+			route_name = VALUES(route_name),
+			consumer_name = VALUES(consumer_name),
+			display_name = VALUES(display_name),
+			blocked_at = VALUES(blocked_at),
+			blocked_by = VALUES(blocked_by),
+			request_phase = VALUES(request_phase),
+			blocked_reason_json = VALUES(blocked_reason_json),
+			match_type = VALUES(match_type),
+			matched_rule = VALUES(matched_rule),
+			matched_excerpt = VALUES(matched_excerpt),
+			provider_id = VALUES(provider_id),
+			cost_usd = VALUES(cost_usd)`
+	_, err := c.db.ExecContext(ctx, statement)
+	return WrapExecError("migrate legacy ai sensitive audits", err)
 }
 
 func normalizeDriver(driver, dsn string) string {

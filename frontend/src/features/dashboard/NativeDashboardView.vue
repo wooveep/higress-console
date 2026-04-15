@@ -2,20 +2,34 @@
 import { computed, onBeforeUnmount, shallowRef, watch } from 'vue';
 import { ReloadOutlined } from '@ant-design/icons-vue';
 import NativeDashboardPanelCard from '@/features/dashboard/NativeDashboardPanelCard.vue';
-import { DEFAULT_RANGE_MS, panelHasData, RANGE_OPTIONS, REFRESH_OPTIONS } from '@/features/dashboard/dashboard-native';
+import {
+  panelHasData,
+  RANGE_OPTIONS,
+  REFRESH_OPTIONS,
+  resolveDashboardTimeWindow,
+  syncFixedDashboardTimeRange,
+  type DashboardTimeRangeState,
+} from '@/features/dashboard/dashboard-native';
 import { DashboardType, type NativeDashboardData } from '@/interfaces/dashboard';
 import { getNativeDashboard } from '@/services/dashboard';
-import { formatDateTimeDisplay } from '@/utils/time';
+import {
+  formatDateTimeDisplay,
+  getNowDateTimeLocalInputValue,
+} from '@/utils/time';
 import { useI18n } from 'vue-i18n';
 
 const props = defineProps<{
   type: DashboardType;
+  timeRange: DashboardTimeRangeState;
+}>();
+
+const emit = defineEmits<{
+  (event: 'update:timeRange', value: DashboardTimeRangeState): void;
+  (event: 'windowChange', value: { from: number; to: number; valid: boolean }): void;
 }>();
 
 const { t } = useI18n();
 
-const rangeMs = shallowRef(DEFAULT_RANGE_MS);
-const refreshMs = shallowRef(30 * 1000);
 const loading = shallowRef(false);
 const errorMessage = shallowRef('');
 const lastUpdated = shallowRef('');
@@ -25,15 +39,69 @@ const activeRows = shallowRef<string[]>([]);
 let refreshTimer: number | null = null;
 
 const hasAnyData = computed(() => data.value?.rows.some((row) => row.panels.some((panel) => panelHasData(panel))) ?? false);
+const isFixedMode = computed(() => props.timeRange.endTimeMode === 'fixed');
+const canAutoRefresh = computed(() => props.timeRange.endTimeMode === 'now');
+const rangeLabel = computed(() => t(isFixedMode.value ? 'dashboard.native.quickRange' : 'dashboard.native.range'));
+const rangeHint = computed(() => (
+  isFixedMode.value
+    ? t('dashboard.native.quickRangeHint')
+    : ''
+));
+const chartRangeMs = computed(() => props.timeRange.endTimeMode === 'fixed'
+  ? Math.max(0, resolveDashboardTimeWindow(props.timeRange).to - resolveDashboardTimeWindow(props.timeRange).from)
+  : props.timeRange.rangeMs);
+const rangeMsModel = computed({
+  get: () => props.timeRange.rangeMs,
+  set: (value: number) => {
+    const nextState = props.timeRange.endTimeMode === 'fixed'
+      ? syncFixedDashboardTimeRange({ ...props.timeRange, rangeMs: value })
+      : { ...props.timeRange, rangeMs: value };
+    emit('update:timeRange', nextState);
+  },
+});
+const refreshMsModel = computed({
+  get: () => props.timeRange.refreshMs,
+  set: (value: number) => emit('update:timeRange', { ...props.timeRange, refreshMs: value }),
+});
+const endTimeModeModel = computed({
+  get: () => props.timeRange.endTimeMode,
+  set: (value: 'now' | 'fixed') => {
+    if (value === 'fixed') {
+      emit('update:timeRange', syncFixedDashboardTimeRange({ ...props.timeRange, endTimeMode: value }, Date.now()));
+      return;
+    }
+    const now = Date.now();
+    emit('update:timeRange', {
+      ...props.timeRange,
+      endTimeMode: value,
+      fixedEndTime: getNowDateTimeLocalInputValue(),
+      fixedStartTime: formatDateTimeDisplay(now - props.timeRange.rangeMs).replace(' ', 'T').slice(0, 16),
+    });
+  },
+});
+const fixedStartTimeModel = computed({
+  get: () => props.timeRange.fixedStartTime,
+  set: (value: string) => emit('update:timeRange', { ...props.timeRange, fixedStartTime: value }),
+});
+const fixedEndTimeModel = computed({
+  get: () => props.timeRange.fixedEndTime,
+  set: (value: string) => emit('update:timeRange', { ...props.timeRange, fixedEndTime: value }),
+});
 
 async function load() {
+  const effectiveWindow = resolveDashboardTimeWindow(props.timeRange);
+  emit('windowChange', effectiveWindow);
+  if (!effectiveWindow.valid) {
+    data.value = null;
+    errorMessage.value = t('dashboard.native.invalidTimeRange');
+    return;
+  }
   loading.value = true;
   errorMessage.value = '';
   try {
-    const to = Date.now();
     const result = await getNativeDashboard(props.type, {
-      from: to - rangeMs.value,
-      to,
+      from: effectiveWindow.from,
+      to: effectiveWindow.to,
     });
     data.value = result;
     lastUpdated.value = formatDateTimeDisplay(Date.now());
@@ -53,14 +121,14 @@ function setupAutoRefresh() {
     window.clearInterval(refreshTimer);
     refreshTimer = null;
   }
-  if (refreshMs.value > 0) {
+  if (canAutoRefresh.value && props.timeRange.refreshMs > 0) {
     refreshTimer = window.setInterval(() => {
       void load();
-    }, refreshMs.value);
+    }, props.timeRange.refreshMs);
   }
 }
 
-function translateText(group: 'titles' | 'series' | 'columns', value?: string) {
+function translateText(group: 'titles' | 'series' | 'columns' | 'values', value?: string) {
   if (!value) {
     return value || '';
   }
@@ -74,11 +142,19 @@ watch(() => props.type, () => {
   void load();
 }, { immediate: true });
 
-watch(rangeMs, () => {
-  void load();
-});
+watch(
+  () => [
+    props.timeRange.rangeMs,
+    props.timeRange.endTimeMode,
+    props.timeRange.fixedStartTime,
+    props.timeRange.fixedEndTime,
+  ],
+  () => {
+    void load();
+  },
+);
 
-watch(refreshMs, setupAutoRefresh, { immediate: true });
+watch([() => props.timeRange.refreshMs, canAutoRefresh], setupAutoRefresh, { immediate: true });
 
 onBeforeUnmount(() => {
   if (refreshTimer) {
@@ -92,12 +168,43 @@ onBeforeUnmount(() => {
     <div class="native-dashboard__toolbar">
       <div class="native-dashboard__controls">
         <div class="native-dashboard__control">
-          <span class="native-dashboard__label">{{ t('dashboard.native.range') }}</span>
-          <a-select v-model:value="rangeMs" :options="RANGE_OPTIONS.map((option) => ({ value: option, label: t(`dashboard.native.rangeOptions.${option}`) }))" />
+          <span class="native-dashboard__label">{{ t('dashboard.native.endTimeMode') }}</span>
+          <a-select
+            v-model:value="endTimeModeModel"
+            :options="[
+              { value: 'now', label: t('dashboard.native.endTimeModes.now') },
+              { value: 'fixed', label: t('dashboard.native.endTimeModes.fixed') },
+            ]"
+          />
+        </div>
+        <div v-if="timeRange.endTimeMode === 'fixed'" class="native-dashboard__control">
+          <span class="native-dashboard__label">{{ t('dashboard.native.startTime') }}</span>
+          <input
+            v-model="fixedStartTimeModel"
+            class="native-dashboard__datetime-input"
+            type="datetime-local"
+          />
+        </div>
+        <div v-if="timeRange.endTimeMode === 'fixed'" class="native-dashboard__control">
+          <span class="native-dashboard__label">{{ t('dashboard.native.endTime') }}</span>
+          <input
+            v-model="fixedEndTimeModel"
+            class="native-dashboard__datetime-input"
+            type="datetime-local"
+          />
+        </div>
+        <div class="native-dashboard__control">
+          <span class="native-dashboard__label">{{ rangeLabel }}</span>
+          <a-select v-model:value="rangeMsModel" :options="RANGE_OPTIONS.map((option) => ({ value: option, label: t(`dashboard.native.rangeOptions.${option}`) }))" />
+          <span v-if="rangeHint" class="native-dashboard__hint">{{ rangeHint }}</span>
         </div>
         <div class="native-dashboard__control">
           <span class="native-dashboard__label">{{ t('dashboard.native.refreshEvery') }}</span>
-          <a-select v-model:value="refreshMs" :options="REFRESH_OPTIONS.map((option) => ({ value: option, label: t(`dashboard.native.refreshOptions.${option}`) }))" />
+          <a-select
+            v-model:value="refreshMsModel"
+            :disabled="!canAutoRefresh"
+            :options="REFRESH_OPTIONS.map((option) => ({ value: option, label: t(`dashboard.native.refreshOptions.${option}`) }))"
+          />
         </div>
       </div>
       <div class="native-dashboard__actions">
@@ -141,7 +248,7 @@ onBeforeUnmount(() => {
             class="native-dashboard__panel-cell"
             :style="{ gridColumn: `${panel.gridPos.x + 1} / span ${Math.max(1, panel.gridPos.w)}` }"
           >
-            <NativeDashboardPanelCard :panel="panel" :range-ms="rangeMs" :translate-text="translateText" />
+            <NativeDashboardPanelCard :panel="panel" :range-ms="chartRangeMs" :translate-text="translateText" />
           </div>
         </div>
       </a-collapse-panel>
@@ -181,6 +288,21 @@ onBeforeUnmount(() => {
 .native-dashboard__updated {
   color: var(--portal-text-soft);
   font-size: 12px;
+}
+
+.native-dashboard__hint {
+  color: var(--portal-text-soft);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.native-dashboard__datetime-input {
+  min-height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--portal-border);
+  padding: 6px 10px;
+  color: var(--portal-text);
+  background: var(--portal-surface-strong);
 }
 
 .native-dashboard__collapse :deep(.ant-collapse-item) {

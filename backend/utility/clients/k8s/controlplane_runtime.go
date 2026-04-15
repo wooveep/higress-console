@@ -432,6 +432,8 @@ func (c *RealClient) syncAIRouteFallbackRuntime(ctx context.Context, name string
 		_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIStatistics, map[string][]string{"ingress": {aiRouteInternalFallbackIngressName(name)}})
 		_ = c.removeModelMapperRulesForIngress(ctx, aiRouteFallbackIngressName(name))
 		_ = c.removeModelMapperRulesForIngress(ctx, aiRouteInternalFallbackIngressName(name))
+		_ = c.syncRouteAuthRule(ctx, aiRouteFallbackIngressName(name), nil, false)
+		_ = c.syncRouteAuthRule(ctx, aiRouteInternalFallbackIngressName(name), nil, true)
 		return nil
 	}
 	fallbackData := cloneMap(data)
@@ -978,7 +980,7 @@ func deriveProviderRuntimePlan(name string, data map[string]any) (providerRuntim
 		}
 		return plan, nil
 	}
-	endpoints, err := providerEndpointsForRuntime(providerType, rawConfigs)
+	endpoints, err := providerEndpointsForRuntime(providerType, data, rawConfigs)
 	if err != nil {
 		return plan, err
 	}
@@ -988,11 +990,10 @@ func deriveProviderRuntimePlan(name string, data map[string]any) (providerRuntim
 	}
 	plan.primaryRegistry = registry
 	plan.primaryServiceRef = serviceRef
-	if providerType == "vertex" {
+	if providerType == "vertex" && !providerUsesAPITokenAuth(data) {
 		plan.extraRegistries = []map[string]any{vertexAuthRegistry()}
-	} else {
-		plan.deletableExtraRegistryNames = registryNames(plan.extraRegistries)
 	}
+	plan.deletableExtraRegistryNames = registryNames(plan.extraRegistries)
 	return plan, nil
 }
 
@@ -1005,11 +1006,18 @@ func providerNeedsRouteSync(providerType string) bool {
 	}
 }
 
-func providerEndpointsForRuntime(providerType string, rawConfigs map[string]any) ([]providerEndpoint, error) {
+func providerEndpointsForRuntime(providerType string, data map[string]any, rawConfigs map[string]any) ([]providerEndpoint, error) {
 	if endpoints, err := openAIProviderEndpoints(rawConfigs); err != nil || len(endpoints) > 0 {
 		return endpoints, err
 	}
-	if endpoints, ok, err := providerCustomServiceEndpoints(providerType, rawConfigs); ok || err != nil {
+	if domain := strings.TrimSpace(stringValue(rawConfigs["providerDomain"])); domain != "" {
+		endpoint, err := providerEndpointFromDomain(domain)
+		if err != nil {
+			return nil, err
+		}
+		return []providerEndpoint{endpoint}, nil
+	}
+	if endpoints, ok, err := providerCustomServiceEndpoints(providerType, data, rawConfigs); ok || err != nil {
 		return endpoints, err
 	}
 	if raw := firstNonEmpty(stringValue(rawConfigs["baseUrl"]), stringValue(rawConfigs["endpoint"])); raw != "" {
@@ -1025,7 +1033,7 @@ func providerEndpointsForRuntime(providerType string, rawConfigs map[string]any)
 	return nil, nil
 }
 
-func providerCustomServiceEndpoints(providerType string, rawConfigs map[string]any) ([]providerEndpoint, bool, error) {
+func providerCustomServiceEndpoints(providerType string, data map[string]any, rawConfigs map[string]any) ([]providerEndpoint, bool, error) {
 	switch providerType {
 	case "openai":
 		endpoints, err := openAIProviderEndpoints(rawConfigs)
@@ -1045,6 +1053,15 @@ func providerCustomServiceEndpoints(providerType string, rawConfigs map[string]a
 			return []providerEndpoint{endpoint}, true, err
 		}
 	case "vertex":
+		if providerUsesAPITokenAuth(data) {
+			return []providerEndpoint{{
+				Type:        higressDNSRegistryType,
+				Protocol:    higressTransportHTTPS,
+				Domain:      "aiplatform.googleapis.com",
+				Port:        443,
+				ContextPath: "/",
+			}}, true, nil
+		}
 		region := strings.TrimSpace(stringValue(rawConfigs["vertexRegion"]))
 		if region == "" {
 			return nil, false, errors.New("vertexRegion cannot be empty")
@@ -1071,6 +1088,10 @@ func providerCustomServiceEndpoints(providerType string, rawConfigs map[string]a
 		return []providerEndpoint{endpoint}, true, nil
 	}
 	return nil, false, nil
+}
+
+func providerUsesAPITokenAuth(data map[string]any) bool {
+	return len(normalizeStringSlice(data["tokens"])) > 0
 }
 
 func openAIProviderEndpoints(rawConfigs map[string]any) ([]providerEndpoint, error) {

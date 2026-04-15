@@ -578,28 +578,56 @@ func Bind(group *ghttp.RouterGroup, portalService *portalsvc.Service) {
 		})
 		writeJSON(r, items, err, 200)
 	})
+	group.GET("/v1/portal/stats/usage-trend", func(r *ghttp.Request) {
+		items, err := portalService.ListUsageTrend(r.Context(), portalsvc.UsageTrendQuery{
+			From:            optionalInt64Query(r, "from"),
+			To:              optionalInt64Query(r, "to"),
+			Bucket:          r.GetQuery("bucket").String(),
+			ConsumerName:    r.GetQuery("consumerName").String(),
+			DepartmentID:    r.GetQuery("departmentId").String(),
+			IncludeChildren: optionalBoolQuery(r, "includeChildren"),
+			ModelID:         r.GetQuery("modelId").String(),
+			RouteName:       r.GetQuery("routeName").String(),
+		})
+		writeJSON(r, items, err, 200)
+	})
 	group.GET("/v1/portal/stats/usage-events", func(r *ghttp.Request) {
 		items, err := portalService.ListUsageEvents(r.Context(), portalsvc.UsageEventsQuery{
 			From:            optionalInt64Query(r, "from"),
 			To:              optionalInt64Query(r, "to"),
-			ConsumerName:    r.GetQuery("consumerName").String(),
-			DepartmentID:    r.GetQuery("departmentId").String(),
+			ConsumerNames:   optionalCSVQuery(r, "consumerNames"),
+			DepartmentIDs:   optionalCSVQuery(r, "departmentIds"),
 			IncludeChildren: optionalBoolQuery(r, "includeChildren"),
-			APIKeyID:        r.GetQuery("apiKeyId").String(),
-			ModelID:         r.GetQuery("modelId").String(),
-			RouteName:       r.GetQuery("routeName").String(),
-			RequestStatus:   r.GetQuery("requestStatus").String(),
-			UsageStatus:     r.GetQuery("usageStatus").String(),
+			APIKeyIDs:       optionalCSVQuery(r, "apiKeyIds"),
+			ModelIDs:        optionalCSVQuery(r, "modelIds"),
+			RouteNames:      optionalCSVQuery(r, "routeNames"),
+			RequestStatuses: optionalCSVQuery(r, "requestStatuses"),
+			UsageStatuses:   optionalCSVQuery(r, "usageStatuses"),
 			PageNum:         r.GetQuery("pageNum").Int(),
 			PageSize:        r.GetQuery("pageSize").Int(),
 		})
 		writeJSON(r, items, err, 200)
 	})
+	group.GET("/v1/portal/stats/usage-event-options", func(r *ghttp.Request) {
+		item, err := portalService.ListUsageEventFilterOptions(r.Context(), portalsvc.UsageEventsQuery{
+			From:            optionalInt64Query(r, "from"),
+			To:              optionalInt64Query(r, "to"),
+			ConsumerNames:   optionalCSVQuery(r, "consumerNames"),
+			DepartmentIDs:   optionalCSVQuery(r, "departmentIds"),
+			IncludeChildren: optionalBoolQuery(r, "includeChildren"),
+			APIKeyIDs:       optionalCSVQuery(r, "apiKeyIds"),
+			ModelIDs:        optionalCSVQuery(r, "modelIds"),
+			RouteNames:      optionalCSVQuery(r, "routeNames"),
+			RequestStatuses: optionalCSVQuery(r, "requestStatuses"),
+			UsageStatuses:   optionalCSVQuery(r, "usageStatuses"),
+		})
+		writeJSON(r, item, err, 200)
+	})
 	group.GET("/v1/portal/stats/department-bills", func(r *ghttp.Request) {
 		items, err := portalService.ListDepartmentBills(r.Context(), portalsvc.DepartmentBillsQuery{
 			From:            optionalInt64Query(r, "from"),
 			To:              optionalInt64Query(r, "to"),
-			DepartmentID:    r.GetQuery("departmentId").String(),
+			DepartmentIDs:   optionalCSVQuery(r, "departmentIds"),
 			IncludeChildren: optionalBoolQuery(r, "includeChildren"),
 		})
 		writeJSON(r, items, err, 200)
@@ -649,6 +677,24 @@ func optionalBoolQuery(r *ghttp.Request, key string) *bool {
 	}
 	value := r.GetQuery(key).Bool()
 	return &value
+}
+
+func optionalCSVQuery(r *ghttp.Request, key string) []string {
+	raw := strings.TrimSpace(r.GetQuery(key).String())
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			items = append(items, trimmed)
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	return items
 }
 
 func writeWorkbook(r *ghttp.Request, filename string, content []byte) {

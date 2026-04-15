@@ -22,6 +22,7 @@ var (
 	matchTypes         = []string{"EQUAL", "PRE", "REGULAR"}
 	wasmPhases         = []string{"UNSPECIFIED_PHASE", "AUTHN", "AUTHZ", "STATS"}
 	mcpServerTypes     = []string{"OPEN_API", "DATABASE", "DIRECT_ROUTE", "REDIRECT_ROUTE"}
+	fallbackRespCodes  = []string{"4xx", "5xx"}
 )
 
 func (s *Service) hydrateResources(kind string, items []map[string]any) []map[string]any {
@@ -46,7 +47,20 @@ func (s *Service) hydrateResource(kind string, item map[string]any) map[string]a
 		if name != "" {
 			clone["routeMetadata"] = normalizeMCPRouteMetadata(name, clone["routeMetadata"], s.k8sClient.IngressClass())
 		}
-	case "routes", "ai-routes":
+	case "ai-routes":
+		if pathPredicate, _ := clone["pathPredicate"].(map[string]any); len(pathPredicate) == 0 {
+			if path, ok := clone["path"].(map[string]any); ok && len(path) > 0 {
+				clone["pathPredicate"] = clonePayload(path)
+			}
+		}
+		if len(toMapSlice(clone["headerPredicates"])) == 0 && len(toMapSlice(clone["headers"])) > 0 {
+			clone["headerPredicates"] = clone["headers"]
+		}
+		if len(toMapSlice(clone["urlParamPredicates"])) == 0 && len(toMapSlice(clone["urlParams"])) > 0 {
+			clone["urlParamPredicates"] = clone["urlParams"]
+		}
+	}
+	if kind == "routes" || kind == "ai-routes" {
 		name := strings.TrimSpace(fmt.Sprint(clone["name"]))
 		if name != "" {
 			clone["mcpRouteMetadata"] = normalizeRouteBindingMetadata(name, clone["mcpRouteMetadata"], s.k8sClient.IngressClass())
@@ -67,8 +81,10 @@ func (s *Service) normalizeForSave(ctx context.Context, kind string, payload map
 	}
 
 	switch kind {
-	case "routes", "ai-routes":
+	case "routes":
 		return s.normalizeRouteLike(kind, normalized)
+	case "ai-routes":
+		return s.normalizeAIRoute(ctx, normalized)
 	case "services":
 		return normalizeGatewayService(normalized)
 	case "ai-providers":
@@ -133,6 +149,238 @@ func (s *Service) normalizeRouteLike(kind string, payload map[string]any) (map[s
 	return payload, nil
 }
 
+func (s *Service) normalizeAIRoute(ctx context.Context, payload map[string]any) (map[string]any, error) {
+	payload["ingressClass"] = firstNonEmpty(stringValue(payload["ingressClass"]), s.k8sClient.IngressClass())
+	payload["domains"] = normalizeStringSlice(payload["domains"])
+
+	pathSource := firstNonNil(payload["pathPredicate"], payload["path"])
+	if pathSource == nil {
+		pathSource = map[string]any{
+			"matchType":  "PRE",
+			"matchValue": "/",
+		}
+	}
+	pathPredicate, err := normalizeRoutePredicate(pathSource, false)
+	if err != nil {
+		return nil, err
+	}
+	if stringValue(pathPredicate["matchType"]) != "PRE" {
+		return nil, errors.New("pathPredicate must be of type PRE")
+	}
+	payload["pathPredicate"] = pathPredicate
+	delete(payload, "path")
+
+	if headers, err := normalizeKeyedPredicates(firstNonNil(payload["headerPredicates"], payload["headers"])); err != nil {
+		return nil, err
+	} else if len(headers) > 0 {
+		for _, predicate := range headers {
+			if strings.EqualFold(stringValue(predicate["key"]), "x-higress-llm-model") {
+				return nil, errors.New("headerPredicates cannot contain the model routing header")
+			}
+		}
+		payload["headerPredicates"] = headers
+	} else {
+		delete(payload, "headerPredicates")
+	}
+	delete(payload, "headers")
+
+	if params, err := normalizeKeyedPredicates(firstNonNil(payload["urlParamPredicates"], payload["urlParams"])); err != nil {
+		return nil, err
+	} else if len(params) > 0 {
+		payload["urlParamPredicates"] = params
+	} else {
+		delete(payload, "urlParamPredicates")
+	}
+	delete(payload, "urlParams")
+
+	if methods, err := normalizeMethods(payload["methods"]); err != nil {
+		return nil, err
+	} else if len(methods) > 0 {
+		payload["methods"] = methods
+	} else {
+		delete(payload, "methods")
+	}
+
+	upstreams, err := s.normalizeAIUpstreams(ctx, payload["upstreams"], true)
+	if err != nil {
+		return nil, err
+	}
+	payload["upstreams"] = upstreams
+	weightSum := 0
+	for _, upstream := range upstreams {
+		weightSum += toInt(upstream["weight"])
+	}
+	if weightSum != 100 {
+		return nil, errors.New("the sum of upstream weights must be 100")
+	}
+
+	if modelPredicates, err := normalizeAIModelPredicates(payload["modelPredicates"]); err != nil {
+		return nil, err
+	} else if len(modelPredicates) > 0 {
+		payload["modelPredicates"] = modelPredicates
+	} else {
+		delete(payload, "modelPredicates")
+	}
+
+	if authConfig, err := normalizeAuthConfig(payload["authConfig"]); err != nil {
+		return nil, err
+	} else if len(authConfig) > 0 {
+		payload["authConfig"] = authConfig
+	} else {
+		delete(payload, "authConfig")
+	}
+
+	if fallbackConfig, err := s.normalizeAIRouteFallbackConfig(ctx, payload["fallbackConfig"]); err != nil {
+		return nil, err
+	} else if len(fallbackConfig) > 0 {
+		payload["fallbackConfig"] = fallbackConfig
+	} else {
+		delete(payload, "fallbackConfig")
+	}
+
+	return payload, nil
+}
+
+func (s *Service) normalizeAIRouteFallbackConfig(ctx context.Context, value any) (map[string]any, error) {
+	item, _ := value.(map[string]any)
+	if len(item) == 0 {
+		return nil, nil
+	}
+
+	result := clonePayload(item)
+	enabled := boolFromAny(item["enabled"], false)
+	result["enabled"] = enabled
+
+	if !enabled {
+		if upstreams, err := s.normalizeAIUpstreams(ctx, item["upstreams"], false); err == nil && len(upstreams) > 0 {
+			result["upstreams"] = upstreams
+		}
+		if responseCodes := normalizeFallbackResponseCodes(item["responseCodes"]); len(responseCodes) > 0 {
+			result["responseCodes"] = responseCodes
+		}
+		if strategy := strings.ToUpper(firstNonEmpty(stringValue(item["fallbackStrategy"]), stringValue(item["strategy"]))); strategy != "" {
+			result["fallbackStrategy"] = strategy
+		}
+		delete(result, "strategy")
+		return result, nil
+	}
+
+	upstreams, err := s.normalizeAIUpstreams(ctx, item["upstreams"], true)
+	if err != nil {
+		return nil, err
+	}
+	if len(upstreams) == 0 {
+		return nil, errors.New("upstreams cannot be empty when fallback is enabled")
+	}
+	result["upstreams"] = upstreams
+
+	strategy := strings.ToUpper(firstNonEmpty(stringValue(item["fallbackStrategy"]), stringValue(item["strategy"])))
+	if strategy == "" {
+		strategy = "RANDOM"
+	}
+	if strategy != "RANDOM" && strategy != "SEQUENCE" {
+		return nil, fmt.Errorf("unknown fallback strategy: %s", strategy)
+	}
+	result["fallbackStrategy"] = strategy
+	delete(result, "strategy")
+
+	responseCodes := normalizeFallbackResponseCodes(item["responseCodes"])
+	if len(responseCodes) == 0 {
+		return nil, errors.New("response codes cannot be empty when fallback is enabled")
+	}
+	for _, code := range responseCodes {
+		if !slices.Contains(fallbackRespCodes, code) {
+			return nil, fmt.Errorf("invalid response code:%s", code)
+		}
+	}
+	result["responseCodes"] = responseCodes
+	return result, nil
+}
+
+func (s *Service) normalizeAIUpstreams(ctx context.Context, value any, validateProvider bool) ([]map[string]any, error) {
+	rawItems := toAnySlice(value)
+	if len(rawItems) == 0 {
+		return nil, nil
+	}
+
+	result := make([]map[string]any, 0, len(rawItems))
+	for _, rawItem := range rawItems {
+		item, _ := rawItem.(map[string]any)
+		provider := strings.TrimSpace(fmt.Sprint(item["provider"]))
+		if provider == "" {
+			return nil, errors.New("provider cannot be null or empty")
+		}
+		if validateProvider {
+			if _, err := s.k8sClient.GetResource(ctx, "ai-providers", provider); err != nil {
+				return nil, fmt.Errorf("unknown provider: %s", provider)
+			}
+		}
+		weight := toInt(item["weight"])
+		if weight < 0 {
+			return nil, fmt.Errorf("provider %s weight must be greater than or equal to 0", provider)
+		}
+		if weight == 0 && len(rawItems) == 1 {
+			weight = 100
+		}
+
+		normalized := map[string]any{
+			"provider": provider,
+			"weight":   weight,
+		}
+		if modelMapping, ok := item["modelMapping"].(map[string]any); ok && len(modelMapping) > 0 {
+			normalized["modelMapping"] = clonePayload(modelMapping)
+		}
+		result = append(result, normalized)
+	}
+	return result, nil
+}
+
+func normalizeAIModelPredicates(value any) ([]map[string]any, error) {
+	items := toAnySlice(value)
+	if len(items) == 0 {
+		return nil, nil
+	}
+
+	result := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		predicate, _ := item.(map[string]any)
+		if len(predicate) == 0 {
+			return nil, errors.New("model predicate is required")
+		}
+		matchType := strings.ToUpper(strings.TrimSpace(fmt.Sprint(predicate["matchType"])))
+		if matchType == "" {
+			return nil, errors.New("matchType is required")
+		}
+		if matchType == "REGULAR" {
+			return nil, errors.New("AiModelPredicate does not support regular expression matchType")
+		}
+		if !slices.Contains(matchTypes, matchType) {
+			return nil, fmt.Errorf("unsupported matchType %s", matchType)
+		}
+		matchValue := strings.TrimSpace(fmt.Sprint(predicate["matchValue"]))
+		if matchValue == "" {
+			return nil, errors.New("matchValue is required")
+		}
+		result = append(result, map[string]any{
+			"matchType":  matchType,
+			"matchValue": matchValue,
+		})
+	}
+	return result, nil
+}
+
+func normalizeFallbackResponseCodes(value any) []string {
+	items := normalizeStringSlice(value)
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, strings.ToLower(strings.TrimSpace(item)))
+	}
+	return uniqueStrings(result)
+}
+
 func normalizeGatewayService(payload map[string]any) (map[string]any, error) {
 	name := strings.TrimSpace(fmt.Sprint(payload["name"]))
 	if name == "" {
@@ -182,7 +430,8 @@ func normalizeAIProvider(payload map[string]any) (map[string]any, error) {
 	if protocol := strings.TrimSpace(fmt.Sprint(payload["protocol"])); protocol != "" {
 		payload["protocol"] = protocol
 	}
-	if tokens := normalizeStringSlice(payload["tokens"]); len(tokens) > 0 {
+	tokens := normalizeStringSlice(payload["tokens"])
+	if len(tokens) > 0 {
 		payload["tokens"] = tokens
 	} else {
 		delete(payload, "tokens")
@@ -190,6 +439,9 @@ func normalizeAIProvider(payload map[string]any) (map[string]any, error) {
 
 	if failover, ok := payload["tokenFailoverConfig"].(map[string]any); ok && len(failover) > 0 {
 		payload["tokenFailoverConfig"] = clonePayload(failover)
+	}
+	if err := normalizeProviderAdvancedConfigs(rawConfigs); err != nil {
+		return nil, err
 	}
 
 	switch providerType {
@@ -212,7 +464,7 @@ func normalizeAIProvider(payload map[string]any) (map[string]any, error) {
 	case "claude":
 		normalizeClaudeProviderConfigs(rawConfigs)
 	case "vertex":
-		if err := normalizeVertexProviderConfigs(rawConfigs); err != nil {
+		if err := normalizeVertexProviderConfigs(rawConfigs, tokens); err != nil {
 			return nil, err
 		}
 	case "bedrock":
@@ -226,6 +478,54 @@ func normalizeAIProvider(payload map[string]any) (map[string]any, error) {
 	}
 
 	return payload, nil
+}
+
+func normalizeProviderAdvancedConfigs(rawConfigs map[string]any) error {
+	if domain := strings.TrimSpace(stringValue(rawConfigs["providerDomain"])); domain != "" {
+		if err := validateProviderDomain(domain); err != nil {
+			return fmt.Errorf("providerDomain contains an invalid domain name: %s", domain)
+		}
+		rawConfigs["providerDomain"] = domain
+	}
+	if rawConfigs["promoteThinkingOnEmpty"] != nil {
+		rawConfigs["promoteThinkingOnEmpty"] = boolFromAny(rawConfigs["promoteThinkingOnEmpty"], false)
+	}
+	if rawConfigs["hiclawMode"] != nil {
+		rawConfigs["hiclawMode"] = boolFromAny(rawConfigs["hiclawMode"], false)
+		if boolFromAny(rawConfigs["hiclawMode"], false) {
+			rawConfigs["promoteThinkingOnEmpty"] = true
+		}
+	}
+	if rawConfigs["providerBasePath"] != nil {
+		basePath := strings.TrimSpace(stringValue(rawConfigs["providerBasePath"]))
+		if basePath == "" {
+			delete(rawConfigs, "providerBasePath")
+		} else {
+			if !strings.HasPrefix(basePath, "/") {
+				return errors.New("providerBasePath must start with '/'")
+			}
+			rawConfigs["providerBasePath"] = basePath
+		}
+	}
+	if rawConfigs["bedrockPromptCachePointPositions"] != nil {
+		positions, err := normalizeBedrockPromptCachePointPositions(rawConfigs["bedrockPromptCachePointPositions"])
+		if err != nil {
+			return err
+		}
+		rawConfigs["bedrockPromptCachePointPositions"] = positions
+	}
+	if rawConfigs["promptCacheRetention"] != nil {
+		retention, err := normalizePromptCacheRetentionConfig(rawConfigs["promptCacheRetention"])
+		if err != nil {
+			return err
+		}
+		if retention == "" {
+			delete(rawConfigs, "promptCacheRetention")
+		} else {
+			rawConfigs["promptCacheRetention"] = retention
+		}
+	}
+	return nil
 }
 
 func normalizeMCPServer(payload map[string]any, ingressClass string) (map[string]any, error) {
@@ -391,28 +691,33 @@ func normalizeClaudeProviderConfigs(rawConfigs map[string]any) {
 	}
 }
 
-func normalizeVertexProviderConfigs(rawConfigs map[string]any) error {
+func normalizeVertexProviderConfigs(rawConfigs map[string]any, tokens []string) error {
 	region := strings.TrimSpace(stringValue(rawConfigs["vertexRegion"]))
-	if region == "" {
+	if region == "" && len(tokens) == 0 {
 		return errors.New("vertexRegion cannot be empty")
 	}
-	rawConfigs["vertexRegion"] = strings.ToLower(region)
+	if region != "" {
+		rawConfigs["vertexRegion"] = strings.ToLower(region)
+	}
 
-	if strings.TrimSpace(stringValue(rawConfigs["vertexProjectId"])) == "" {
+	if strings.TrimSpace(stringValue(rawConfigs["vertexProjectId"])) == "" && len(tokens) == 0 {
 		return errors.New("vertexProjectId cannot be empty")
 	}
 	authKey := strings.TrimSpace(stringValue(rawConfigs["vertexAuthKey"]))
-	if authKey == "" {
+	if authKey == "" && len(tokens) == 0 {
 		return errors.New("vertexAuthKey cannot be empty")
 	}
-	authKeyJSON := map[string]any{}
-	if err := json.Unmarshal([]byte(authKey), &authKeyJSON); err != nil {
-		return fmt.Errorf("vertexAuthKey must contain a valid JSON object: %w", err)
-	}
-	for _, key := range []string{"client_email", "private_key_id", "private_key", "token_uri"} {
-		if strings.TrimSpace(stringValue(authKeyJSON[key])) == "" {
-			return fmt.Errorf("vertexAuthKey must contain a valid JSON object with a string property: %s", key)
+	if authKey != "" {
+		authKeyJSON := map[string]any{}
+		if err := json.Unmarshal([]byte(authKey), &authKeyJSON); err != nil {
+			return fmt.Errorf("vertexAuthKey must contain a valid JSON object: %w", err)
 		}
+		for _, key := range []string{"client_email", "private_key_id", "private_key", "token_uri"} {
+			if strings.TrimSpace(stringValue(authKeyJSON[key])) == "" {
+				return fmt.Errorf("vertexAuthKey must contain a valid JSON object with a string property: %s", key)
+			}
+		}
+		rawConfigs["vertexAuthKey"] = authKey
 	}
 
 	if rawConfigs["vertexTokenRefreshAhead"] != nil {
@@ -433,7 +738,11 @@ func normalizeVertexProviderConfigs(rawConfigs map[string]any) error {
 			}
 		}
 	}
-	rawConfigs["vertexAuthServiceName"] = "vertex-auth.internal"
+	if len(tokens) == 0 {
+		rawConfigs["vertexAuthServiceName"] = "vertex-auth.internal"
+	} else {
+		delete(rawConfigs, "vertexAuthServiceName")
+	}
 	return nil
 }
 
@@ -448,6 +757,89 @@ func normalizeBedrockProviderConfigs(rawConfigs map[string]any) error {
 		return errors.New("awsSecretKey cannot be empty")
 	}
 	return nil
+}
+
+func normalizeBedrockPromptCachePointPositions(value any) (map[string]bool, error) {
+	switch typed := value.(type) {
+	case map[string]bool:
+		result := make(map[string]bool, len(typed))
+		for key, enabled := range typed {
+			normalizedKey := normalizeBedrockPromptCachePointPositionKey(key)
+			if normalizedKey == "" {
+				return nil, fmt.Errorf("bedrockPromptCachePointPositions contains an empty key")
+			}
+			result[normalizedKey] = enabled
+		}
+		return result, nil
+	case map[string]any:
+		result := make(map[string]bool, len(typed))
+		for key, raw := range typed {
+			normalizedKey := normalizeBedrockPromptCachePointPositionKey(key)
+			if normalizedKey == "" {
+				return nil, fmt.Errorf("bedrockPromptCachePointPositions contains an empty key")
+			}
+			boolValue, err := normalizeBoolFieldValue(raw, "bedrockPromptCachePointPositions."+normalizedKey)
+			if err != nil {
+				return nil, err
+			}
+			result[normalizedKey] = boolValue
+		}
+		return result, nil
+	default:
+		return nil, errors.New("bedrockPromptCachePointPositions must be an object")
+	}
+}
+
+func normalizePromptCacheRetentionConfig(value any) (string, error) {
+	retention := strings.ToLower(strings.TrimSpace(stringValue(value)))
+	retention = strings.ReplaceAll(retention, "-", "_")
+	retention = strings.ReplaceAll(retention, " ", "_")
+	switch retention {
+	case "", "<nil>":
+		return "", nil
+	case "inmemory":
+		return "in_memory", nil
+	case "in_memory", "24h":
+		return retention, nil
+	default:
+		return "", errors.New("promptCacheRetention must be in_memory or 24h")
+	}
+}
+
+func normalizeBedrockPromptCachePointPositionKey(raw string) string {
+	key := strings.TrimSpace(raw)
+	if key == "" {
+		return ""
+	}
+	normalized := strings.ToLower(key)
+	normalized = strings.ReplaceAll(normalized, "_", "")
+	normalized = strings.ReplaceAll(normalized, "-", "")
+	switch normalized {
+	case "systemprompt":
+		return "systemPrompt"
+	case "lastusermessage":
+		return "lastUserMessage"
+	case "lastmessage":
+		return "lastMessage"
+	default:
+		return key
+	}
+}
+
+func normalizeBoolFieldValue(value any, field string) (bool, error) {
+	switch typed := value.(type) {
+	case bool:
+		return typed, nil
+	case string:
+		normalized := strings.ToLower(strings.TrimSpace(typed))
+		switch normalized {
+		case "true", "1", "yes":
+			return true, nil
+		case "false", "0", "no":
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("%s must be a boolean", field)
 }
 
 func normalizeOllamaProviderConfigs(rawConfigs map[string]any) error {
@@ -967,6 +1359,22 @@ func toAnySlice(value any) []any {
 	default:
 		return nil
 	}
+}
+
+func toMapSlice(value any) []map[string]any {
+	items := toAnySlice(value)
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		typed, _ := item.(map[string]any)
+		if len(typed) == 0 {
+			continue
+		}
+		result = append(result, typed)
+	}
+	return result
 }
 
 func uniqueStrings(items []string) []string {

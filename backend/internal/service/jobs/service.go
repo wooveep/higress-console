@@ -72,8 +72,8 @@ type Service struct {
 
 	cron *gcron.Cron
 
-	schemaOnce sync.Once
-	schemaErr  error
+	schemaMu      sync.Mutex
+	schemaChecked bool
 
 	startMu sync.Mutex
 	started bool
@@ -967,11 +967,13 @@ func (s *Service) db(ctx context.Context) (*sql.DB, error) {
 	if s.client == nil || !s.client.Enabled() || s.client.DB() == nil {
 		return nil, portaldbclient.ErrUnavailable
 	}
-	s.schemaOnce.Do(func() {
-		s.schemaErr = s.client.EnsureSchema(ctx)
-	})
-	if s.schemaErr != nil {
-		return nil, s.schemaErr
+	s.schemaMu.Lock()
+	defer s.schemaMu.Unlock()
+	if !s.schemaChecked {
+		if err := s.client.EnsureSchema(ctx); err != nil {
+			return nil, err
+		}
+		s.schemaChecked = true
 	}
 	return s.client.DB(), nil
 }

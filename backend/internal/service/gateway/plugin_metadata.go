@@ -3,6 +3,7 @@ package gateway
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -43,31 +44,46 @@ func (s *Service) mergeWasmPlugins(items []map[string]any) []map[string]any {
 }
 
 func (s *Service) listBuiltinWasmPlugins() []map[string]any {
-	root, ok := resolveBuiltinPluginRoot()
-	if !ok {
+	roots := resolveBuiltinPluginRoots()
+	if len(roots) == 0 {
 		return []map[string]any{}
 	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return []map[string]any{}
-	}
-	items := make([]map[string]any, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
+	index := map[string]map[string]any{}
+	for _, root := range roots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
 			continue
 		}
-		if item, ok := s.loadBuiltinWasmPlugin(entry.Name()); ok {
-			items = append(items, item)
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			key := strings.TrimSpace(strings.ToLower(entry.Name()))
+			if key == "" || index[key] != nil {
+				continue
+			}
+			if item, ok := loadBuiltinWasmPluginFromRoot(root, entry.Name()); ok {
+				index[key] = item
+			}
 		}
+	}
+	items := make([]map[string]any, 0, len(index))
+	for _, item := range index {
+		items = append(items, item)
 	}
 	return items
 }
 
 func (s *Service) loadBuiltinWasmPlugin(name string) (map[string]any, bool) {
-	base, ok := resolveBuiltinPluginRoot()
-	if !ok {
-		return nil, false
+	for _, root := range resolveBuiltinPluginRoots() {
+		if item, ok := loadBuiltinWasmPluginFromRoot(root, name); ok {
+			return item, true
+		}
 	}
+	return nil, false
+}
+
+func loadBuiltinWasmPluginFromRoot(base, name string) (map[string]any, bool) {
 	root := filepath.Join(base, name)
 	specBytes, err := os.ReadFile(filepath.Join(root, "spec.yaml"))
 	if err != nil {
@@ -109,25 +125,46 @@ func (s *Service) loadBuiltinWasmPlugin(name string) (map[string]any, bool) {
 	return item, true
 }
 
-func resolveBuiltinPluginRoot() (string, bool) {
+func resolveBuiltinPluginRoots() []string {
+	roots := make([]string, 0, len(builtinPluginResourceDirs))
+	seen := map[string]struct{}{}
 	for _, resourceDir := range builtinPluginResourceDirs {
 		for _, candidate := range relativeResourceCandidates(resourceDir) {
 			if isBuiltinPluginRoot(candidate) {
-				return filepath.Clean(candidate), true
+				cleaned := filepath.Clean(candidate)
+				if _, ok := seen[cleaned]; ok {
+					continue
+				}
+				seen[cleaned] = struct{}{}
+				roots = append(roots, cleaned)
+				break
 			}
 		}
 	}
-	return "", false
+	return roots
 }
 
 func relativeResourceCandidates(resourceDir string) []string {
-	return []string{
+	candidates := []string{
+		resourceDir,
 		filepath.Join("..", resourceDir),
 		filepath.Join("..", "..", resourceDir),
 		filepath.Join("..", "..", "..", resourceDir),
 		filepath.Join("..", "..", "..", "..", resourceDir),
 		filepath.Join("..", "..", "..", "..", "..", resourceDir),
 	}
+	if _, file, _, ok := runtime.Caller(0); ok {
+		base := filepath.Dir(file)
+		candidates = append(candidates,
+			filepath.Join(base, resourceDir),
+			filepath.Join(base, "..", resourceDir),
+			filepath.Join(base, "..", "..", resourceDir),
+			filepath.Join(base, "..", "..", "..", resourceDir),
+			filepath.Join(base, "..", "..", "..", "..", resourceDir),
+			filepath.Join(base, "..", "..", "..", "..", "..", resourceDir),
+		)
+	}
+	return candidates
 }
 
 func isBuiltinPluginRoot(path string) bool {

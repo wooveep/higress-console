@@ -89,7 +89,7 @@ spec:
             - name: PORTAL_MYSQL_DATABASE
               value: {{ $portalDB.database | quote }}
             - name: PORTAL_MYSQL_PARAMS
-              value: {{ $portalDB.jdbcParams | quote }}
+              value: {{ $portalDB.params | default "parseTime=true&charset=utf8mb4&loc=UTC" | quote }}
             - name: HIGRESS_PORTAL_DB_URL
               value: "jdbc:mysql://{{ $portalDBHost }}:{{ $portalDB.port }}/{{ $portalDB.database }}?{{ $portalDB.jdbcParams }}"
             - name: HIGRESS_PORTAL_DB_USERNAME

@@ -142,12 +142,16 @@ func resolvePortalDBConfig(values runtimeConfigValues, lookup func(string) strin
 	} else if discovered {
 		enabled = true
 	}
+	autoMigrate := values.PortalDBAutoMigrate
+	if override, ok := parseOptionalBool(lookup("AIGATEWAY_CONSOLE_PORTALDB_AUTO_MIGRATE")); ok {
+		autoMigrate = override
+	}
 
 	return portaldbclient.Config{
 		Enabled:     enabled,
 		Driver:      driver,
 		DSN:         dsn,
-		AutoMigrate: values.PortalDBAutoMigrate,
+		AutoMigrate: autoMigrate,
 	}
 }
 
@@ -239,7 +243,7 @@ func hasPortalMySQLConnEnv(lookup func(string) string) bool {
 }
 
 func buildMySQLDSN(host, port, user, password, database, params string) string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?%s", user, password, host, port, database, params)
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?%s", user, password, host, port, database, normalizeMySQLParams(params))
 }
 
 func buildClusterServiceURL(scheme, service, namespace, clusterDomain, port, path string) string {
@@ -294,9 +298,39 @@ func parseMySQLJDBCURL(raw string) (host string, port string, database string, p
 	if database == "" {
 		return "", "", "", "", fmt.Errorf("missing database in jdbc mysql url")
 	}
-	params = parsed.RawQuery
-	if params == "" {
-		params = "parseTime=true&charset=utf8mb4&loc=UTC"
-	}
+	params = normalizeMySQLParams(parsed.RawQuery)
 	return host, port, database, params, nil
+}
+
+func normalizeMySQLParams(raw string) string {
+	const defaultParams = "parseTime=true&charset=utf8mb4&loc=UTC"
+	if strings.TrimSpace(raw) == "" {
+		return defaultParams
+	}
+
+	query, err := url.ParseQuery(raw)
+	if err != nil {
+		return raw
+	}
+
+	if query.Get("parseTime") == "" {
+		query.Set("parseTime", "true")
+	}
+	if query.Get("charset") == "" {
+		if encoding := strings.TrimSpace(query.Get("characterEncoding")); encoding != "" {
+			query.Set("charset", encoding)
+		} else {
+			query.Set("charset", "utf8mb4")
+		}
+	}
+	if query.Get("loc") == "" {
+		if timezone := strings.TrimSpace(query.Get("serverTimezone")); timezone != "" {
+			query.Set("loc", timezone)
+		} else {
+			query.Set("loc", "UTC")
+		}
+	}
+
+	query.Del("serverTimezone")
+	return query.Encode()
 }

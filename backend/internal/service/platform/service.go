@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
-	"gopkg.in/yaml.v3"
 
 	"github.com/wooveep/aigateway-console/backend/internal/consts"
 	"github.com/wooveep/aigateway-console/backend/internal/model/response"
@@ -83,10 +82,14 @@ func (s *Service) SystemConfig(ctx context.Context) (*response.SystemConfigSnaps
 			"test/contracts/system",
 			"test/contracts/consumers",
 			"test/contracts/org",
+			"test/contracts/portal-invite",
 			"test/contracts/routes",
 			"test/contracts/mcp",
 			"test/contracts/ai-routes",
 			"test/contracts/model-assets",
+			"test/contracts/agent-catalog",
+			"test/contracts/ai-quota",
+			"test/contracts/ai-sensitive",
 		},
 		Properties: s.GetConfigs(ctx),
 	}, nil
@@ -293,8 +296,9 @@ func (s *Service) BuildDashboardConfigData(ctx context.Context, dashboardType, d
 
 func (s *Service) NativeDashboard(ctx context.Context, dashboardType string, from, to int64, gateway, namespace string) (*response.NativeDashboardData, error) {
 	now := time.Now().UnixMilli()
+	defaultRangeMS := int64(time.Hour / time.Millisecond)
 	if from == 0 {
-		from = now - 5*60*1000
+		from = now - defaultRangeMS
 	}
 	if to == 0 {
 		to = now
@@ -305,80 +309,12 @@ func (s *Service) NativeDashboard(ctx context.Context, dashboardType string, fro
 		Type:           strings.ToUpper(firstNonEmpty(dashboardType, "MAIN")),
 		From:           from,
 		To:             to,
-		DefaultRangeMS: 5 * 60 * 1000,
-		Rows:           []response.NativeDashboardRow{},
+		DefaultRangeMS: defaultRangeMS,
 	}
-	data.Variables.Gateway = response.NativeDashboardVariableState{Value: gateway, Options: []string{gateway}}
+	data.Variables.Gateway = response.NativeDashboardVariableState{Value: firstNonEmpty(gateway, "aigateway"), Options: []string{firstNonEmpty(gateway, "aigateway")}}
 	data.Variables.Namespace = response.NativeDashboardVariableState{Value: firstNonEmpty(namespace, "aigateway-system"), Options: []string{"aigateway-system"}}
+	data.Rows = s.buildNativeDashboardRows(ctx, data.Type, from, to)
 	return data, nil
-}
-
-func (s *Service) GetAIGatewayConfig(ctx context.Context) (string, error) {
-	data, err := s.readMigratedConfigMap(ctx)
-	if err != nil {
-		return "", err
-	}
-	return k8sclient.RenderConfigMapYAML(consts.DefaultConfigMapName, data)
-}
-
-func (s *Service) SetAIGatewayConfig(ctx context.Context, raw string) (string, error) {
-	data, err := k8sclient.ParseConfigMapYAML(raw)
-	if err != nil {
-		return "", err
-	}
-	migrateLegacyConfigData(data)
-	requiredKeys := []string{"aigateway", "mesh", "meshNetworks"}
-	for _, key := range requiredKeys {
-		if strings.TrimSpace(data[key]) == "" {
-			return "", fmt.Errorf("config map data key %s has an empty value", key)
-		}
-		var node map[string]any
-		if err := yaml.Unmarshal([]byte(data[key]), &node); err != nil {
-			return "", fmt.Errorf("invalid YAML data for key %s: %w", key, err)
-		}
-	}
-	if data["resourceVersion"] == "" {
-		current, err := s.readMigratedConfigMap(ctx)
-		if err == nil {
-			data["resourceVersion"] = current["resourceVersion"]
-		}
-	}
-	if data["resourceVersion"] == "" {
-		data["resourceVersion"] = "1"
-	}
-	if err := s.k8sClient.UpsertConfigMap(ctx, consts.DefaultConfigMapName, data); err != nil {
-		return "", err
-	}
-	return k8sclient.RenderConfigMapYAML(consts.DefaultConfigMapName, data)
-}
-
-func (s *Service) readMigratedConfigMap(ctx context.Context) (map[string]string, error) {
-	data, err := s.k8sClient.ReadConfigMap(ctx, consts.DefaultConfigMapName)
-	if err != nil {
-		return nil, err
-	}
-	if migrateLegacyConfigData(data) {
-		if err := s.k8sClient.UpsertConfigMap(ctx, consts.DefaultConfigMapName, data); err != nil {
-			return nil, err
-		}
-	}
-	return data, nil
-}
-
-func migrateLegacyConfigData(data map[string]string) bool {
-	if data == nil {
-		return false
-	}
-	if strings.TrimSpace(data["aigateway"]) != "" {
-		return false
-	}
-	legacy := strings.TrimSpace(data["higress"])
-	if legacy == "" {
-		return false
-	}
-	data["aigateway"] = data["higress"]
-	delete(data, "higress")
-	return true
 }
 
 func (s *Service) bootstrapDefaultResourcesLocked(ctx context.Context, adminPassword string) error {

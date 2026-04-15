@@ -1,40 +1,33 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, shallowRef } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import PageSection from '@/components/common/PageSection.vue';
-import { getAIGatewayConfig, getSystemInfo, updateAIGatewayConfig } from '@/services/system';
-import { showSuccess } from '@/lib/feedback';
+import HigressGlobalConfigForm from '@/components/system/HigressGlobalConfigForm.vue';
+import { useHigressGlobalConfig } from '@/composables/system/useHigressGlobalConfig';
+import { getSystemInfo } from '@/services/system';
 
 const router = useRouter();
 const { t } = useI18n();
-const loading = ref(false);
-const saving = ref(false);
-const systemInfo = ref<Record<string, any>>({});
-const configText = ref('');
+const systemInfoLoading = shallowRef(false);
+const systemInfo = shallowRef<Record<string, any>>({});
+const configState = useHigressGlobalConfig();
 
-async function load() {
-  loading.value = true;
+async function loadSystemInfo() {
+  systemInfoLoading.value = true;
   try {
-    const [info, config] = await Promise.all([
-      getSystemInfo().catch(() => ({})),
-      getAIGatewayConfig().catch(() => ''),
-    ]);
+    const info = await getSystemInfo().catch(() => ({}));
     systemInfo.value = info || {};
-    configText.value = typeof config === 'string' ? config : JSON.stringify(config, null, 2);
   } finally {
-    loading.value = false;
+    systemInfoLoading.value = false;
   }
 }
 
-async function saveConfig() {
-  saving.value = true;
-  try {
-    await updateAIGatewayConfig(configText.value);
-    showSuccess(t('misc.save'));
-  } finally {
-    saving.value = false;
-  }
+async function load() {
+  await Promise.all([
+    loadSystemInfo(),
+    configState.load(),
+  ]);
 }
 
 onMounted(load);
@@ -45,9 +38,9 @@ onMounted(load);
     <PageSection :title="t('menu.systemSettings')">
       <template #actions>
         <a-button @click="router.push('/system/jobs')">Jobs 运维</a-button>
-        <a-button @click="load">{{ t('misc.refresh') }}</a-button>
+        <a-button @click="loadSystemInfo">{{ t('misc.refresh') }}</a-button>
       </template>
-      <a-skeleton v-if="loading" active />
+      <a-skeleton v-if="systemInfoLoading" active />
       <div v-else class="system-page__overview">
         <article
           v-for="(value, key) in systemInfo"
@@ -60,12 +53,22 @@ onMounted(load);
       </div>
     </PageSection>
 
-    <PageSection title="AIGateway Config">
-      <a-textarea v-model:value="configText" :rows="24" spellcheck="false" />
-      <div class="system-page__actions">
-        <a-button @click="load">{{ t('misc.refresh') }}</a-button>
-        <a-button type="primary" :loading="saving" @click="saveConfig">{{ t('misc.save') }}</a-button>
-      </div>
+    <PageSection title="Higress Config">
+      <HigressGlobalConfigForm
+        :loading="configState.loading.value"
+        :saving="configState.saving.value"
+        :value="configState.formState.value"
+        :raw-yaml="configState.rawYaml.value"
+        :dirty="configState.dirty.value"
+        :save-disabled="configState.saveDisabled.value"
+        :parse-error="configState.parseError.value"
+        :save-error="configState.saveError.value"
+        :validation-errors="configState.validationErrors.value"
+        @refresh="configState.load"
+        @save="configState.save"
+        @update-form="configState.updateForm"
+        @update-raw-yaml="configState.updateRawYaml"
+      />
     </PageSection>
   </div>
 </template>
@@ -101,13 +104,6 @@ onMounted(load);
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.system-page__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 18px;
 }
 
 @media (max-width: 1023px) {

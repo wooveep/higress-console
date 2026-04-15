@@ -16,58 +16,58 @@ import (
 )
 
 const (
-	higressAnnotationDestination        = "higress.io/destination"
-	higressAnnotationUseRegex           = "higress.io/use-regex"
-	higressAnnotationIgnorePathCase     = "higress.io/ignore-path-case"
-	higressAnnotationMatchMethod        = "higress.io/match-method"
+	higressAnnotationDestination         = "higress.io/destination"
+	higressAnnotationUseRegex            = "higress.io/use-regex"
+	higressAnnotationIgnorePathCase      = "higress.io/ignore-path-case"
+	higressAnnotationMatchMethod         = "higress.io/match-method"
 	higressAnnotationResourceDescription = "higress.io/resource-description"
-	higressAnnotationProxyNextUpstream  = "higress.io/proxy-next-upstream"
-	higressAnnotationProxyNextTries     = "higress.io/proxy-next-upstream-tries"
-	higressAnnotationProxyNextTimeout   = "higress.io/proxy-next-upstream-timeout"
-	higressAnnotationProxyNextEnabled   = "higress.io/enable-proxy-next-upstream"
-	higressAnnotationRewriteEnabled     = "higress.io/enable-rewrite"
-	higressAnnotationRewritePath        = "higress.io/rewrite-path"
-	higressAnnotationRewriteTarget      = "higress.io/rewrite-target"
-	higressAnnotationUpstreamVHost      = "higress.io/upstream-vhost"
-	higressAnnotationAuthConsumerLevels = "higress.io/auth-consumer-levels"
-	higressAnnotationComment            = "higress.io/comment"
-	higressAnnotationHeaderMatch        = "-match-header-"
-	higressAnnotationQueryMatch         = "-match-query-"
-	higressAnnotationPseudoHeaderMatch  = "-match-pseudo-header-"
-	higressLabelDomainPrefix            = "higress.io/domain_"
-	higressLabelConfigMapType           = "higress.io/config-map-type"
-	higressLabelConfigMapTypeDomain     = "domain"
-	higressLabelConfigMapTypeAIRoute    = "ai-route"
-	higressLabelResourceDefiner         = "higress.io/resource-definer"
-	higressLabelResourceDefinerValue    = "higress"
-	higressLabelInternal                = "higress.io/internal"
-	higressLabelBizType                 = "higress.io/biz-type"
-	higressLabelBizTypeMCPServer        = "mcp-server"
-	higressLabelMCPServerType           = "higress.io/mcp-server-type"
-	higressLabelWasmPluginName          = "higress.io/wasm-plugin-name"
-	higressLabelWasmPluginVersion       = "higress.io/wasm-plugin-version"
-	higressAnnotationTrueValue          = "true"
-	higressSecretTLS                    = "kubernetes.io/tls"
-	higressSecretTLSCRT                 = "tls.crt"
-	higressSecretTLSKey                 = "tls.key"
-	higressDataField                    = "data"
-	higressMcpBridgeKind                = "McpBridge"
-	higressMcpBridgeAPIGroup            = "networking.higress.io"
-	higressMcpBridgeDefaultName         = "default"
-	higressConfigMapName               = "higress-config"
-	higressWasmPluginResource           = "wasmplugin.extensions.higress.io"
-	higressEnvoyFilterResource          = "envoyfilters.networking.istio.io"
-	higressAIRoutePrefix                = "ai-route-"
-	higressDomainPrefix                 = "domain-"
-	higressProviderDefaultProtocol      = "openai/v1"
-	higressProviderPluginProtocolOpenAI = "openai"
-	higressMCPConfigKey                 = "higress"
-	higressMCPServerPathPrefix          = "/mcp-servers"
+	higressAnnotationProxyNextUpstream   = "higress.io/proxy-next-upstream"
+	higressAnnotationProxyNextTries      = "higress.io/proxy-next-upstream-tries"
+	higressAnnotationProxyNextTimeout    = "higress.io/proxy-next-upstream-timeout"
+	higressAnnotationProxyNextEnabled    = "higress.io/enable-proxy-next-upstream"
+	higressAnnotationRewriteEnabled      = "higress.io/enable-rewrite"
+	higressAnnotationRewritePath         = "higress.io/rewrite-path"
+	higressAnnotationRewriteTarget       = "higress.io/rewrite-target"
+	higressAnnotationUpstreamVHost       = "higress.io/upstream-vhost"
+	higressAnnotationAuthConsumerLevels  = "higress.io/auth-consumer-levels"
+	higressAnnotationComment             = "higress.io/comment"
+	higressAnnotationHeaderMatch         = "-match-header-"
+	higressAnnotationQueryMatch          = "-match-query-"
+	higressAnnotationPseudoHeaderMatch   = "-match-pseudo-header-"
+	higressLabelDomainPrefix             = "higress.io/domain_"
+	higressLabelConfigMapType            = "higress.io/config-map-type"
+	higressLabelConfigMapTypeDomain      = "domain"
+	higressLabelConfigMapTypeAIRoute     = "ai-route"
+	higressLabelResourceDefiner          = "higress.io/resource-definer"
+	higressLabelResourceDefinerValue     = "higress"
+	higressLabelInternal                 = "higress.io/internal"
+	higressLabelBizType                  = "higress.io/biz-type"
+	higressLabelBizTypeMCPServer         = "mcp-server"
+	higressLabelMCPServerType            = "higress.io/mcp-server-type"
+	higressLabelWasmPluginName           = "higress.io/wasm-plugin-name"
+	higressLabelWasmPluginVersion        = "higress.io/wasm-plugin-version"
+	higressAnnotationTrueValue           = "true"
+	higressSecretTLS                     = "kubernetes.io/tls"
+	higressSecretTLSCRT                  = "tls.crt"
+	higressSecretTLSKey                  = "tls.key"
+	higressDataField                     = "data"
+	higressMcpBridgeKind                 = "McpBridge"
+	higressMcpBridgeAPIGroup             = "networking.higress.io"
+	higressMcpBridgeDefaultName          = "default"
+	higressConfigMapName                 = "higress-config"
+	higressWasmPluginResource            = "wasmplugin.extensions.higress.io"
+	higressEnvoyFilterResource           = "envoyfilters.networking.istio.io"
+	higressAIRoutePrefix                 = "ai-route-"
+	higressDomainPrefix                  = "domain-"
+	higressProviderDefaultProtocol       = "openai/v1"
+	higressProviderPluginProtocolOpenAI  = "openai"
+	higressMCPConfigKey                  = "higress"
+	higressMCPServerPathPrefix           = "/mcp-servers"
 )
 
 func isControlPlaneKind(kind string) bool {
 	switch strings.TrimSpace(kind) {
-	case "routes", "domains", "tls-certificates", "ai-routes", "ai-providers", "mcp-servers":
+	case "routes", "domains", "tls-certificates", "ai-routes", "ai-providers", "mcp-servers", "service-sources":
 		return true
 	default:
 		return false
@@ -88,6 +88,8 @@ func (c *RealClient) listControlPlaneResources(ctx context.Context, kind string)
 		return c.listAIProviderResources(ctx)
 	case "mcp-servers":
 		return c.listMCPServerResources(ctx)
+	case "service-sources":
+		return c.listServiceSourceResources(ctx)
 	default:
 		return nil, ErrNotFound
 	}
@@ -107,6 +109,8 @@ func (c *RealClient) getControlPlaneResource(ctx context.Context, kind, name str
 		return c.getAIProviderResource(ctx, name)
 	case "mcp-servers":
 		return c.getMCPServerResource(ctx, name)
+	case "service-sources":
+		return c.getServiceSourceResource(ctx, name)
 	default:
 		return nil, ErrNotFound
 	}
@@ -126,6 +130,8 @@ func (c *RealClient) upsertControlPlaneResource(ctx context.Context, kind, name 
 		return c.upsertAIProviderResource(ctx, name, data)
 	case "mcp-servers":
 		return c.upsertMCPServerResource(ctx, name, data)
+	case "service-sources":
+		return c.upsertServiceSourceResource(ctx, name, data)
 	default:
 		return nil, ErrNotFound
 	}
@@ -148,6 +154,8 @@ func (c *RealClient) deleteControlPlaneResource(ctx context.Context, kind, name 
 		return c.deleteAIProviderResource(ctx, name)
 	case "mcp-servers":
 		return c.deleteMCPServerResource(ctx, name)
+	case "service-sources":
+		return c.deleteServiceSourceResource(ctx, name)
 	default:
 		return ErrNotFound
 	}
@@ -468,6 +476,42 @@ func (c *RealClient) deleteAIProviderResource(ctx context.Context, name string) 
 	return nil
 }
 
+func (c *RealClient) listServiceSourceResources(ctx context.Context) ([]map[string]any, error) {
+	registries, err := c.loadMcpBridgeRegistries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]map[string]any, 0, len(registries))
+	for _, registry := range registries {
+		result = append(result, serviceSourceFromRegistry(registry))
+	}
+	sortResourcesByName(result)
+	return result, nil
+}
+
+func (c *RealClient) getServiceSourceResource(ctx context.Context, name string) (map[string]any, error) {
+	registries, err := c.loadMcpBridgeRegistries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	item, ok := registries[strings.TrimSpace(name)]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return serviceSourceFromRegistry(item), nil
+}
+
+func (c *RealClient) upsertServiceSourceResource(ctx context.Context, name string, data map[string]any) (map[string]any, error) {
+	if err := c.upsertMcpBridgeRegistry(ctx, serviceSourceToRegistry(name, data)); err != nil {
+		return nil, err
+	}
+	return c.getServiceSourceResource(ctx, name)
+}
+
+func (c *RealClient) deleteServiceSourceResource(ctx context.Context, name string) error {
+	return c.removeMcpBridgeRegistry(ctx, name)
+}
+
 func (c *RealClient) updateAIProxyWasmPlugin(ctx context.Context, mutate func(map[string]any) error, providerName string) (map[string]any, error) {
 	plugin, err := c.getAIProxyWasmPlugin(ctx)
 	if err != nil {
@@ -629,6 +673,63 @@ func wasmPluginToProviders(plugin map[string]any) []map[string]any {
 		result = append(result, item)
 	}
 	return result
+}
+
+func serviceSourceFromRegistry(registry map[string]any) map[string]any {
+	item := map[string]any{
+		"name":       stringValue(registry["name"]),
+		"type":       stringValue(registry["type"]),
+		"domain":     stringValue(registry["domain"]),
+		"protocol":   stringValue(registry["protocol"]),
+		"proxyName":  stringValue(registry["proxyName"]),
+		"properties": map[string]any{},
+	}
+	if port := toInt(registry["port"]); port > 0 {
+		item["port"] = port
+	}
+	if sni := stringValue(registry["sni"]); sni != "" {
+		item["sni"] = sni
+	}
+	if vport := toInt(registry["vport"]); vport > 0 {
+		item["vport"] = vport
+	}
+	properties := map[string]any{}
+	for key, value := range registry {
+		switch key {
+		case "name", "type", "domain", "port", "protocol", "proxyName", "sni", "vport":
+			continue
+		default:
+			properties[key] = value
+		}
+	}
+	item["properties"] = properties
+	return item
+}
+
+func serviceSourceToRegistry(name string, data map[string]any) map[string]any {
+	registry := map[string]any{
+		"name":      strings.TrimSpace(name),
+		"type":      stringValue(data["type"]),
+		"domain":    stringValue(data["domain"]),
+		"protocol":  stringValue(data["protocol"]),
+		"proxyName": stringValue(data["proxyName"]),
+	}
+	if port := toInt(data["port"]); port > 0 {
+		registry["port"] = port
+	}
+	if sni := stringValue(data["sni"]); sni != "" {
+		registry["sni"] = sni
+	}
+	if vport := toInt(data["vport"]); vport > 0 {
+		registry["vport"] = vport
+	}
+	for key, value := range mapValue(data["properties"]) {
+		if key == "" {
+			continue
+		}
+		registry[key] = value
+	}
+	return registry
 }
 
 func providerPayloadFromResource(name string, data map[string]any) map[string]any {

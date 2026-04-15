@@ -129,6 +129,23 @@ func TestBuiltinWasmPluginFallbackExposesConfig(t *testing.T) {
 	require.Contains(t, readme, "CORS")
 }
 
+func TestBuiltinWasmPluginSnapshotOverridesLegacyMetadata(t *testing.T) {
+	svc := New(k8sclient.NewMemoryClient())
+
+	config, err := svc.GetWasmPluginConfig(context.Background(), "ai-statistics")
+	require.NoError(t, err)
+	schema := mapValue(config["schema"])
+	openAPIV3Schema := mapValue(schema["openAPIV3Schema"])
+	properties := mapValue(openAPIV3Schema["properties"])
+	valueLengthLimit := mapValue(properties["value_length_limit"])
+	require.Equal(t, 32000, toInt(valueLengthLimit["default"]))
+
+	readme, err := svc.GetWasmPluginReadme(context.Background(), "ai-statistics")
+	require.NoError(t, err)
+	require.Contains(t, readme, "32000")
+	require.Contains(t, readme, "Detailed Usage Normalization")
+}
+
 func TestMCPServerRouteMetadataIsExplicit(t *testing.T) {
 	svc := New(k8sclient.NewMemoryClient(k8sclient.Config{IngressClass: "aigateway"}))
 
@@ -229,6 +246,55 @@ func TestAIProviderValidationRejectsInvalidVertexAuthKey(t *testing.T) {
 	require.Contains(t, err.Error(), "private_key_id")
 }
 
+func TestAIProviderValidationAllowsVertexExpressModeWithTokens(t *testing.T) {
+	svc := New(k8sclient.NewMemoryClient())
+
+	item, err := svc.Save(context.Background(), "ai-providers", map[string]any{
+		"name":   "vertex-express",
+		"type":   "vertex",
+		"tokens": []any{"api-key"},
+		"rawConfigs": map[string]any{
+			"vertexRegion":     "Asia-East1",
+			"providerBasePath": "/v1beta1",
+		},
+	})
+	require.NoError(t, err)
+	rawConfigs := mapValue(item["rawConfigs"])
+	require.Equal(t, "asia-east1", rawConfigs["vertexRegion"])
+	require.Equal(t, "/v1beta1", rawConfigs["providerBasePath"])
+	require.Empty(t, rawConfigs["vertexAuthServiceName"])
+}
+
+func TestAIProviderValidationNormalizesAdvancedRawConfigs(t *testing.T) {
+	svc := New(k8sclient.NewMemoryClient())
+
+	item, err := svc.Save(context.Background(), "ai-providers", map[string]any{
+		"name": "bedrock-cache",
+		"type": "bedrock",
+		"rawConfigs": map[string]any{
+			"awsRegion":                        "us-west-2",
+			"awsAccessKey":                     "demo-ak",
+			"awsSecretKey":                     "demo-sk",
+			"providerDomain":                   "proxy.example.com",
+			"providerBasePath":                 "/bedrock",
+			"promoteThinkingOnEmpty":           "false",
+			"hiclawMode":                       "true",
+			"promptCacheRetention":             "in-memory",
+			"bedrockPromptCachePointPositions": map[string]any{"system_prompt": true, "last-user-message": "true"},
+		},
+	})
+	require.NoError(t, err)
+	rawConfigs := mapValue(item["rawConfigs"])
+	require.Equal(t, "proxy.example.com", rawConfigs["providerDomain"])
+	require.Equal(t, "/bedrock", rawConfigs["providerBasePath"])
+	require.Equal(t, true, rawConfigs["hiclawMode"])
+	require.Equal(t, true, rawConfigs["promoteThinkingOnEmpty"])
+	require.Equal(t, "in_memory", rawConfigs["promptCacheRetention"])
+	positions := mapValue(rawConfigs["bedrockPromptCachePointPositions"])
+	require.Equal(t, true, positions["systemPrompt"])
+	require.Equal(t, true, positions["lastUserMessage"])
+}
+
 func TestAIProviderValidationNormalizesQwenDefaults(t *testing.T) {
 	svc := New(k8sclient.NewMemoryClient())
 
@@ -244,4 +310,109 @@ func TestAIProviderValidationNormalizesQwenDefaults(t *testing.T) {
 	require.Equal(t, false, rawConfigs["qwenEnableSearch"])
 	require.Equal(t, true, rawConfigs["qwenEnableCompatible"])
 	require.ElementsMatch(t, []string{"file-a", "file-b"}, rawConfigs["qwenFileIds"])
+}
+
+func TestAIRouteValidationRejectsUnknownProvider(t *testing.T) {
+	svc := New(k8sclient.NewMemoryClient())
+
+	_, err := svc.Save(context.Background(), "ai-routes", map[string]any{
+		"name": "chat-demo",
+		"pathPredicate": map[string]any{
+			"matchType":  "PRE",
+			"matchValue": "/v1/chat/completions",
+		},
+		"upstreams": []any{
+			map[string]any{"provider": "missing-provider", "weight": 100},
+		},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown provider: missing-provider")
+}
+
+func TestAIRouteValidationNormalizesFrontendPayload(t *testing.T) {
+	client := k8sclient.NewMemoryClient()
+	_, err := client.UpsertResource(context.Background(), "ai-providers", "openai-demo", map[string]any{
+		"name": "openai-demo",
+		"type": "openai",
+	})
+	require.NoError(t, err)
+	_, err = client.UpsertResource(context.Background(), "ai-providers", "backup-demo", map[string]any{
+		"name": "backup-demo",
+		"type": "openai",
+	})
+	require.NoError(t, err)
+
+	svc := New(client)
+	item, err := svc.Save(context.Background(), "ai-routes", map[string]any{
+		"name": "chat-demo",
+		"pathPredicate": map[string]any{
+			"matchType":  "pre",
+			"matchValue": "/v1/chat/completions",
+		},
+		"headerPredicates": []any{
+			map[string]any{"key": "x-tenant", "matchType": "equal", "matchValue": "team-a"},
+		},
+		"urlParamPredicates": []any{
+			map[string]any{"key": "model", "matchType": "pre", "matchValue": "gpt-4"},
+		},
+		"modelPredicates": []any{
+			map[string]any{"matchType": "pre", "matchValue": "gpt-4"},
+		},
+		"upstreams": []any{
+			map[string]any{"provider": "openai-demo"},
+		},
+		"fallbackConfig": map[string]any{
+			"enabled":       true,
+			"responseCodes": []any{"5XX", "4xx", "5xx"},
+			"upstreams": []any{
+				map[string]any{"provider": "backup-demo"},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "PRE", item["pathPredicate"].(map[string]any)["matchType"])
+	require.Equal(t, 100, toInt(toMapSlice(item["upstreams"])[0]["weight"]))
+	require.Equal(t, "EQUAL", toMapSlice(item["headerPredicates"])[0]["matchType"])
+	require.Equal(t, "PRE", toMapSlice(item["modelPredicates"])[0]["matchType"])
+
+	fallbackConfig, _ := item["fallbackConfig"].(map[string]any)
+	require.Equal(t, "RANDOM", fallbackConfig["fallbackStrategy"])
+	require.Equal(t, []string{"4xx", "5xx"}, normalizeStringSlice(fallbackConfig["responseCodes"]))
+}
+
+func TestAIRouteValidationRejectsEnabledFallbackWithoutResponseCodes(t *testing.T) {
+	client := k8sclient.NewMemoryClient()
+	_, err := client.UpsertResource(context.Background(), "ai-providers", "openai-demo", map[string]any{
+		"name": "openai-demo",
+		"type": "openai",
+	})
+	require.NoError(t, err)
+
+	svc := New(client)
+	_, err = svc.Save(context.Background(), "ai-routes", map[string]any{
+		"name": "chat-demo",
+		"pathPredicate": map[string]any{
+			"matchType":  "PRE",
+			"matchValue": "/v1/chat/completions",
+		},
+		"upstreams": []any{
+			map[string]any{"provider": "openai-demo", "weight": 100},
+		},
+		"fallbackConfig": map[string]any{
+			"enabled": true,
+			"upstreams": []any{
+				map[string]any{"provider": "openai-demo", "weight": 100},
+			},
+		},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "response codes cannot be empty")
+}
+
+func mapValue(value any) map[string]any {
+	typed, ok := value.(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+	return typed
 }
