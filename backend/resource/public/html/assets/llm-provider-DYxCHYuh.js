@@ -1,1 +1,0 @@
-import{n as e}from"./index-DEHBknFx.js";const s=()=>e.get("/v1/ai/providers"),o=r=>e.post("/v1/ai/providers",r),d=r=>e.delete(`/v1/ai/providers/${r}`),i=r=>e.put(`/v1/ai/providers/${r.name}`,r);export{o as a,d,s as g,i as u};
