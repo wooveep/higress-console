@@ -103,6 +103,12 @@ func TestBuildAIRouteIngressPayloadMapsFrontendContract(t *testing.T) {
 			map[string]any{"matchType": "PRE", "matchValue": "gpt-4"},
 		},
 		"methods": []any{"GET", "POST"},
+		"proxyNextUpstream": map[string]any{
+			"enabled":    true,
+			"conditions": []any{"error", "timeout"},
+			"attempts":   3,
+			"timeout":    5,
+		},
 		"authConfig": map[string]any{
 			"enabled":          true,
 			"allowedConsumers": []any{"consumer-a"},
@@ -122,10 +128,15 @@ func TestBuildAIRouteIngressPayloadMapsFrontendContract(t *testing.T) {
 	require.Equal(t, "gpt-4", publicAnnotations["higress.io/prefix-match-header-x-higress-llm-model"])
 	require.Equal(t, "gpt-4", publicAnnotations["higress.io/prefix-match-query-model"])
 	require.Equal(t, "GET POST", publicAnnotations[higressAnnotationMatchMethod])
+	require.Equal(t, "5", publicAnnotations[higressAnnotationProxyNextTimeout])
 
 	internalPayload := buildAIRouteIngressPayload("chat-demo", aiRouteInternalIngressName("chat-demo"), data, services, true)
+	internalAnnotations := routeAnnotations(internalPayload)
 	require.Equal(t, []string{}, internalPayload["domains"])
 	require.Equal(t, higressAIRouteInternalPathPrefix+"chat-demo", mapValue(internalPayload["path"])["matchValue"])
+	require.Equal(t, "3", internalAnnotations[higressAnnotationProxyNextTries])
+	_, exists := internalAnnotations[higressAnnotationProxyNextTimeout]
+	require.False(t, exists)
 }
 
 func TestBuildAIRouteFallbackIngressPayloadAddsFallbackHeader(t *testing.T) {
@@ -155,6 +166,66 @@ func TestBuildAIRouteFallbackIngressPayloadAddsFallbackHeader(t *testing.T) {
 	require.Equal(t, "/v1/chat/completions", mapValue(payload["path"])["matchValue"])
 	require.Equal(t, "team-a", annotations["higress.io/exact-match-header-x-tenant"])
 	require.Equal(t, aiRouteIngressName("chat-demo"), annotations["higress.io/exact-match-header-x-higress-fallback-from"])
+}
+
+func TestSyncMirroredBuiltinIngressRuleSpecCopiesSourceRule(t *testing.T) {
+	spec := map[string]any{
+		"matchRules": []any{
+			map[string]any{
+				"ingress":       []any{"ai-route-chat-demo.internal"},
+				"config":        map[string]any{"provider": "doubao", "chargeType": "amount"},
+				"configDisable": false,
+			},
+			map[string]any{
+				"ingress":       []any{"ai-route-chat-demo.internal-internal"},
+				"config":        map[string]any{"provider": "stale"},
+				"configDisable": true,
+			},
+			map[string]any{
+				"service":       []any{"llm-doubao.internal.dns"},
+				"config":        map[string]any{"keep": "me"},
+				"configDisable": false,
+			},
+		},
+	}
+
+	syncMirroredBuiltinIngressRuleSpec(spec, "ai-route-chat-demo.internal", "ai-route-chat-demo.internal-internal")
+
+	matchRules := toMapSlice(spec["matchRules"])
+	require.Len(t, matchRules, 3)
+
+	internalRuleFound := false
+	for _, rule := range matchRules {
+		if wasmRuleMatchesTargets(rule, map[string][]string{"ingress": {"ai-route-chat-demo.internal-internal"}}) {
+			internalRuleFound = true
+			require.Equal(t, map[string]any{"provider": "doubao", "chargeType": "amount"}, mapValue(rule["config"]))
+			require.Equal(t, false, boolValue(rule["configDisable"]))
+		}
+	}
+	require.True(t, internalRuleFound)
+}
+
+func TestSyncMirroredBuiltinIngressRuleSpecRemovesTargetWhenSourceMissing(t *testing.T) {
+	spec := map[string]any{
+		"matchRules": []any{
+			map[string]any{
+				"ingress":       []any{"ai-route-chat-demo.internal-internal"},
+				"config":        map[string]any{"provider": "stale"},
+				"configDisable": true,
+			},
+			map[string]any{
+				"service":       []any{"llm-doubao.internal.dns"},
+				"config":        map[string]any{"keep": "me"},
+				"configDisable": false,
+			},
+		},
+	}
+
+	syncMirroredBuiltinIngressRuleSpec(spec, "ai-route-chat-demo.internal", "ai-route-chat-demo.internal-internal")
+
+	matchRules := toMapSlice(spec["matchRules"])
+	require.Len(t, matchRules, 1)
+	require.True(t, wasmRuleMatchesTargets(matchRules[0], map[string][]string{"service": {"llm-doubao.internal.dns"}}))
 }
 
 func TestWasmPluginToProvidersExposesTokensProtocolAndModels(t *testing.T) {

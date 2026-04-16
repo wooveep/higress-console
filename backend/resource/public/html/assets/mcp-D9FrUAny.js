@@ -1,1 +1,0 @@
-import{n as r}from"./index-B3mS5kCQ.js";const t="/v1/mcpServer",n=e=>r.get(t,{params:e}),c=e=>r.get(`${t}/${e}`),p=e=>e.name?r.put(`${t}/${e.name}`,e):r.post(t,e),a=e=>r.delete(`${t}/${e}`),m=e=>r.get(`${t}/consumers`,{params:e});export{m as a,p as c,a as d,c as g,n as l};

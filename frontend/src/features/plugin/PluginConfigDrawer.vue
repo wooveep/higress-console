@@ -192,6 +192,7 @@ function submit() {
               :schema="currentSchema"
               :state="schemaState"
               :locale="locale"
+              :allow-custom-fields="record?.name === AI_DATA_MASKING_PLUGIN_NAME"
             />
           </a-tab-pane>
           <a-tab-pane key="yaml" tab="YAML">

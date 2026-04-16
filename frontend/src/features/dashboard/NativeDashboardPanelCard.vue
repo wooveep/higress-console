@@ -8,6 +8,8 @@ import { formatDateTimeDisplay } from '@/utils/time';
 const props = defineProps<{
   panel: NativeDashboardPanel;
   rangeMs: number;
+  from?: number;
+  to?: number;
   translateText: (group: 'titles' | 'series' | 'columns' | 'values', value?: string) => string;
 }>();
 
@@ -57,7 +59,14 @@ function formatBodyCellValue(columnKey: string, value: string | number | null) {
       </div>
 
       <div v-else-if="panel.type === 'timeseries'" class="native-dashboard-panel__chart">
-        <NativeDashboardLineChart v-if="hasContent" :series="panel.series || []" :range-ms="rangeMs" :unit="panel.unit" />
+        <NativeDashboardLineChart
+          v-if="hasContent"
+          :series="panel.series || []"
+          :range-ms="rangeMs"
+          :from="from"
+          :to="to"
+          :unit="panel.unit"
+        />
         <a-empty v-else />
       </div>
 

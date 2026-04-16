@@ -248,7 +248,13 @@ onBeforeUnmount(() => {
             class="native-dashboard__panel-cell"
             :style="{ gridColumn: `${panel.gridPos.x + 1} / span ${Math.max(1, panel.gridPos.w)}` }"
           >
-            <NativeDashboardPanelCard :panel="panel" :range-ms="chartRangeMs" :translate-text="translateText" />
+            <NativeDashboardPanelCard
+              :panel="panel"
+              :range-ms="chartRangeMs"
+              :from="data?.from"
+              :to="data?.to"
+              :translate-text="translateText"
+            />
           </div>
         </div>
       </a-collapse-panel>

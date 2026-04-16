@@ -184,7 +184,8 @@ func pageResult(items []map[string]any) map[string]any {
 }
 
 func listPluginInstances(r *ghttp.Request, gatewayService *gatewaysvc.Service, scope, target string) {
-	items, err := gatewayService.ListPluginInstances(r.Context(), scope, target)
+	aliases := splitAliases(r.GetQuery("aliases").String())
+	items, err := gatewayService.ListPluginInstances(r.Context(), scope, target, aliases...)
 	if err != nil {
 		r.Response.WriteStatusExit(500, g.Map{"success": false, "message": err.Error()})
 		return
@@ -193,12 +194,26 @@ func listPluginInstances(r *ghttp.Request, gatewayService *gatewaysvc.Service, s
 }
 
 func getPluginInstance(r *ghttp.Request, gatewayService *gatewaysvc.Service, scope, target, pluginName string) {
-	item, err := gatewayService.GetPluginInstance(r.Context(), scope, target, pluginName)
+	aliases := splitAliases(r.GetQuery("aliases").String())
+	item, err := gatewayService.GetPluginInstance(r.Context(), scope, target, pluginName, aliases...)
 	if err != nil {
 		r.Response.WriteStatusExit(404, g.Map{"success": false, "message": err.Error()})
 		return
 	}
 	r.Response.WriteJsonExit(g.Map{"success": true, "data": item})
+}
+
+func splitAliases(value string) []string {
+	raw := strings.Split(strings.TrimSpace(value), ",")
+	items := make([]string, 0, len(raw))
+	for _, item := range raw {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		items = append(items, trimmed)
+	}
+	return items
 }
 
 func savePluginInstance(r *ghttp.Request, gatewayService *gatewaysvc.Service, scope, target, pluginName string) {

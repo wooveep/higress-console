@@ -37,8 +37,21 @@ const filtered = computed(() => rows.value.filter((item) => {
   if (!keyword) {
     return true;
   }
-  return [item.name, (item.domains || []).join(',')].some((value) => String(value || '').toLowerCase().includes(keyword));
+  return [item.name, (item.domains || []).join(','), item.pathPredicate?.matchValue, formatRouteDomainDisplay(item)]
+    .some((value) => String(value || '').toLowerCase().includes(keyword));
 }));
+
+function formatRouteDomainDisplay(route: { domains?: string[]; pathPredicate?: { matchValue?: string } }) {
+  const domains = (route.domains || []).map((item) => String(item || '').trim()).filter(Boolean);
+  if (domains.length > 0) {
+    return domains.join(', ');
+  }
+  const internalPath = String(route.pathPredicate?.matchValue || '').trim();
+  if (internalPath) {
+    return `内部路由 · ${internalPath}`;
+  }
+  return '内部路由';
+}
 
 async function load() {
   loading.value = true;
@@ -124,7 +137,7 @@ onMounted(load);
     <a-table :data-source="filtered" :loading="loading" row-key="name" :scroll="{ x: 1120 }">
       <a-table-column key="name" data-index="name" title="名称" />
       <a-table-column key="domains" title="域名">
-        <template #default="{ record }">{{ (record.domains || []).join(', ') || '-' }}</template>
+        <template #default="{ record }">{{ formatRouteDomainDisplay(record) }}</template>
       </a-table-column>
       <a-table-column key="pathPredicate" title="路径匹配">
         <template #default="{ record }">{{ record.pathPredicate?.matchType }} | {{ record.pathPredicate?.matchValue }}</template>

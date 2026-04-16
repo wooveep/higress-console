@@ -63,10 +63,12 @@ function jumpHome() {
     <div class="app-topbar__right">
       <LanguageSwitcher />
       <a-dropdown
-        :menu="{ items: dropdownItems, onClick: handleMenuClick }"
         :trigger="['click']"
         placement="bottomRight"
       >
+        <template #overlay>
+          <a-menu :items="dropdownItems" @click="handleMenuClick" />
+        </template>
         <button
           class="app-topbar__account"
           type="button"

@@ -19,6 +19,8 @@ import {
   getGlobalPluginInstance,
   getRoutePluginInstance,
   getRoutePluginInstances,
+  getRoutePluginInstanceWithAliases,
+  getRoutePluginInstancesWithAliases,
   getServicePluginInstance,
   getServicePluginInstances,
   getWasmPluginReadme,
@@ -166,6 +168,17 @@ function getPluginTargetName() {
   return queryName.value;
 }
 
+function getPluginTargetAliases() {
+  if (queryType.value !== QueryType.AI_ROUTE) {
+    return [];
+  }
+  return [
+    `ai-route-${queryName.value}.internal-internal`,
+    `ai-route-${queryName.value}-fallback.internal`,
+    `ai-route-${queryName.value}-fallback.internal-internal`,
+  ];
+}
+
 async function load() {
   loading.value = true;
   try {
@@ -181,7 +194,9 @@ async function load() {
       } else if (queryType.value === QueryType.SERVICE) {
         enabledList = await getServicePluginInstances(queryName.value).catch(() => []);
       } else {
-        enabledList = await getRoutePluginInstances(getPluginTargetName()).catch(() => []);
+        enabledList = queryType.value === QueryType.AI_ROUTE
+          ? await getRoutePluginInstancesWithAliases(getPluginTargetName(), getPluginTargetAliases()).catch(() => [])
+          : await getRoutePluginInstances(getPluginTargetName()).catch(() => []);
       }
 
       merged = visiblePlugins.map((item: any) => {
@@ -294,6 +309,13 @@ async function loadPluginInstance(record: any) {
     }
     if (queryType.value === QueryType.SERVICE) {
       return await getServicePluginInstance({ name: queryName.value, pluginName: record.name });
+    }
+    if (queryType.value === QueryType.AI_ROUTE) {
+      return await getRoutePluginInstanceWithAliases({
+        name: getPluginTargetName(),
+        pluginName: record.name,
+        aliases: getPluginTargetAliases(),
+      });
     }
     return await getRoutePluginInstance({ name: getPluginTargetName(), pluginName: record.name });
   } catch {

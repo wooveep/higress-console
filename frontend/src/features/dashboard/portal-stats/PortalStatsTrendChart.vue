@@ -14,36 +14,14 @@ const maxTokens = computed(() => {
 
 const chartBars = computed(() => {
   return props.points.map((item) => ({
-    label: formatBucketLabel(item.bucketLabel, props.rangeMs),
-    tooltipLabel: formatBucketTooltip(item.bucketLabel),
+    label: formatChartTimeLabel(item.bucketLabel, props.rangeMs),
+    tooltipLabel: formatDateTimeDisplay(item.bucketLabel),
     height: Math.max(8, Math.round(((item.totalTokens || 0) / maxTokens.value) * 160)),
     value: item.totalTokens || 0,
     requests: item.requestCount || 0,
     costMicroYuan: item.costMicroYuan || 0,
   }));
 });
-
-function parseBucketTimestamp(value: string) {
-  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
-  const parsed = Date.parse(normalized);
-  return Number.isNaN(parsed) ? null : parsed;
-}
-
-function formatBucketLabel(value: string, rangeMs?: number) {
-  const timestamp = parseBucketTimestamp(value);
-  if (timestamp === null) {
-    return value;
-  }
-  return formatChartTimeLabel(timestamp, rangeMs);
-}
-
-function formatBucketTooltip(value: string) {
-  const timestamp = parseBucketTimestamp(value);
-  if (timestamp === null) {
-    return value;
-  }
-  return formatDateTimeDisplay(timestamp);
-}
 </script>
 
 <template>

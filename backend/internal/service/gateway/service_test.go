@@ -82,6 +82,40 @@ func TestPluginInstanceDeleteAndServiceScope(t *testing.T) {
 	require.Len(t, list, 0)
 }
 
+func TestRoutePluginInstancesIncludeBuiltinRuntimeBindings(t *testing.T) {
+	client := k8sclient.NewMemoryClient()
+	_, err := client.UpsertResource(context.Background(), "wasmplugin.extensions.higress.io", "ai-statistics-1.0.0", map[string]any{
+		"metadata": map[string]any{
+			"name": "ai-statistics-1.0.0",
+			"labels": map[string]any{
+				"higress.io/wasm-plugin-name": "ai-statistics",
+			},
+		},
+		"spec": map[string]any{
+			"matchRules": []map[string]any{
+				{
+					"config":        map[string]any{"attributes": []any{"model"}},
+					"configDisable": false,
+					"ingress":       []string{"ai-route-demo.internal-internal"},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	svc := New(client)
+	list, err := svc.ListPluginInstances(context.Background(), "route", "ai-route-demo.internal", "ai-route-demo.internal-internal")
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	require.Equal(t, "ai-statistics", list[0]["pluginName"])
+	require.Equal(t, true, list[0]["enabled"])
+	require.Equal(t, "ai-route-demo.internal-internal", list[0]["runtimeTarget"])
+
+	item, err := svc.GetPluginInstance(context.Background(), "route", "ai-route-demo.internal", "ai-statistics", "ai-route-demo.internal-internal")
+	require.NoError(t, err)
+	require.Equal(t, "builtin-rule", item["runtimeSource"])
+}
+
 func TestWasmPluginReadmeFallsBackToDescription(t *testing.T) {
 	client := k8sclient.NewMemoryClient()
 	_, err := client.UpsertResource(context.Background(), "wasm-plugins", "demo-plugin", map[string]any{
@@ -134,10 +168,10 @@ func TestBuiltinWasmPluginSnapshotOverridesLegacyMetadata(t *testing.T) {
 
 	config, err := svc.GetWasmPluginConfig(context.Background(), "ai-statistics")
 	require.NoError(t, err)
-	schema := mapValue(config["schema"])
-	openAPIV3Schema := mapValue(schema["openAPIV3Schema"])
-	properties := mapValue(openAPIV3Schema["properties"])
-	valueLengthLimit := mapValue(properties["value_length_limit"])
+	schema := mapValueTest(config["schema"])
+	openAPIV3Schema := mapValueTest(schema["openAPIV3Schema"])
+	properties := mapValueTest(openAPIV3Schema["properties"])
+	valueLengthLimit := mapValueTest(properties["value_length_limit"])
 	require.Equal(t, 32000, toInt(valueLengthLimit["default"]))
 
 	readme, err := svc.GetWasmPluginReadme(context.Background(), "ai-statistics")
@@ -259,7 +293,7 @@ func TestAIProviderValidationAllowsVertexExpressModeWithTokens(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	rawConfigs := mapValue(item["rawConfigs"])
+	rawConfigs := mapValueTest(item["rawConfigs"])
 	require.Equal(t, "asia-east1", rawConfigs["vertexRegion"])
 	require.Equal(t, "/v1beta1", rawConfigs["providerBasePath"])
 	require.Empty(t, rawConfigs["vertexAuthServiceName"])
@@ -284,13 +318,13 @@ func TestAIProviderValidationNormalizesAdvancedRawConfigs(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	rawConfigs := mapValue(item["rawConfigs"])
+	rawConfigs := mapValueTest(item["rawConfigs"])
 	require.Equal(t, "proxy.example.com", rawConfigs["providerDomain"])
 	require.Equal(t, "/bedrock", rawConfigs["providerBasePath"])
 	require.Equal(t, true, rawConfigs["hiclawMode"])
 	require.Equal(t, true, rawConfigs["promoteThinkingOnEmpty"])
 	require.Equal(t, "in_memory", rawConfigs["promptCacheRetention"])
-	positions := mapValue(rawConfigs["bedrockPromptCachePointPositions"])
+	positions := mapValueTest(rawConfigs["bedrockPromptCachePointPositions"])
 	require.Equal(t, true, positions["systemPrompt"])
 	require.Equal(t, true, positions["lastUserMessage"])
 }
@@ -409,7 +443,7 @@ func TestAIRouteValidationRejectsEnabledFallbackWithoutResponseCodes(t *testing.
 	require.Contains(t, err.Error(), "response codes cannot be empty")
 }
 
-func mapValue(value any) map[string]any {
+func mapValueTest(value any) map[string]any {
 	typed, ok := value.(map[string]any)
 	if !ok {
 		return map[string]any{}

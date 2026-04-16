@@ -12,7 +12,10 @@ const props = defineProps<{
   state: Record<string, any>;
   locale: string;
   level?: number;
+  allowCustomFields?: boolean;
 }>();
+
+let customFieldCounter = 0;
 
 const fields = computed(() => Object.entries(props.schema.properties || {}).map(([key, node]) => ({
   key,
@@ -21,6 +24,14 @@ const fields = computed(() => Object.entries(props.schema.properties || {}).map(
   description: getLocalizedSchemaText(node, 'description', props.locale, ''),
   required: (props.schema.required || []).includes(key),
 })));
+
+const customFieldKeys = computed(() => {
+  if (!props.allowCustomFields || (props.level || 0) !== 0) {
+    return [];
+  }
+  const definedKeys = new Set(fields.value.map((item) => item.key));
+  return Object.keys(props.state || {}).filter((key) => !definedKeys.has(key));
+});
 
 function ensureObject(key: string) {
   if (!props.state[key] || typeof props.state[key] !== 'object' || Array.isArray(props.state[key])) {
@@ -57,10 +68,75 @@ function getPrimitiveArrayItemValue(item: any) {
 function updatePrimitiveArrayItem(key: string, index: number, value: any) {
   ensureArray(key)[index] = value;
 }
+
+function addCustomField() {
+  customFieldCounter += 1;
+  props.state[`custom_key_${customFieldCounter}`] = '';
+}
+
+function renameCustomField(previousKey: string, nextKey: string) {
+  const trimmed = String(nextKey || '').trim();
+  if (!trimmed || trimmed === previousKey) {
+    return;
+  }
+  if (Object.prototype.hasOwnProperty.call(props.state, trimmed)) {
+    return;
+  }
+  props.state[trimmed] = props.state[previousKey];
+  delete props.state[previousKey];
+}
+
+function updateCustomFieldValue(key: string, value: any) {
+  props.state[key] = value;
+}
+
+function removeCustomField(key: string) {
+  delete props.state[key];
+}
 </script>
 
 <template>
   <div class="plugin-schema-editor" :data-level="level || 0">
+    <section
+      v-if="allowCustomFields && (level || 0) === 0"
+      class="plugin-schema-editor__group"
+    >
+      <header class="plugin-schema-editor__group-header">
+        <div>
+          <div class="plugin-schema-editor__label">
+            <span>自定义参数</span>
+          </div>
+          <p class="plugin-schema-editor__desc">用于补充 Schema 之外的扩展配置，左侧参数名，右侧参数值。</p>
+        </div>
+        <a-button type="link" size="small" @click="addCustomField">
+          <template #icon><PlusOutlined /></template>
+          添加
+        </a-button>
+      </header>
+
+      <div v-if="customFieldKeys.length" class="plugin-schema-editor__array">
+        <div
+          v-for="key in customFieldKeys"
+          :key="key"
+          class="plugin-schema-editor__custom-row"
+        >
+          <a-input
+            :value="key"
+            placeholder="参数名"
+            @change="(event) => renameCustomField(key, event?.target?.value)"
+          />
+          <a-input
+            :value="state[key]"
+            placeholder="参数值"
+            @update:value="(value) => updateCustomFieldValue(key, value)"
+          />
+          <a-button type="text" size="small" danger @click="removeCustomField(key)">
+            <template #icon><MinusCircleOutlined /></template>
+          </a-button>
+        </div>
+      </div>
+    </section>
+
     <div v-for="field in fields" :key="field.key" class="plugin-schema-editor__field">
       <template v-if="field.node.type === 'object'">
         <section class="plugin-schema-editor__group">
@@ -78,6 +154,7 @@ function updatePrimitiveArrayItem(key: string, index: number, value: any) {
             :state="ensureObject(field.key)"
             :locale="locale"
             :level="(level || 0) + 1"
+            :allow-custom-fields="false"
           />
         </section>
       </template>
@@ -117,6 +194,7 @@ function updatePrimitiveArrayItem(key: string, index: number, value: any) {
                 :state="item"
                 :locale="locale"
                 :level="(level || 0) + 1"
+                :allow-custom-fields="false"
               />
             </article>
           </div>
@@ -256,6 +334,13 @@ function updatePrimitiveArrayItem(key: string, index: number, value: any) {
 .plugin-schema-editor__array-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.plugin-schema-editor__custom-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr) auto;
   align-items: center;
   gap: 8px;
 }

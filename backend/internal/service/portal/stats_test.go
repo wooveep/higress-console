@@ -63,18 +63,24 @@ func TestListUsageEventsIncludesAlignedFields(t *testing.T) {
 			"qwen", 9, "chat-route", "/v1/chat/completions", "chat", "failed",
 			"parsed", 500, "upstream_error", "timeout", 10, 5,
 			15, 1, 3200, startedAt, finishedAt, finishedAt,
+		).AddRow(
+			"evt-2", "req-2", "trace-2", "alice", "dept-a", "root/dept-a", nil,
+			"qwen", nil, "chat-route", "/v1/chat/completions", "chat", "success",
+			"missing", 200, "", "", 0, 0,
+			0, 0, 0, startedAt, finishedAt, finishedAt,
 		))
 
 	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
 	items, err := svc.ListUsageEvents(context.Background(), UsageEventsQuery{})
 	require.NoError(t, err)
-	require.Len(t, items, 1)
+	require.Len(t, items, 2)
 	require.Equal(t, "/v1/chat/completions", items[0].RequestPath)
 	require.Equal(t, "upstream_error", items[0].ErrorCode)
 	require.Equal(t, "timeout", items[0].ErrorMessage)
 	require.Equal(t, int64(5500), items[0].ServiceDurationMs)
 	require.NotEmpty(t, items[0].StartedAt)
 	require.NotEmpty(t, items[0].FinishedAt)
+	require.Empty(t, items[1].APIKeyID)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -222,4 +228,18 @@ func TestNormalizeStatsRangeDefaults(t *testing.T) {
 	from, to := normalizeStatsRange(nil, nil, time.Hour)
 	require.True(t, to.After(from))
 	require.WithinDuration(t, to.Add(-time.Hour), from, 2*time.Second)
+	require.Equal(t, time.UTC, to.Location())
+	require.Equal(t, time.UTC, from.Location())
+}
+
+func TestNormalizeStatsRangeUsesUTCMillis(t *testing.T) {
+	fromMillis := time.Date(2026, time.April, 16, 1, 0, 0, 0, time.FixedZone("CST", 8*60*60)).UnixMilli()
+	toMillis := time.Date(2026, time.April, 16, 2, 0, 0, 0, time.FixedZone("CST", 8*60*60)).UnixMilli()
+
+	from, to := normalizeStatsRange(&fromMillis, &toMillis, time.Hour)
+
+	require.Equal(t, time.UTC, from.Location())
+	require.Equal(t, time.UTC, to.Location())
+	require.Equal(t, "2026-04-15T17:00:00Z", from.Format(time.RFC3339))
+	require.Equal(t, "2026-04-15T18:00:00Z", to.Format(time.RFC3339))
 }

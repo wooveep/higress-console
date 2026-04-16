@@ -55,10 +55,27 @@ export const getRoutePluginInstances = (name: string) => {
   return request.get<any, any>(`/v1/routes/${name}/plugin-instances`);
 };
 
+export const getRoutePluginInstancesWithAliases = (name: string, aliases: string[] = []) => {
+  return request.get<any, any>(`/v1/routes/${name}/plugin-instances`, {
+    params: {
+      aliases: aliases.join(','),
+    },
+  });
+};
+
 // 获取指定路由的指定插件配置
 export const getRoutePluginInstance = (params: { name: string; pluginName: string }) => {
   const { name, pluginName } = params;
   return request.get<any, any>(`/v1/routes/${name}/plugin-instances/${pluginName}`);
+};
+
+export const getRoutePluginInstanceWithAliases = (params: { name: string; pluginName: string; aliases?: string[] }) => {
+  const { name, pluginName, aliases = [] } = params;
+  return request.get<any, any>(`/v1/routes/${name}/plugin-instances/${pluginName}`, {
+    params: {
+      aliases: aliases.join(','),
+    },
+  });
 };
 
 // 修改指定路由的指定插件配置

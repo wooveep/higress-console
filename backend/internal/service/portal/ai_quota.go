@@ -146,14 +146,6 @@ func (s *Service) ListAIQuotaConsumers(ctx context.Context, routeName string) ([
 	}
 
 	balances := map[string]int64{}
-	balanceItems, err := newPortalStore(db).listAIQuotaBalances(ctx, routeName)
-	if err != nil {
-		return nil, err
-	}
-	for _, item := range balanceItems {
-		balances[item.ConsumerName] = item.Quota
-	}
-
 	names := map[string]struct{}{
 		builtinQuotaAdminConsumer: {},
 	}
@@ -164,8 +156,25 @@ func (s *Service) ListAIQuotaConsumers(ctx context.Context, routeName string) ([
 	for _, item := range users {
 		names[item.ConsumerName] = struct{}{}
 	}
-	for consumerName := range balances {
-		names[consumerName] = struct{}{}
+
+	legacyBalances, err := newPortalStore(db).listAIQuotaBalances(ctx, routeName)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range legacyBalances {
+		balances[item.ConsumerName] = item.Quota
+		names[item.ConsumerName] = struct{}{}
+	}
+
+	consumerNames := make([]string, 0, len(names))
+	for consumerName := range names {
+		consumerNames = append(consumerNames, consumerName)
+	}
+	sort.Strings(consumerNames)
+	if walletBalances, walletErr := newPortalStore(db).listPortalBillingBalances(ctx, consumerNames); walletErr == nil {
+		for consumerName, balance := range walletBalances {
+			balances[consumerName] = balance
+		}
 	}
 
 	consumers := make([]AIQuotaConsumerQuota, 0, len(names))
@@ -191,22 +200,42 @@ func (s *Service) RefreshAIQuota(ctx context.Context, routeName, consumerName st
 	if routeName == "" || consumerName == "" {
 		return nil, errors.New("routeName and consumerName are required")
 	}
-	if err := newPortalStore(db).saveAIQuotaBalance(ctx, do.PortalAIQuotaBalance{
-		RouteName:    routeName,
-		ConsumerName: consumerName,
-		Quota:        value,
-	}); err != nil {
-		return nil, err
-	}
-	return &AIQuotaConsumerQuota{ConsumerName: consumerName, Quota: value}, nil
-}
-
-func (s *Service) DeltaAIQuota(ctx context.Context, routeName, consumerName string, delta int64) (*AIQuotaConsumerQuota, error) {
-	current, err := s.getAIQuotaBalance(ctx, routeName, consumerName)
+	next, err := newPortalStore(db).refreshPortalBillingBalance(ctx, consumerName, value, routeName)
 	if err != nil {
 		return nil, err
 	}
-	return s.RefreshAIQuota(ctx, routeName, consumerName, current+delta)
+	if err := newPortalStore(db).saveAIQuotaBalance(ctx, do.PortalAIQuotaBalance{
+		RouteName:    routeName,
+		ConsumerName: consumerName,
+		Quota:        next,
+	}); err != nil {
+		return nil, err
+	}
+	return &AIQuotaConsumerQuota{ConsumerName: consumerName, Quota: next}, nil
+}
+
+func (s *Service) DeltaAIQuota(ctx context.Context, routeName, consumerName string, delta int64) (*AIQuotaConsumerQuota, error) {
+	db, err := s.db(ctx)
+	if err != nil {
+		return nil, err
+	}
+	routeName = strings.TrimSpace(routeName)
+	consumerName = strings.TrimSpace(consumerName)
+	if routeName == "" || consumerName == "" {
+		return nil, errors.New("routeName and consumerName are required")
+	}
+	next, err := newPortalStore(db).deltaPortalBillingBalance(ctx, consumerName, delta, routeName)
+	if err != nil {
+		return nil, err
+	}
+	if err := newPortalStore(db).saveAIQuotaBalance(ctx, do.PortalAIQuotaBalance{
+		RouteName:    routeName,
+		ConsumerName: consumerName,
+		Quota:        next,
+	}); err != nil {
+		return nil, err
+	}
+	return &AIQuotaConsumerQuota{ConsumerName: consumerName, Quota: next}, nil
 }
 
 func (s *Service) GetAIQuotaUserPolicy(ctx context.Context, routeName, consumerName string) (*AIQuotaUserPolicy, error) {
@@ -373,6 +402,9 @@ func (s *Service) getAIQuotaBalance(ctx context.Context, routeName, consumerName
 	db, err := s.db(ctx)
 	if err != nil {
 		return 0, err
+	}
+	if balance, walletErr := newPortalStore(db).getPortalBillingBalance(ctx, strings.TrimSpace(consumerName)); walletErr == nil {
+		return balance, nil
 	}
 	return newPortalStore(db).getAIQuotaBalance(ctx, strings.TrimSpace(routeName), strings.TrimSpace(consumerName))
 }

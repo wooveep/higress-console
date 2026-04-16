@@ -2,7 +2,9 @@ package portal
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -169,6 +171,52 @@ func (s *portalStore) listAIQuotaBalances(ctx context.Context, routeName string)
 	return items, rows.Err()
 }
 
+func (s *portalStore) listPortalBillingBalances(ctx context.Context, consumerNames []string) (map[string]int64, error) {
+	normalized := make([]string, 0, len(consumerNames))
+	seen := map[string]struct{}{}
+	for _, consumerName := range consumerNames {
+		trimmed := strings.TrimSpace(consumerName)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+	if len(normalized) == 0 {
+		return map[string]int64{}, nil
+	}
+
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(normalized)), ",")
+	args := make([]any, 0, len(normalized))
+	for _, item := range normalized {
+		args = append(args, item)
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT consumer_name, available_micro_yuan
+		FROM billing_wallet
+		WHERE consumer_name IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := map[string]int64{}
+	for rows.Next() {
+		var (
+			consumerName string
+			balance      int64
+		)
+		if err := rows.Scan(&consumerName, &balance); err != nil {
+			return nil, err
+		}
+		items[consumerName] = balance
+	}
+	return items, rows.Err()
+}
+
 func (s *portalStore) listActivePortalUsers(ctx context.Context) ([]entity.PortalUser, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT consumer_name
@@ -203,6 +251,63 @@ func (s *portalStore) saveAIQuotaBalance(ctx context.Context, balance do.PortalA
 	return err
 }
 
+func (s *portalStore) refreshPortalBillingBalance(
+	ctx context.Context,
+	consumerName string,
+	balanceMicroYuan int64,
+	sourceHint string,
+) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	current, err := queryCurrentPortalBillingBalance(ctx, tx, consumerName)
+	if err != nil {
+		return 0, err
+	}
+	if err := upsertPortalBillingWallet(ctx, tx, consumerName, balanceMicroYuan); err != nil {
+		return 0, err
+	}
+	if err := insertPortalBillingAdjustTransaction(ctx, tx, consumerName, balanceMicroYuan-current, "console_ai_quota_refresh", sourceHint); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return balanceMicroYuan, nil
+}
+
+func (s *portalStore) deltaPortalBillingBalance(
+	ctx context.Context,
+	consumerName string,
+	deltaMicroYuan int64,
+	sourceHint string,
+) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	current, err := queryCurrentPortalBillingBalance(ctx, tx, consumerName)
+	if err != nil {
+		return 0, err
+	}
+	next := current + deltaMicroYuan
+	if err := upsertPortalBillingWallet(ctx, tx, consumerName, next); err != nil {
+		return 0, err
+	}
+	if err := insertPortalBillingAdjustTransaction(ctx, tx, consumerName, deltaMicroYuan, "console_ai_quota_delta", sourceHint); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return next, nil
+}
+
 func (s *portalStore) getAIQuotaBalance(ctx context.Context, routeName, consumerName string) (int64, error) {
 	var quota int64
 	err := s.db.QueryRowContext(ctx, `
@@ -219,6 +324,22 @@ func (s *portalStore) getAIQuotaBalance(ctx context.Context, routeName, consumer
 		return 0, err
 	}
 	return quota, nil
+}
+
+func (s *portalStore) getPortalBillingBalance(ctx context.Context, consumerName string) (int64, error) {
+	var balance int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT available_micro_yuan
+		FROM billing_wallet
+		WHERE consumer_name = ?
+		LIMIT 1`, strings.TrimSpace(consumerName)).Scan(&balance)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return balance, nil
 }
 
 func (s *portalStore) getAIQuotaUserPolicy(ctx context.Context, consumerName string) (*entity.QuotaPolicyUser, error) {
@@ -732,4 +853,71 @@ func gtimePointerFromNullTime(value sql.NullTime) *gtime.Time {
 		return nil
 	}
 	return gtime.NewFromTime(value.Time)
+}
+
+func queryCurrentPortalBillingBalance(ctx context.Context, tx *sql.Tx, consumerName string) (int64, error) {
+	var balance int64
+	err := tx.QueryRowContext(ctx, `
+		SELECT available_micro_yuan
+		FROM billing_wallet
+		WHERE consumer_name = ?
+		LIMIT 1`, strings.TrimSpace(consumerName)).Scan(&balance)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return balance, nil
+}
+
+func upsertPortalBillingWallet(ctx context.Context, tx *sql.Tx, consumerName string, balanceMicroYuan int64) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO billing_wallet (consumer_name, currency, available_micro_yuan, version)
+		VALUES (?, 'CNY', ?, 1)
+		ON DUPLICATE KEY UPDATE available_micro_yuan = VALUES(available_micro_yuan), version = version + 1`,
+		strings.TrimSpace(consumerName),
+		balanceMicroYuan,
+	)
+	return err
+}
+
+func insertPortalBillingAdjustTransaction(
+	ctx context.Context,
+	tx *sql.Tx,
+	consumerName string,
+	deltaMicroYuan int64,
+	sourceType string,
+	sourceHint string,
+) error {
+	if deltaMicroYuan == 0 {
+		return nil
+	}
+	sourceID := buildPortalBillingSourceID(sourceHint, consumerName, deltaMicroYuan)
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO billing_transaction (
+			tx_id, consumer_name, tx_type, amount_micro_yuan, currency, source_type, source_id, occurred_at, created_at
+		)
+		VALUES (?, ?, 'adjust', ?, 'CNY', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+		buildPortalBillingTransactionID(sourceType, sourceID),
+		strings.TrimSpace(consumerName),
+		deltaMicroYuan,
+		sourceType,
+		sourceID,
+	)
+	return err
+}
+
+func buildPortalBillingSourceID(sourceHint, consumerName string, amount int64) string {
+	return strings.Join([]string{
+		firstNonEmpty(strings.TrimSpace(sourceHint), "ai-quota"),
+		strings.TrimSpace(consumerName),
+		fmt.Sprint(amount),
+		fmt.Sprint(gtime.Now().UnixNano()),
+	}, ":")
+}
+
+func buildPortalBillingTransactionID(sourceType, sourceID string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(sourceType) + ":" + strings.TrimSpace(sourceID)))
+	return "a" + hex.EncodeToString(sum[:16])
 }

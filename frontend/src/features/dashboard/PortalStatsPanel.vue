@@ -348,7 +348,7 @@ function filterSelectOption(input: string, option?: PortalStatsSelectOption) {
 
         <a-tab-pane key="usage-events" tab="使用记录">
           <div class="portal-stats-panel__toolbar">
-            <a-form layout="inline" class="portal-stats-panel__filters">
+            <a-form layout="vertical" class="portal-stats-panel__filters">
               <a-form-item label="用户">
                 <a-select
                   v-model:value="usageEventsQuery.consumerNames"
@@ -357,7 +357,7 @@ function filterSelectOption(input: string, option?: PortalStatsSelectOption) {
                   show-search
                   :filter-option="filterSelectOption"
                   :options="usageEventFilterOptions.consumers"
-                  style="width: 220px"
+                  class="portal-stats-panel__filter-select"
                 />
               </a-form-item>
               <a-form-item label="部门">
@@ -368,7 +368,7 @@ function filterSelectOption(input: string, option?: PortalStatsSelectOption) {
                   show-search
                   :filter-option="filterSelectOption"
                   :options="usageEventFilterOptions.departments"
-                  style="width: 220px"
+                  class="portal-stats-panel__filter-select"
                 />
               </a-form-item>
               <a-form-item label="API Key">
@@ -379,7 +379,7 @@ function filterSelectOption(input: string, option?: PortalStatsSelectOption) {
                   show-search
                   :filter-option="filterSelectOption"
                   :options="usageEventFilterOptions.apiKeys"
-                  style="width: 220px"
+                  class="portal-stats-panel__filter-select"
                 />
               </a-form-item>
               <a-form-item label="模型">
@@ -390,7 +390,7 @@ function filterSelectOption(input: string, option?: PortalStatsSelectOption) {
                   show-search
                   :filter-option="filterSelectOption"
                   :options="usageEventFilterOptions.models"
-                  style="width: 220px"
+                  class="portal-stats-panel__filter-select"
                 />
               </a-form-item>
               <a-form-item label="路由">
@@ -401,7 +401,7 @@ function filterSelectOption(input: string, option?: PortalStatsSelectOption) {
                   show-search
                   :filter-option="filterSelectOption"
                   :options="usageEventFilterOptions.routes"
-                  style="width: 220px"
+                  class="portal-stats-panel__filter-select"
                 />
               </a-form-item>
               <a-form-item label="请求状态">
@@ -412,7 +412,7 @@ function filterSelectOption(input: string, option?: PortalStatsSelectOption) {
                   show-search
                   :filter-option="filterSelectOption"
                   :options="usageEventFilterOptions.requestStatuses"
-                  style="width: 180px"
+                  class="portal-stats-panel__filter-select"
                 />
               </a-form-item>
               <a-form-item label="计费状态">
@@ -423,7 +423,7 @@ function filterSelectOption(input: string, option?: PortalStatsSelectOption) {
                   show-search
                   :filter-option="filterSelectOption"
                   :options="usageEventFilterOptions.usageStatuses"
-                  style="width: 180px"
+                  class="portal-stats-panel__filter-select"
                 />
               </a-form-item>
               <a-form-item label="包含子部门"><a-switch v-model:checked="usageEventsQuery.includeChildren" /></a-form-item>
@@ -455,7 +455,7 @@ function filterSelectOption(input: string, option?: PortalStatsSelectOption) {
 
         <a-tab-pane key="department-bills" tab="部门账单">
           <div class="portal-stats-panel__toolbar">
-            <a-form layout="inline" class="portal-stats-panel__filters">
+            <a-form layout="vertical" class="portal-stats-panel__filters">
               <a-form-item label="部门">
                 <a-select
                   v-model:value="departmentBillsQuery.departmentIds"
@@ -464,7 +464,7 @@ function filterSelectOption(input: string, option?: PortalStatsSelectOption) {
                   show-search
                   :filter-option="filterSelectOption"
                   :options="departmentOptions"
-                  style="width: 260px"
+                  class="portal-stats-panel__filter-select"
                 />
               </a-form-item>
               <a-form-item label="包含子部门"><a-switch v-model:checked="departmentBillsQuery.includeChildren" /></a-form-item>
@@ -492,6 +492,8 @@ function filterSelectOption(input: string, option?: PortalStatsSelectOption) {
 .portal-stats-panel {
   display: grid;
   gap: 16px;
+  min-width: 0;
+  width: 100%;
 }
 
 .portal-stats-panel__actions {
@@ -531,6 +533,9 @@ function filterSelectOption(input: string, option?: PortalStatsSelectOption) {
   display: flex;
   gap: 12px;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .portal-stats-panel__toolbar {
@@ -538,10 +543,80 @@ function filterSelectOption(input: string, option?: PortalStatsSelectOption) {
   flex-wrap: wrap;
   gap: 12px;
   justify-content: space-between;
+  align-items: flex-start;
   margin-bottom: 16px;
+  min-width: 0;
 }
 
 .portal-stats-panel__filters {
-  gap: 8px 0;
+  flex: 1 1 720px;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px 16px;
+}
+
+.portal-stats-panel__filter-select {
+  width: 100%;
+}
+
+:deep(.ant-tabs),
+:deep(.ant-tabs-content-holder),
+:deep(.ant-tabs-content),
+:deep(.ant-tabs-tabpane),
+:deep(.ant-tabs-nav),
+:deep(.ant-tabs-nav-wrap),
+:deep(.ant-tabs-nav-list),
+:deep(.ant-table-wrapper),
+:deep(.ant-spin-nested-loading),
+:deep(.ant-spin-container),
+:deep(.ant-table),
+:deep(.ant-table-container),
+:deep(.ant-table-content) {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+:deep(.ant-tabs-content-holder),
+:deep(.ant-tabs-content),
+:deep(.ant-tabs-tabpane) {
+  overflow-x: hidden;
+}
+
+:deep(.ant-table-content) {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+:deep(.ant-table-cell) {
+  word-break: break-word;
+}
+
+:deep(.portal-stats-panel__filters .ant-form-item) {
+  min-width: 0;
+  margin-bottom: 0;
+  margin-inline-end: 0;
+}
+
+:deep(.portal-stats-panel__filters .ant-form-item-control) {
+  min-width: 0;
+}
+
+:deep(.portal-stats-panel__filters .ant-select) {
+  width: 100%;
+}
+
+@media (max-width: 960px) {
+  .portal-stats-panel__summary-actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .portal-stats-panel__filters {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

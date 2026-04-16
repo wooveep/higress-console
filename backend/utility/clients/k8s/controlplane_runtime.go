@@ -30,6 +30,7 @@ const (
 	higressMCPServerTypeRedirectRoute       = "REDIRECT_ROUTE"
 	higressMCPServerTypeKey                 = "type"
 	higressWasmPluginNameAIProxy            = "ai-proxy"
+	higressWasmPluginNameAIQuota            = "ai-quota"
 	higressWasmPluginNameModelRouter        = "model-router"
 	higressWasmPluginNameModelMapper        = "model-mapper"
 	higressWasmPluginNameAIStatistics       = "ai-statistics"
@@ -414,6 +415,9 @@ func (c *RealClient) syncAIRouteRuntime(ctx context.Context, name string, data m
 	if err := c.syncAIStatisticsRule(ctx, internalName, true); err != nil {
 		return err
 	}
+	if err := c.syncAIQuotaMirrorRule(ctx, publicName, internalName); err != nil {
+		return err
+	}
 	return c.syncAIRouteFallbackRuntime(ctx, name, data)
 }
 
@@ -430,6 +434,7 @@ func (c *RealClient) syncAIRouteFallbackRuntime(ctx context.Context, name string
 		_ = c.deleteObjectIfExists(ctx, higressEnvoyFilterResource, aiRouteInternalIngressName(name))
 		_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIStatistics, map[string][]string{"ingress": {aiRouteFallbackIngressName(name)}})
 		_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIStatistics, map[string][]string{"ingress": {aiRouteInternalFallbackIngressName(name)}})
+		_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIQuota, map[string][]string{"ingress": {aiRouteInternalFallbackIngressName(name)}})
 		_ = c.removeModelMapperRulesForIngress(ctx, aiRouteFallbackIngressName(name))
 		_ = c.removeModelMapperRulesForIngress(ctx, aiRouteInternalFallbackIngressName(name))
 		_ = c.syncRouteAuthRule(ctx, aiRouteFallbackIngressName(name), nil, false)
@@ -468,6 +473,9 @@ func (c *RealClient) syncAIRouteFallbackRuntime(ctx context.Context, name string
 	if err := c.syncAIStatisticsRule(ctx, aiRouteInternalFallbackIngressName(name), true); err != nil {
 		return err
 	}
+	if err := c.syncAIQuotaMirrorRule(ctx, aiRouteFallbackIngressName(name), aiRouteInternalFallbackIngressName(name)); err != nil {
+		return err
+	}
 	responseCodes := normalizeStringSlice(fallback["responseCodes"])
 	if len(responseCodes) == 0 {
 		responseCodes = []string{"4xx", "5xx"}
@@ -490,6 +498,8 @@ func (c *RealClient) deleteAIRouteResource(ctx context.Context, name string) err
 	_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIStatistics, map[string][]string{"ingress": {aiRouteInternalIngressName(name)}})
 	_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIStatistics, map[string][]string{"ingress": {aiRouteFallbackIngressName(name)}})
 	_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIStatistics, map[string][]string{"ingress": {aiRouteInternalFallbackIngressName(name)}})
+	_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIQuota, map[string][]string{"ingress": {aiRouteInternalIngressName(name)}})
+	_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIQuota, map[string][]string{"ingress": {aiRouteInternalFallbackIngressName(name)}})
 	_ = c.removeModelMapperRulesForIngress(ctx, aiRouteIngressName(name))
 	_ = c.removeModelMapperRulesForIngress(ctx, aiRouteInternalIngressName(name))
 	_ = c.removeModelMapperRulesForIngress(ctx, aiRouteFallbackIngressName(name))
@@ -630,6 +640,14 @@ func (c *RealClient) syncAIStatisticsRule(ctx context.Context, ingressName strin
 	}, true, nil)
 }
 
+func (c *RealClient) syncAIQuotaMirrorRule(ctx context.Context, sourceIngress, targetIngress string) error {
+	return c.mutateBuiltinWasmPlugin(ctx, higressWasmPluginNameAIQuota, func(plugin map[string]any) error {
+		spec := ensureMap(plugin, "spec")
+		syncMirroredBuiltinIngressRuleSpec(spec, sourceIngress, targetIngress)
+		return nil
+	})
+}
+
 func (c *RealClient) syncRouteAuthRule(ctx context.Context, ingressName string, authConfig map[string]any, internal bool) error {
 	enabled := boolValue(firstNonNil(authConfig["enabled"], authConfig["enable"]))
 	allow := normalizeStringSlice(authConfig["allowedConsumers"])
@@ -758,6 +776,10 @@ func (c *RealClient) loadBuiltinPluginRules(ctx context.Context, pluginName stri
 		}
 	}
 	return result, nil
+}
+
+func (c *RealClient) LoadBuiltinPluginRules(ctx context.Context, pluginName string) (map[string]map[string]any, error) {
+	return c.loadBuiltinPluginRules(ctx, pluginName)
 }
 
 func (c *RealClient) loadRouteAuthRules(ctx context.Context) (map[string]map[string]any, error) {
@@ -1325,9 +1347,22 @@ func buildAIRouteIngressPayload(name, ingressName string, data map[string]any, s
 		payload["domains"] = []string{}
 	}
 	if proxyNext := mapValue(data["proxyNextUpstream"]); len(proxyNext) > 0 {
-		payload["proxyNextUpstream"] = proxyNext
+		payload["proxyNextUpstream"] = normalizeAIRouteProxyNextUpstream(proxyNext, internal)
 	}
 	return payload
+}
+
+func normalizeAIRouteProxyNextUpstream(proxyNext map[string]any, internal bool) map[string]any {
+	if len(proxyNext) == 0 {
+		return nil
+	}
+	result := cloneMap(proxyNext)
+	if internal {
+		// Portal AI chat calls use the internal AI route and may keep the upstream
+		// stream open for much longer than the public retry timeout budget.
+		delete(result, "timeout")
+	}
+	return result
 }
 
 func buildAIRouteFallbackIngressPayload(name, ingressName, originalRouteName string, data map[string]any, services []map[string]any, internal bool) map[string]any {
@@ -1719,6 +1754,34 @@ func applyWasmTargets(rule map[string]any, targets map[string][]string) {
 		}
 		rule[key] = normalizeStringSlice(values)
 	}
+}
+
+func syncMirroredBuiltinIngressRuleSpec(spec map[string]any, sourceIngress, targetIngress string) {
+	var (
+		matchRules = toMapSlice(spec["matchRules"])
+		sourceRule map[string]any
+	)
+	for _, rule := range matchRules {
+		if wasmRuleMatchesTargets(rule, map[string][]string{"ingress": {sourceIngress}}) {
+			sourceRule = cloneMap(rule)
+			break
+		}
+	}
+	next := make([]map[string]any, 0, len(matchRules)+1)
+	for _, rule := range matchRules {
+		if wasmRuleMatchesTargets(rule, map[string][]string{"ingress": {targetIngress}}) {
+			continue
+		}
+		next = append(next, rule)
+	}
+	if len(sourceRule) > 0 {
+		applyWasmTargets(sourceRule, map[string][]string{"ingress": {targetIngress}})
+		next = append(next, sourceRule)
+		sort.Slice(next, func(i, j int) bool {
+			return wasmRuleSortKey(next[i]) < wasmRuleSortKey(next[j])
+		})
+	}
+	spec["matchRules"] = next
 }
 
 func stringSlicesEqual(left, right []string) bool {

@@ -309,6 +309,7 @@ func (s *Service) ListUsageEvents(ctx context.Context, query UsageEventsQuery) (
 	items := make([]PortalUsageEventRecord, 0)
 	for rows.Next() {
 		var item PortalUsageEventRecord
+		var apiKeyID sql.NullString
 		var priceVersionID sql.NullInt64
 		var httpStatus sql.NullInt64
 		var startedAt sql.NullTime
@@ -321,7 +322,7 @@ func (s *Service) ListUsageEvents(ctx context.Context, query UsageEventsQuery) (
 			&item.ConsumerName,
 			&item.DepartmentID,
 			&item.DepartmentPath,
-			&item.APIKeyID,
+			&apiKeyID,
 			&item.ModelID,
 			&priceVersionID,
 			&item.RouteName,
@@ -346,6 +347,9 @@ func (s *Service) ListUsageEvents(ctx context.Context, query UsageEventsQuery) (
 		if priceVersionID.Valid {
 			value := priceVersionID.Int64
 			item.PriceVersionID = &value
+		}
+		if apiKeyID.Valid {
+			item.APIKeyID = strings.TrimSpace(apiKeyID.String)
 		}
 		if httpStatus.Valid {
 			value := int(httpStatus.Int64)
@@ -522,14 +526,14 @@ func (s *Service) ListUsageEventFilterOptions(ctx context.Context, query UsageEv
 }
 
 func normalizeStatsRange(fromMillis, toMillis *int64, fallback time.Duration) (time.Time, time.Time) {
-	now := time.Now()
+	now := time.Now().UTC()
 	toTime := now
 	if toMillis != nil && *toMillis > 0 {
-		toTime = time.UnixMilli(*toMillis)
+		toTime = time.UnixMilli(*toMillis).UTC()
 	}
 	fromTime := toTime.Add(-fallback)
 	if fromMillis != nil && *fromMillis > 0 && *fromMillis < toTime.UnixMilli() {
-		fromTime = time.UnixMilli(*fromMillis)
+		fromTime = time.UnixMilli(*fromMillis).UTC()
 	}
 	return fromTime, toTime
 }

@@ -146,6 +146,15 @@ func TestServiceMigratesLegacySecretStateToDatabase(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestNativeDashboardDBTimeFromMillisUsesUTC(t *testing.T) {
+	value := time.Date(2026, time.April, 16, 1, 8, 44, 0, time.FixedZone("CST", 8*60*60)).UnixMilli()
+
+	parsed := nativeDashboardDBTimeFromMillis(value)
+
+	require.Equal(t, time.UTC, parsed.Location())
+	require.Equal(t, "2026-04-15T17:08:44Z", parsed.Format(time.RFC3339))
+}
+
 func TestServiceSetAndGetAIGatewayConfig(t *testing.T) {
 	svc := New(k8sclient.NewMemoryClient(), grafanaclient.New(grafanaclient.Config{}), portaldbclient.New(portaldbclient.Config{}))
 
@@ -492,6 +501,32 @@ func TestResolveNativeDashboardPrometheusRateRange(t *testing.T) {
 
 	require.Equal(t, "300s", shortRange)
 	require.Equal(t, "14400s", longRange)
+}
+
+func TestNativeDashboardSeriesHasNonZeroPoints(t *testing.T) {
+	require.False(t, nativeDashboardSeriesHasNonZeroPoints(nil))
+	require.False(t, nativeDashboardSeriesHasNonZeroPoints([]response.NativeDashboardSeries{{
+		Name: "zero",
+		Points: []response.NativeDashboardPoint{
+			{Time: 1, Value: 0},
+			{Time: 2, Value: 0},
+		},
+	}}))
+	require.True(t, nativeDashboardSeriesHasNonZeroPoints([]response.NativeDashboardSeries{{
+		Name: "non-zero",
+		Points: []response.NativeDashboardPoint{
+			{Time: 1, Value: 0},
+			{Time: 2, Value: 0.25},
+		},
+	}}))
+}
+
+func TestIsNativeDashboardInfraService(t *testing.T) {
+	require.True(t, isNativeDashboardInfraService("prometheus_stats"))
+	require.True(t, isNativeDashboardInfraService("redis-stack-server.aigateway-system.svc.cluster.local"))
+	require.True(t, isNativeDashboardInfraService("xds-grpc"))
+	require.False(t, isNativeDashboardInfraService("llm-doubao.internal.dns"))
+	require.False(t, isNativeDashboardInfraService("svc-a.default.svc.cluster.local"))
 }
 
 func TestBootstrapDefaultResourcesLockedDoesNotOverwriteExistingResources(t *testing.T) {

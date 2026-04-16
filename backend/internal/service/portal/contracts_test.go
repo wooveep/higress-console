@@ -134,17 +134,23 @@ func TestPortalContracts(t *testing.T) {
 	t.Run("ai-quota", func(t *testing.T) {
 		db, mock := newPortalContractMock(t)
 		mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT consumer_name
+		FROM portal_user
+		WHERE COALESCE(is_deleted, 0) = 0
+		ORDER BY consumer_name ASC`)).
+			WillReturnRows(sqlmock.NewRows([]string{"consumer_name"}).AddRow("alice").AddRow("bob"))
+		mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT consumer_name, quota
 		FROM portal_ai_quota_balance
 		WHERE route_name = ?`)).
 			WithArgs("chat-route").
 			WillReturnRows(sqlmock.NewRows([]string{"consumer_name", "quota"}).AddRow("alice", 1200))
 		mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT consumer_name
-		FROM portal_user
-		WHERE COALESCE(is_deleted, 0) = 0
-		ORDER BY consumer_name ASC`)).
-			WillReturnRows(sqlmock.NewRows([]string{"consumer_name"}).AddRow("alice").AddRow("bob"))
+		SELECT consumer_name, available_micro_yuan
+		FROM billing_wallet
+		WHERE consumer_name IN (?,?,?)`)).
+			WithArgs("administrator", "alice", "bob").
+			WillReturnRows(sqlmock.NewRows([]string{"consumer_name", "available_micro_yuan"}).AddRow("alice", 1200))
 
 		assertPortalFixture(t, db, "ai-quota/consumers-success.json")
 		require.NoError(t, mock.ExpectationsWereMet())

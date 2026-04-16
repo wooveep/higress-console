@@ -71,6 +71,18 @@ const filteredConsumers = computed(() => consumers.value.filter((item) => {
   return item.consumerName.toLowerCase().includes(keyword);
 }));
 
+function formatRouteDomainDisplay(route: Pick<AiQuotaRouteSummary, 'domains' | 'path'>) {
+  const domains = (route.domains || []).map((item) => String(item || '').trim()).filter(Boolean);
+  if (domains.length > 0) {
+    return domains.join(', ');
+  }
+  const internalPath = String(route.path || '').trim();
+  if (internalPath) {
+    return `内部路由 · ${internalPath}`;
+  }
+  return '内部路由';
+}
+
 const summaryItems = computed(() => {
   if (!activeRoute.value) {
     return [];
@@ -78,7 +90,7 @@ const summaryItems = computed(() => {
   return [
     { label: t('aiQuota.summary.route'), value: activeRoute.value.routeName },
     { label: t('aiQuota.summary.path'), value: activeRoute.value.path || '-' },
-    { label: t('aiQuota.summary.domains'), value: activeRoute.value.domains?.join(', ') || '-' },
+    { label: t('aiQuota.summary.domains'), value: formatRouteDomainDisplay(activeRoute.value) },
     { label: t('aiQuota.summary.balanceKeyPrefix'), value: activeRoute.value.redisKeyPrefix || '-' },
     { label: t('aiQuota.summary.adminConsumer'), value: activeRoute.value.adminConsumer || '-' },
     { label: t('aiQuota.summary.adminPath'), value: activeRoute.value.adminPath || '-' },

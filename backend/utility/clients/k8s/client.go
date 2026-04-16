@@ -239,6 +239,27 @@ func (c *MemoryClient) DeleteResource(ctx context.Context, kind, name string) er
 	return nil
 }
 
+func (c *MemoryClient) LoadBuiltinPluginRules(ctx context.Context, pluginName string) (map[string]map[string]any, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	result := map[string]map[string]any{}
+	items := c.resources[higressWasmPluginResource]
+	for _, item := range items {
+		labels, _ := nestedValue(item, "metadata", "labels").(map[string]any)
+		if strings.TrimSpace(fmt.Sprint(labels[higressLabelWasmPluginName])) != strings.TrimSpace(pluginName) &&
+			strings.TrimSpace(fmt.Sprint(item["name"])) != strings.TrimSpace(pluginName) {
+			continue
+		}
+		for _, rule := range toMapSlice(nestedValue(item, "spec", "matchRules")) {
+			for _, ingress := range normalizeStringSlice(rule["ingress"]) {
+				result[ingress] = cloneMap(rule)
+			}
+		}
+	}
+	return result, nil
+}
+
 func (c *RealClient) Healthy(ctx context.Context) error {
 	_, err := c.run(ctx, nil, "get", "namespace", c.namespace, "-o", "name")
 	return err

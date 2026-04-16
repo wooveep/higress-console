@@ -77,6 +77,10 @@ type nativeDashboardResourcePanel struct {
 	Kind  string
 }
 
+func nativeDashboardDBTimeFromMillis(value int64) time.Time {
+	return time.UnixMilli(value).UTC()
+}
+
 func (s *Service) buildNativeDashboardRows(ctx context.Context, dashboardType string, from, to int64) []response.NativeDashboardRow {
 	switch strings.ToUpper(strings.TrimSpace(dashboardType)) {
 	case "AI":
@@ -201,6 +205,12 @@ func (s *Service) buildNativeMainDashboardRows(ctx context.Context, from, to int
 		"Latency",
 		to,
 	)
+	if len(failureTopTable.Rows) == 0 && failureTopTableErr == nil {
+		failureTopTable, failureTopTableErr = s.queryNativeDashboardExceptionRouteTopTable(ctx, from, to, "failed", 10)
+	}
+	if len(slowTopTable.Rows) == 0 && slowTopTableErr == nil {
+		slowTopTable, slowTopTableErr = s.queryNativeDashboardExceptionRouteTopTable(ctx, from, to, "slow", 10)
+	}
 	rows = append(rows, response.NativeDashboardRow{
 		Title:     "Exceptions",
 		Collapsed: false,
@@ -308,6 +318,59 @@ func (s *Service) buildNativeAIDashboardRows(ctx context.Context, from, to int64
 			"Output Image Token": fmt.Sprintf(`sum(rate(route_upstream_model_consumer_metric_output_image_token[%s]))`, tokenRateRange),
 		},
 	)
+	usageDetailTrend, usageDetailTrendErr := s.queryNativeDashboardUsageDetailTrend(ctx, from, to)
+	usageBucketSeconds := resolveNativeDashboardUsageBucketSize(from, to).Seconds()
+	if !nativeDashboardSeriesHasNonZeroPoints(tokenPerSecond) && usageDetailTrendErr == nil {
+		tokenPerSecond = buildNativeDashboardUsageDetailSeries(
+			usageDetailTrend,
+			usageBucketSeconds,
+			nativeDashboardUsageDetailSeriesSpec{
+				Name: "Total Token",
+				Pick: func(item nativeDashboardUsageDetailTrendRow) float64 {
+					return float64(item.TotalTokens)
+				},
+			},
+		)
+		tokenPerSecondErr = nil
+	}
+	if !nativeDashboardSeriesHasNonZeroPoints(cacheTokenPerSecond) && usageDetailTrendErr == nil {
+		cacheTokenPerSecond = buildNativeDashboardUsageDetailSeries(
+			usageDetailTrend,
+			usageBucketSeconds,
+			nativeDashboardUsageDetailSeriesSpec{
+				Name: "Cache Creation Token",
+				Pick: func(item nativeDashboardUsageDetailTrendRow) float64 {
+					return float64(item.CacheCreationTokens)
+				},
+			},
+			nativeDashboardUsageDetailSeriesSpec{
+				Name: "Cache Read Token",
+				Pick: func(item nativeDashboardUsageDetailTrendRow) float64 {
+					return float64(item.CacheReadTokens)
+				},
+			},
+		)
+		cacheTokenPerSecondErr = nil
+	}
+	if !nativeDashboardSeriesHasNonZeroPoints(imageTokenPerSecond) && usageDetailTrendErr == nil {
+		imageTokenPerSecond = buildNativeDashboardUsageDetailSeries(
+			usageDetailTrend,
+			usageBucketSeconds,
+			nativeDashboardUsageDetailSeriesSpec{
+				Name: "Input Image Token",
+				Pick: func(item nativeDashboardUsageDetailTrendRow) float64 {
+					return float64(item.InputImageTokens)
+				},
+			},
+			nativeDashboardUsageDetailSeriesSpec{
+				Name: "Output Image Token",
+				Pick: func(item nativeDashboardUsageDetailTrendRow) float64 {
+					return float64(item.OutputImageTokens)
+				},
+			},
+		)
+		imageTokenPerSecondErr = nil
+	}
 	rows = append(rows, response.NativeDashboardRow{
 		Title:     "Token Runtime",
 		Collapsed: false,
@@ -438,8 +501,8 @@ func (s *Service) queryNativeDashboardUsageSummary(ctx context.Context, from, to
 		return nativeDashboardUsageSummary{}, nil
 	}
 
-	fromTime := time.UnixMilli(from)
-	toTime := time.UnixMilli(to)
+	fromTime := nativeDashboardDBTimeFromMillis(from)
+	toTime := nativeDashboardDBTimeFromMillis(to)
 
 	var item nativeDashboardUsageSummary
 	err := db.QueryRowContext(ctx, `
@@ -472,8 +535,8 @@ func (s *Service) queryNativeDashboardUsageTrend(ctx context.Context, from, to i
 	}
 
 	var (
-		fromTime   = time.UnixMilli(from)
-		toTime     = time.UnixMilli(to)
+		fromTime   = nativeDashboardDBTimeFromMillis(from)
+		toTime     = nativeDashboardDBTimeFromMillis(to)
 		rangeHours = toTime.Sub(fromTime).Hours()
 		bucketExpr = "DATE_FORMAT(occurred_at, '%Y-%m-%d %H:00')"
 	)
@@ -538,8 +601,8 @@ func (s *Service) queryNativeDashboardRecentEvents(ctx context.Context, from, to
 		WHERE occurred_at >= ? AND occurred_at < ?
 		ORDER BY occurred_at DESC, id DESC
 		LIMIT ?`,
-		time.UnixMilli(from),
-		time.UnixMilli(to),
+		nativeDashboardDBTimeFromMillis(from),
+		nativeDashboardDBTimeFromMillis(to),
 		limit,
 	)
 	if err != nil {
@@ -599,8 +662,8 @@ func (s *Service) queryNativeDashboardAIGeneralSummary(ctx context.Context, from
 			COALESCE(SUM(cost_micro_yuan), 0) AS cost_micro_yuan
 		FROM billing_usage_event
 		WHERE occurred_at >= ? AND occurred_at < ?`,
-		time.UnixMilli(from),
-		time.UnixMilli(to),
+		nativeDashboardDBTimeFromMillis(from),
+		nativeDashboardDBTimeFromMillis(to),
 	).Scan(&item.RequestCount, &item.SuccessCount, &item.TotalTokens, &item.CostMicroYuan)
 	if err != nil {
 		return nativeDashboardAIGeneralSummary{}, fmt.Errorf("query native dashboard AI general summary: %w", err)
@@ -627,7 +690,7 @@ func (s *Service) queryNativeDashboardDownstreamRequestTrend(ctx context.Context
 		GROUP BY bucket_label, dimension_value
 		ORDER BY bucket_label ASC, dimension_value ASC`, bucketExpr)
 
-	rows, err := db.QueryContext(ctx, statement, time.UnixMilli(from), time.UnixMilli(to))
+	rows, err := db.QueryContext(ctx, statement, nativeDashboardDBTimeFromMillis(from), nativeDashboardDBTimeFromMillis(to))
 	if err != nil {
 		return nil, fmt.Errorf("query native dashboard downstream request trend: %w", err)
 	}
@@ -692,7 +755,7 @@ func (s *Service) queryNativeDashboardExceptionRecords(ctx context.Context, from
 		ORDER BY %s
 		LIMIT ?`, filterClause, orderClause)
 
-	rows, err := db.QueryContext(ctx, query, time.UnixMilli(from), time.UnixMilli(to), limit)
+	rows, err := db.QueryContext(ctx, query, nativeDashboardDBTimeFromMillis(from), nativeDashboardDBTimeFromMillis(to), limit)
 	if err != nil {
 		return nil, fmt.Errorf("query native dashboard %s requests: %w", mode, err)
 	}
@@ -752,8 +815,8 @@ func (s *Service) queryNativeDashboardAIErrorCodeTopTable(ctx context.Context, f
 		GROUP BY error_code
 		ORDER BY request_count DESC, error_code ASC
 		LIMIT ?`,
-		time.UnixMilli(from),
-		time.UnixMilli(to),
+		nativeDashboardDBTimeFromMillis(from),
+		nativeDashboardDBTimeFromMillis(to),
 		limit,
 	)
 	if err != nil {
@@ -783,6 +846,80 @@ func (s *Service) queryNativeDashboardAIErrorCodeTopTable(ctx context.Context, f
 		Columns: []response.NativeDashboardTableColumn{
 			{Key: "errorCode", Title: "Error Code"},
 			{Key: "requestCount", Title: "Request Count"},
+		},
+		Rows: items,
+	}, nil
+}
+
+func (s *Service) queryNativeDashboardExceptionRouteTopTable(ctx context.Context, from, to int64, mode string, limit int) (response.NativeDashboardTable, error) {
+	db := s.portalClient.DB()
+	if db == nil {
+		return response.NativeDashboardTable{Columns: []response.NativeDashboardTableColumn{}, Rows: []map[string]any{}}, nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+
+	var (
+		filterClause string
+		valueExpr    string
+		valueKey     string
+		valueTitle   string
+		orderClause  string
+	)
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "slow":
+		filterClause = `started_at IS NOT NULL AND finished_at IS NOT NULL AND TIMESTAMPDIFF(MICROSECOND, started_at, finished_at) > 5000000`
+		valueExpr = `MAX(GREATEST(TIMESTAMPDIFF(MICROSECOND, started_at, finished_at), 0) DIV 1000)`
+		valueKey = "latencyMs"
+		valueTitle = "Latency"
+		orderClause = "latency_ms DESC, route ASC"
+	default:
+		filterClause = `(http_status < 200 OR http_status >= 300 OR request_status <> 'success')`
+		valueExpr = `COALESCE(SUM(CASE WHEN request_count > 0 THEN request_count ELSE 1 END), 0)`
+		valueKey = "requestCount"
+		valueTitle = "Request Count"
+		orderClause = "request_count DESC, route ASC"
+	}
+
+	statement := fmt.Sprintf(`
+		SELECT
+			COALESCE(NULLIF(TRIM(request_path), ''), NULLIF(TRIM(route_name), ''), '-') AS route,
+			%s AS %s
+		FROM billing_usage_event
+		WHERE occurred_at >= ? AND occurred_at < ? AND %s
+		GROUP BY route
+		ORDER BY %s
+		LIMIT ?`, valueExpr, toSnakeCase(valueKey), filterClause, orderClause)
+
+	rows, err := db.QueryContext(ctx, statement, nativeDashboardDBTimeFromMillis(from), nativeDashboardDBTimeFromMillis(to), limit)
+	if err != nil {
+		return response.NativeDashboardTable{}, fmt.Errorf("query native dashboard %s route top table: %w", mode, err)
+	}
+	defer rows.Close()
+
+	items := make([]map[string]any, 0, limit)
+	for rows.Next() {
+		var (
+			route string
+			value float64
+		)
+		if err := rows.Scan(&route, &value); err != nil {
+			return response.NativeDashboardTable{}, err
+		}
+		items = append(items, map[string]any{
+			"route":  route,
+			valueKey: value,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return response.NativeDashboardTable{}, err
+	}
+
+	return response.NativeDashboardTable{
+		Columns: []response.NativeDashboardTableColumn{
+			{Key: "route", Title: "Route"},
+			{Key: valueKey, Title: valueTitle},
 		},
 		Rows: items,
 	}, nil
@@ -901,7 +1038,7 @@ func (s *Service) queryNativeDashboardUsageDetailTrend(ctx context.Context, from
 		GROUP BY bucket_label
 		ORDER BY bucket_label ASC`, bucketExpr)
 
-	rows, err := db.QueryContext(ctx, statement, time.UnixMilli(from), time.UnixMilli(to))
+	rows, err := db.QueryContext(ctx, statement, nativeDashboardDBTimeFromMillis(from), nativeDashboardDBTimeFromMillis(to))
 	if err != nil {
 		return nil, fmt.Errorf("query native dashboard usage detail trend: %w", err)
 	}
@@ -959,7 +1096,7 @@ func (s *Service) queryNativeDashboardUsageModelTrend(ctx context.Context, from,
 		GROUP BY bucket_label, model_id
 		ORDER BY bucket_label ASC, model_id ASC`, bucketExpr)
 
-	rows, err := db.QueryContext(ctx, statement, time.UnixMilli(from), time.UnixMilli(to))
+	rows, err := db.QueryContext(ctx, statement, nativeDashboardDBTimeFromMillis(from), nativeDashboardDBTimeFromMillis(to))
 	if err != nil {
 		return nil, fmt.Errorf("query native dashboard usage model trend: %w", err)
 	}
@@ -1038,7 +1175,7 @@ func (s *Service) queryNativeDashboardUsageTable(ctx context.Context, from, to i
 		ORDER BY total_tokens DESC, dimension_value ASC
 		LIMIT ?`, column, column)
 
-	rows, err := db.QueryContext(ctx, statement, time.UnixMilli(from), time.UnixMilli(to), limit)
+	rows, err := db.QueryContext(ctx, statement, nativeDashboardDBTimeFromMillis(from), nativeDashboardDBTimeFromMillis(to), limit)
 	if err != nil {
 		return response.NativeDashboardTable{}, fmt.Errorf("query native dashboard %s usage table: %w", dimension, err)
 	}
@@ -1103,8 +1240,8 @@ func (s *Service) queryNativeDashboardProviderUsage(ctx context.Context, from, t
 			AND route_name <> ''
 		GROUP BY route_name
 		ORDER BY total_tokens DESC, route_name ASC`,
-		time.UnixMilli(from),
-		time.UnixMilli(to),
+		nativeDashboardDBTimeFromMillis(from),
+		nativeDashboardDBTimeFromMillis(to),
 	)
 	if err != nil {
 		return response.NativeDashboardTable{}, fmt.Errorf("query native dashboard provider usage: %w", err)
@@ -1362,10 +1499,13 @@ func (s *Service) queryNativeDashboardPrometheusUpstreamServiceTrend(
 	for _, item := range results {
 		service, _ := parseNativeDashboardClusterName(item.Metric["cluster_name"])
 		service = strings.TrimSpace(service)
-		if service == "" || service == "-" {
+		if service == "" || service == "-" || isNativeDashboardInfraService(service) {
 			continue
 		}
 		points := nativeDashboardPromPoints(item.Values)
+		if !nativeDashboardPointsHaveNonZeroValues(points) {
+			continue
+		}
 		for _, point := range points {
 			totalByService[service] += point.Value
 		}
@@ -1888,6 +2028,60 @@ func mergeNativeDashboardPoints(existing, incoming []response.NativeDashboardPoi
 		})
 	}
 	return items
+}
+
+func nativeDashboardSeriesHasNonZeroPoints(series []response.NativeDashboardSeries) bool {
+	for _, item := range series {
+		if nativeDashboardPointsHaveNonZeroValues(item.Points) {
+			return true
+		}
+	}
+	return false
+}
+
+func nativeDashboardPointsHaveNonZeroValues(points []response.NativeDashboardPoint) bool {
+	for _, item := range points {
+		if math.Abs(item.Value) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func isNativeDashboardInfraService(service string) bool {
+	service = strings.ToLower(strings.TrimSpace(service))
+	if service == "" {
+		return true
+	}
+	for _, blocked := range []string{
+		"prometheus",
+		"prometheus_stats",
+		"grafana",
+		"loki",
+		"xds-grpc",
+		"sds-grpc",
+		"redis",
+		"mysql",
+		"portal",
+		"console",
+		"agent",
+	} {
+		if strings.Contains(service, blocked) {
+			return true
+		}
+	}
+	return false
+}
+
+func toSnakeCase(value string) string {
+	var builder strings.Builder
+	for index, char := range value {
+		if index > 0 && char >= 'A' && char <= 'Z' {
+			builder.WriteByte('_')
+		}
+		builder.WriteRune(char)
+	}
+	return strings.ToLower(builder.String())
 }
 
 func parseNativeDashboardBucket(value string) (time.Time, bool) {

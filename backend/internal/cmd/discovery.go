@@ -323,14 +323,7 @@ func normalizeMySQLParams(raw string) string {
 			query.Set("charset", "utf8mb4")
 		}
 	}
-	if query.Get("loc") == "" {
-		if timezone := strings.TrimSpace(query.Get("serverTimezone")); timezone != "" {
-			query.Set("loc", timezone)
-		} else {
-			query.Set("loc", "UTC")
-		}
-	}
-
+	query.Set("loc", "UTC")
 	query.Del("serverTimezone")
 	return query.Encode()
 }

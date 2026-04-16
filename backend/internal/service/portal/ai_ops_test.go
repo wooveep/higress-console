@@ -36,6 +36,28 @@ func TestRefreshAIQuota(t *testing.T) {
 	defer db.Close()
 
 	expectSchema(mock)
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT available_micro_yuan
+		FROM billing_wallet
+		WHERE consumer_name = ?
+		LIMIT 1`)).
+		WithArgs("demo").
+		WillReturnRows(sqlmock.NewRows([]string{"available_micro_yuan"}))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO billing_wallet (consumer_name, currency, available_micro_yuan, version)
+		VALUES (?, 'CNY', ?, 1)
+		ON DUPLICATE KEY UPDATE available_micro_yuan = VALUES(available_micro_yuan), version = version + 1`)).
+		WithArgs("demo", int64(1200000)).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO billing_transaction (
+			tx_id, consumer_name, tx_type, amount_micro_yuan, currency, source_type, source_id, occurred_at, created_at
+		)
+		VALUES (?, ?, 'adjust', ?, 'CNY', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`)).
+		WithArgs(sqlmock.AnyArg(), "demo", int64(1200000), "console_ai_quota_refresh", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
 	mock.ExpectExec(regexp.QuoteMeta(`
 		INSERT INTO portal_ai_quota_balance (route_name, consumer_name, quota)
 		VALUES (?, ?, ?)
@@ -47,6 +69,42 @@ func TestRefreshAIQuota(t *testing.T) {
 	item, err := svc.RefreshAIQuota(context.Background(), "route-a", "demo", 1200000)
 	require.NoError(t, err)
 	require.Equal(t, int64(1200000), item.Quota)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestListAIQuotaConsumersPrefersPortalBillingWallet(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	expectSchema(mock)
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT consumer_name
+		FROM portal_user
+		WHERE COALESCE(is_deleted, 0) = 0
+		ORDER BY consumer_name ASC`)).
+		WillReturnRows(sqlmock.NewRows([]string{"consumer_name"}).
+			AddRow("demo"))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT consumer_name, quota
+		FROM portal_ai_quota_balance
+		WHERE route_name = ?`)).
+		WithArgs("route-a").
+		WillReturnRows(sqlmock.NewRows([]string{"consumer_name", "quota"}).
+			AddRow("demo", int64(300000)))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT consumer_name, available_micro_yuan
+		FROM billing_wallet
+		WHERE consumer_name IN (?,?)`)).
+		WithArgs("administrator", "demo").
+		WillReturnRows(sqlmock.NewRows([]string{"consumer_name", "available_micro_yuan"}).
+			AddRow("demo", int64(900000)))
+
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	items, err := svc.ListAIQuotaConsumers(context.Background(), "route-a")
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	require.Equal(t, int64(900000), items[1].Quota)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

@@ -111,7 +111,7 @@ func TestResolveRuntimeDependenciesNormalizesJDBCStyleMySQLParams(t *testing.T) 
 	require.True(t, deps.Portal.Enabled)
 	require.Equal(
 		t,
-		"portal:secret@tcp(mysql-server:3306)/aigateway_portal?allowPublicKeyRetrieval=true&characterEncoding=UTF-8&charset=UTF-8&loc=Asia%2FShanghai&parseTime=true&useSSL=false&useUnicode=true",
+		"portal:secret@tcp(mysql-server:3306)/aigateway_portal?allowPublicKeyRetrieval=true&characterEncoding=UTF-8&charset=UTF-8&loc=UTC&parseTime=true&useSSL=false&useUnicode=true",
 		deps.Portal.DSN,
 	)
 }
