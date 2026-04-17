@@ -1,5 +1,11 @@
 node_modules
 .ice
+.logs/
+logs/
+*.log
+*.log.*
+tmp/
+.tmp/
 frontend/build
 .DS_Store
 
