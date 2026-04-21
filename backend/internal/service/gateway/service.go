@@ -17,6 +17,7 @@ import (
 type Service struct {
 	k8sClient k8sclient.Client
 	portal    portalReader
+	hook      Hook
 }
 
 type builtinPluginRuleLoader interface {
@@ -28,12 +29,18 @@ type portalReader interface {
 	ListDepartmentTree(ctx context.Context) ([]*portalsvc.OrgDepartmentNode, error)
 }
 
+type Hook interface {
+	AfterWrite(ctx context.Context, trigger string) error
+}
+
+type noopHook struct{}
+
 func New(k8sClient k8sclient.Client, portals ...portalReader) *Service {
 	var portal portalReader
 	if len(portals) > 0 {
 		portal = portals[0]
 	}
-	svc := &Service{k8sClient: k8sClient, portal: portal}
+	svc := &Service{k8sClient: k8sClient, portal: portal, hook: noopHook{}}
 	svc.bootstrapDefaults(context.Background())
 	return svc
 }
@@ -82,6 +89,9 @@ func (s *Service) Save(ctx context.Context, kind string, payload map[string]any)
 	if err != nil {
 		return nil, err
 	}
+	if err := s.afterWrite(ctx, kind, "save"); err != nil {
+		return nil, err
+	}
 	return s.hydrateResource(kind, item), nil
 }
 
@@ -92,7 +102,10 @@ func (s *Service) Delete(ctx context.Context, kind, name string) error {
 	if s.isInternalWriteBlocked(kind, name) {
 		return fmt.Errorf("%s %s is an internal resource", kind, name)
 	}
-	return s.k8sClient.DeleteResource(ctx, kind, name)
+	if err := s.k8sClient.DeleteResource(ctx, kind, name); err != nil {
+		return err
+	}
+	return s.afterWrite(ctx, kind, "delete")
 }
 
 func (s *Service) ListMcpConsumers(ctx context.Context, serverName string) ([]map[string]any, error) {
@@ -248,6 +261,23 @@ func stringValue(value any) string {
 		return ""
 	}
 	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func (noopHook) AfterWrite(ctx context.Context, trigger string) error { return nil }
+
+func (s *Service) SetHook(hook Hook) {
+	if hook == nil {
+		s.hook = noopHook{}
+		return
+	}
+	s.hook = hook
+}
+
+func (s *Service) afterWrite(ctx context.Context, kind, action string) error {
+	if strings.TrimSpace(kind) != "ai-routes" {
+		return nil
+	}
+	return s.hook.AfterWrite(ctx, "ai-route-"+strings.TrimSpace(action))
 }
 
 func clonePayload(src map[string]any) map[string]any {

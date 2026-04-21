@@ -57,6 +57,9 @@ type Client interface {
 	UpsertResource(ctx context.Context, kind, name string, data map[string]any) (map[string]any, error)
 	DeleteResource(ctx context.Context, kind, name string) error
 	SyncAIDataMaskingRuntime(ctx context.Context) error
+	SyncAIModelRateLimitRuntime(ctx context.Context) error
+	ResolveAIQuotaRedisServiceName(ctx context.Context) string
+	ResolveAIQuotaRedisPassword(ctx context.Context) string
 }
 
 type RealClient struct {
@@ -232,6 +235,11 @@ func (c *MemoryClient) UpsertResource(ctx context.Context, kind, name string, da
 			return nil, err
 		}
 	}
+	if shouldSyncAIModelRateLimitRuntime(kind, name) {
+		if err := c.SyncAIModelRateLimitRuntime(ctx); err != nil {
+			return nil, err
+		}
+	}
 	return cloneMap(merged), nil
 }
 
@@ -247,6 +255,9 @@ func (c *MemoryClient) DeleteResource(ctx context.Context, kind, name string) er
 
 	if shouldSyncAIDataMaskingRuntime(kind, name) {
 		return c.SyncAIDataMaskingRuntime(ctx)
+	}
+	if shouldSyncAIModelRateLimitRuntime(kind, name) {
+		return c.SyncAIModelRateLimitRuntime(ctx)
 	}
 	return nil
 }
@@ -298,6 +309,50 @@ func (c *MemoryClient) SyncAIDataMaskingRuntime(ctx context.Context) error {
 	}
 	c.resources[higressWasmPluginResource][pluginName] = existing
 	return nil
+}
+
+func (c *MemoryClient) SyncAIModelRateLimitRuntime(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	projection := cloneMap(c.resources["ai-model-rate-limit-projections"]["default"])
+	desiredRules := buildAIModelRateLimitRulesFromProjection(projection)
+	for pluginName, desired := range desiredRules {
+		internalName := builtinWasmPluginResourceName(pluginName)
+		existing := cloneMap(c.resources[higressWasmPluginResource][internalName])
+		if existing == nil && len(desired) == 0 {
+			continue
+		}
+		if existing == nil {
+			manifest, ok := builtinWasmPluginManifest(pluginName, c.namespace)
+			if !ok {
+				return ErrNotFound
+			}
+			existing = manifest
+		}
+		spec := ensureMap(existing, "spec")
+		spec["matchRules"] = syncAIModelRateLimitMatchRules(toMapSlice(spec["matchRules"]), desired, modelRateLimitRulePrefix(pluginName))
+
+		if _, ok := c.resources[higressWasmPluginResource]; !ok {
+			c.resources[higressWasmPluginResource] = map[string]map[string]any{}
+		}
+		c.resources[higressWasmPluginResource][internalName] = existing
+	}
+	return nil
+}
+
+func (c *MemoryClient) ResolveAIQuotaRedisServiceName(ctx context.Context) string {
+	return fmt.Sprintf("%s.%s.svc.%s", higressAIQuotaRedisServiceDefault, c.namespace, higressPluginServerClusterDomainDefault)
+}
+
+func (c *MemoryClient) ResolveAIQuotaRedisPassword(ctx context.Context) string {
+	secret, ok := c.secrets[higressAIQuotaRedisSecretDefault]
+	if ok {
+		if password := strings.TrimSpace(secret[higressAIQuotaRedisPasswordKey]); password != "" {
+			return password
+		}
+	}
+	return higressAIQuotaRedisPasswordDefault
 }
 
 func (c *RealClient) Healthy(ctx context.Context) error {
@@ -486,6 +541,11 @@ func (c *RealClient) UpsertResource(ctx context.Context, kind, name string, data
 			return nil, err
 		}
 	}
+	if shouldSyncAIModelRateLimitRuntime(kind, name) {
+		if err := c.SyncAIModelRateLimitRuntime(ctx); err != nil {
+			return nil, err
+		}
+	}
 	return cloneMap(item), nil
 }
 
@@ -500,6 +560,9 @@ func (c *RealClient) DeleteResource(ctx context.Context, kind, name string) erro
 	if shouldSyncAIDataMaskingRuntime(kind, name) {
 		return c.SyncAIDataMaskingRuntime(ctx)
 	}
+	if shouldSyncAIModelRateLimitRuntime(kind, name) {
+		return c.SyncAIModelRateLimitRuntime(ctx)
+	}
 	return nil
 }
 
@@ -510,6 +573,15 @@ func shouldSyncAIDataMaskingRuntime(kind, name string) bool {
 		return true
 	}
 	if strings.HasPrefix(trimmedKind, "route-plugin-instances:") && trimmedName == higressWasmPluginNameAIDataMasking {
+		return true
+	}
+	return false
+}
+
+func shouldSyncAIModelRateLimitRuntime(kind, name string) bool {
+	trimmedKind := strings.TrimSpace(kind)
+	trimmedName := strings.TrimSpace(name)
+	if trimmedKind == "ai-model-rate-limit-projections" && trimmedName == "default" {
 		return true
 	}
 	return false

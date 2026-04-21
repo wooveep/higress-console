@@ -17,88 +17,96 @@ import (
 )
 
 const (
-	higressAnnotationMCPServer              = "higress.io/mcp-server"
-	higressAnnotationMCPMatchRuleDomains    = "higress.io/mcp-server-match-rule-domains"
-	higressAnnotationMCPMatchRuleType       = "higress.io/mcp-server-match-rule-type"
-	higressAnnotationMCPMatchRuleValue      = "higress.io/mcp-server-match-rule-value"
-	higressAnnotationMCPUpstreamType        = "higress.io/mcp-server-upstream-type"
-	higressAnnotationMCPUpstreamTransport   = "higress.io/mcp-server-upstream-transport-type"
-	higressAnnotationMCPPathRewritePrefix   = "higress.io/mcp-server-path-rewrite-prefix"
-	higressAnnotationMCPPathRewriteEnabled  = "higress.io/mcp-server-enable-path-rewrite"
-	higressMCPServerTypeOpenAPI             = "OPEN_API"
-	higressMCPServerTypeDatabase            = "DATABASE"
-	higressMCPServerTypeDirectRoute         = "DIRECT_ROUTE"
-	higressMCPServerTypeRedirectRoute       = "REDIRECT_ROUTE"
-	higressMCPServerTypeKey                 = "type"
-	higressWasmPluginNameAIProxy            = "ai-proxy"
-	higressWasmPluginNameAIQuota            = "ai-quota"
-	higressWasmPluginNameAIDataMasking      = "ai-data-masking"
-	higressWasmPluginNameModelRouter        = "model-router"
-	higressWasmPluginNameModelMapper        = "model-mapper"
-	higressWasmPluginNameAIStatistics       = "ai-statistics"
-	higressWasmPluginNameKeyAuth            = "key-auth"
-	higressWasmPluginNameMCPServer          = "mcp-server"
-	higressWasmPluginVersionDefault         = "2.0.0"
-	higressPluginServerServiceNameDefault   = "aigateway-plugin-server"
-	higressPluginServerClusterDomainDefault = "cluster.local"
-	higressAdminWasmPluginURLPatternEnv     = "HIGRESS_ADMIN_WASM_PLUGIN_CUSTOM_IMAGE_URL_PATTERN"
-	higressWasmPluginPriorityModelRouter    = 900
-	higressWasmPluginPriorityModelMapper    = 800
-	higressWasmPluginPriorityAIProxy        = 100
-	higressWasmPluginPriorityAIQuota        = 280
-	higressWasmPluginPriorityAIDataMasking  = 100
-	higressWasmPluginPriorityAIStatistics   = 900
-	higressWasmPluginPriorityKeyAuth        = 310
-	higressWasmPluginPriorityMCPServer      = 999
-	higressWasmPluginPhaseUnspecified       = "UNSPECIFIED_PHASE"
-	higressWasmPluginPhaseAuthN             = "AUTHN"
-	higressWasmPluginPhaseStats             = "STATS"
-	higressAIModelRoutingHeader             = "x-higress-llm-model"
-	higressAIFallbackHeader                 = "x-higress-fallback-from"
-	higressAIRouteInternalPathPrefix        = "/internal/ai-routes/"
-	higressAIRouteFallbackSuffix            = ".fallback"
-	higressMCPServerStaticPort              = 80
-	higressStaticRegistryType               = "static"
-	higressDNSRegistryType                  = "dns"
-	higressTransportHTTP                    = "http"
-	higressTransportHTTPS                   = "https"
-	higressKeyAuthAllowKey                  = "allow"
-	higressAIProxyActiveProviderKey         = "activeProviderId"
-	higressModelRouterHeaderKey             = "modelToHeader"
-	higressAIStatisticsDefaultAttrsKey      = "use_default_response_attributes"
-	higressAIQuotaQuotaUnitAmount           = "amount"
-	higressAIQuotaBalanceKeyPrefix          = "billing:balance:"
-	higressAIQuotaPriceKeyPrefix            = "billing:model-price:"
-	higressAIQuotaUsageEventStream          = "billing:usage:stream"
-	higressAIQuotaAdminConsumer             = "administrator"
-	higressAIQuotaRedisServiceDefault       = "redis-server"
-	higressAIQuotaRedisServiceAlt           = "redis-server-master"
-	higressAIQuotaRedisSecretDefault        = "redis-server"
-	higressAIQuotaRedisPasswordKey          = "redis-password"
-	higressAIQuotaRedisPasswordDefault      = "aigateway-redis"
-	higressAIQuotaRedisTimeoutMillis        = 1000
-	higressMCPConfigSectionKey              = "mcpServer"
-	higressMCPMatchListKey                  = "match_list"
-	higressMCPServersKey                    = "servers"
-	higressMCPRedisKey                      = "redis"
-	higressMCPRedisAddressKey               = "address"
-	higressMCPRedisPasswordKey              = "password"
-	higressMCPRedisUsernameKey              = "username"
-	higressMCPRedisDBKey                    = "db"
-	higressMCPSSEPathSuffixKey              = "sse_path_suffix"
-	higressMCPSSEPathSuffixDefault          = "/sse"
-	higressMCPRedisAddressPlaceholder       = "your.redis.host:6379"
-	higressMCPRedisPasswordPlaceholder      = "your_password"
-	higressMCPRedisUsernamePlaceholder      = "your_username"
-	higressMCPServerNameKey                 = "name"
-	higressMCPServerPathKey                 = "path"
-	higressMCPServerConfigKey               = "config"
-	higressMCPServerDBTypeKey               = "dbType"
-	higressMCPServerDSNKey                  = "dsn"
-	higressMCPMatchRulePathKey              = "match_rule_path"
-	higressMCPMatchRuleDomainKey            = "match_rule_domain"
-	higressMCPMatchRuleTypeKey              = "match_rule_type"
-	higressMCPServerConfigSectionEnabledKey = "enable"
+	higressAnnotationMCPServer                   = "higress.io/mcp-server"
+	higressAnnotationMCPMatchRuleDomains         = "higress.io/mcp-server-match-rule-domains"
+	higressAnnotationMCPMatchRuleType            = "higress.io/mcp-server-match-rule-type"
+	higressAnnotationMCPMatchRuleValue           = "higress.io/mcp-server-match-rule-value"
+	higressAnnotationMCPUpstreamType             = "higress.io/mcp-server-upstream-type"
+	higressAnnotationMCPUpstreamTransport        = "higress.io/mcp-server-upstream-transport-type"
+	higressAnnotationMCPPathRewritePrefix        = "higress.io/mcp-server-path-rewrite-prefix"
+	higressAnnotationMCPPathRewriteEnabled       = "higress.io/mcp-server-enable-path-rewrite"
+	higressMCPServerTypeOpenAPI                  = "OPEN_API"
+	higressMCPServerTypeDatabase                 = "DATABASE"
+	higressMCPServerTypeDirectRoute              = "DIRECT_ROUTE"
+	higressMCPServerTypeRedirectRoute            = "REDIRECT_ROUTE"
+	higressMCPServerTypeKey                      = "type"
+	higressWasmPluginNameAIProxy                 = "ai-proxy"
+	higressWasmPluginNameAIQuota                 = "ai-quota"
+	higressWasmPluginNameAIDataMasking           = "ai-data-masking"
+	higressWasmPluginNameClusterKeyRateLimit     = "cluster-key-rate-limit"
+	higressWasmPluginNameAITokenRateLimit        = "ai-token-ratelimit"
+	higressWasmPluginNameModelRouter             = "model-router"
+	higressWasmPluginNameModelMapper             = "model-mapper"
+	higressWasmPluginNameAIStatistics            = "ai-statistics"
+	higressWasmPluginNameKeyAuth                 = "key-auth"
+	higressWasmPluginNameMCPServer               = "mcp-server"
+	higressWasmPluginVersionDefault              = "2.0.0"
+	higressPluginServerServiceNameDefault        = "aigateway-plugin-server"
+	higressPluginServerClusterDomainDefault      = "cluster.local"
+	higressAdminWasmPluginURLPatternEnv          = "HIGRESS_ADMIN_WASM_PLUGIN_CUSTOM_IMAGE_URL_PATTERN"
+	higressWasmPluginPriorityModelRouter         = 900
+	higressWasmPluginPriorityModelMapper         = 800
+	higressWasmPluginPriorityAIProxy             = 100
+	higressWasmPluginPriorityAIQuota             = 280
+	higressWasmPluginPriorityAIDataMasking       = 100
+	higressWasmPluginPriorityClusterKeyRateLimit = 20
+	higressWasmPluginPriorityAITokenRateLimit    = 600
+	higressWasmPluginPriorityAIStatistics        = 900
+	higressWasmPluginPriorityKeyAuth             = 310
+	higressWasmPluginPriorityMCPServer           = 999
+	higressWasmPluginPhaseUnspecified            = "UNSPECIFIED_PHASE"
+	higressWasmPluginPhaseAuthN                  = "AUTHN"
+	higressWasmPluginPhaseStats                  = "STATS"
+	higressAIModelRoutingHeader                  = "x-higress-llm-model"
+	higressAIFallbackHeader                      = "x-higress-fallback-from"
+	higressAIRouteInternalPathPrefix             = "/internal/ai-routes/"
+	higressAIRouteFallbackSuffix                 = ".fallback"
+	higressMCPServerStaticPort                   = 80
+	higressStaticRegistryType                    = "static"
+	higressDNSRegistryType                       = "dns"
+	higressTransportHTTP                         = "http"
+	higressTransportHTTPS                        = "https"
+	higressKeyAuthAllowKey                       = "allow"
+	higressAIProxyActiveProviderKey              = "activeProviderId"
+	higressModelRouterHeaderKey                  = "modelToHeader"
+	higressAIStatisticsDefaultAttrsKey           = "use_default_response_attributes"
+	higressAIQuotaQuotaUnitAmount                = "amount"
+	higressAIQuotaBalanceKeyPrefix               = "billing:balance:"
+	higressAIQuotaPriceKeyPrefix                 = "billing:model-price:"
+	higressAIQuotaUsageEventStream               = "billing:usage:stream"
+	higressAIQuotaAdminConsumer                  = "administrator"
+	higressAIQuotaRedisServiceDefault            = "redis-server"
+	higressAIQuotaRedisServiceAlt                = "redis-server-master"
+	higressAIQuotaRedisSecretDefault             = "redis-server"
+	higressAIQuotaRedisPasswordKey               = "redis-password"
+	higressAIQuotaRedisPasswordDefault           = "aigateway-redis"
+	higressAIQuotaRedisTimeoutMillis             = 1000
+	modelRateLimitProjectionKind                 = "ai-model-rate-limit-projections"
+	modelRateLimitProjectionName                 = "default"
+	modelRateLimitRuleNameRPMPrefix              = "model-rate-rpm:"
+	modelRateLimitRuleNameTPMPrefix              = "model-rate-tpm:"
+	higressMCPConfigSectionKey                   = "mcpServer"
+	higressMCPMatchListKey                       = "match_list"
+	higressMCPServersKey                         = "servers"
+	higressMCPRedisKey                           = "redis"
+	higressMCPRedisAddressKey                    = "address"
+	higressMCPRedisPasswordKey                   = "password"
+	higressMCPRedisUsernameKey                   = "username"
+	higressMCPRedisDBKey                         = "db"
+	higressMCPSSEPathSuffixKey                   = "sse_path_suffix"
+	higressMCPSSEPathSuffixDefault               = "/sse"
+	higressMCPRedisAddressPlaceholder            = "your.redis.host:6379"
+	higressMCPRedisPasswordPlaceholder           = "your_password"
+	higressMCPRedisUsernamePlaceholder           = "your_username"
+	higressMCPServerNameKey                      = "name"
+	higressMCPServerPathKey                      = "path"
+	higressMCPServerConfigKey                    = "config"
+	higressMCPServerDBTypeKey                    = "dbType"
+	higressMCPServerDSNKey                       = "dsn"
+	higressMCPMatchRulePathKey                   = "match_rule_path"
+	higressMCPMatchRuleDomainKey                 = "match_rule_domain"
+	higressMCPMatchRuleTypeKey                   = "match_rule_type"
+	higressMCPServerConfigSectionEnabledKey      = "enable"
 )
 
 var providerDefaultEndpoints = map[string]providerEndpoint{
@@ -126,14 +134,16 @@ var providerDefaultEndpoints = map[string]providerEndpoint{
 }
 
 var builtinWasmPluginVersions = map[string]string{
-	higressWasmPluginNameAIProxy:       "2.0.0",
-	higressWasmPluginNameAIQuota:       "1.1.0",
-	higressWasmPluginNameAIDataMasking: "2.0.0",
-	higressWasmPluginNameModelRouter:   "2.0.0",
-	higressWasmPluginNameModelMapper:   "2.0.0",
-	higressWasmPluginNameAIStatistics:  "2.0.0",
-	higressWasmPluginNameKeyAuth:       "2.0.0",
-	higressWasmPluginNameMCPServer:     "2.0.0",
+	higressWasmPluginNameAIProxy:             "2.0.0",
+	higressWasmPluginNameAIQuota:             "1.1.0",
+	higressWasmPluginNameAIDataMasking:       "2.0.0",
+	higressWasmPluginNameClusterKeyRateLimit: "2.0.0",
+	higressWasmPluginNameAITokenRateLimit:    "2.0.0",
+	higressWasmPluginNameModelRouter:         "2.0.0",
+	higressWasmPluginNameModelMapper:         "2.0.0",
+	higressWasmPluginNameAIStatistics:        "2.0.0",
+	higressWasmPluginNameKeyAuth:             "2.0.0",
+	higressWasmPluginNameMCPServer:           "2.0.0",
 }
 
 type providerEndpoint struct {
@@ -803,6 +813,35 @@ func (c *RealClient) SyncAIDataMaskingRuntime(ctx context.Context) error {
 	})
 }
 
+func (c *RealClient) SyncAIModelRateLimitRuntime(ctx context.Context) error {
+	projection, err := c.GetResource(ctx, modelRateLimitProjectionKind, modelRateLimitProjectionName)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if errors.Is(err, ErrNotFound) {
+		projection = map[string]any{}
+	}
+	desiredRules := buildAIModelRateLimitRulesFromProjection(projection)
+	for _, pluginName := range []string{higressWasmPluginNameClusterKeyRateLimit, higressWasmPluginNameAITokenRateLimit} {
+		desired := desiredRules[pluginName]
+		_, lookupErr := c.getBuiltinWasmPlugin(ctx, pluginName)
+		if lookupErr != nil && !errors.Is(lookupErr, ErrNotFound) {
+			return lookupErr
+		}
+		if len(desired) == 0 && errors.Is(lookupErr, ErrNotFound) {
+			continue
+		}
+		if err := c.mutateBuiltinWasmPlugin(ctx, pluginName, func(plugin map[string]any) error {
+			spec := ensureMap(plugin, "spec")
+			spec["matchRules"] = syncAIModelRateLimitMatchRules(toMapSlice(spec["matchRules"]), desired, modelRateLimitRulePrefix(pluginName))
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func buildAIQuotaRuleConfig(routeName, redisServiceName, redisPassword string) map[string]any {
 	trimmedRouteName := strings.TrimSpace(routeName)
 	if trimmedRouteName == "" {
@@ -819,15 +858,24 @@ func buildAIQuotaRuleConfig(routeName, redisServiceName, redisPassword string) m
 		"usage_event_stream": higressAIQuotaUsageEventStream,
 		"admin_consumer":     higressAIQuotaAdminConsumer,
 		"admin_path":         "/v1/ai/quotas/routes/" + trimmedRouteName + "/consumers",
-		"redis": map[string]any{
-			"service_name": serviceName,
-			"service_port": 6379,
-			"timeout":      higressAIQuotaRedisTimeoutMillis,
-			"database":     0,
-		},
+		"redis":              buildRedisRuntimeConfig(serviceName, redisPassword),
+	}
+	return config
+}
+
+func buildRedisRuntimeConfig(redisServiceName, redisPassword string) map[string]any {
+	serviceName := strings.TrimSpace(redisServiceName)
+	if serviceName == "" {
+		serviceName = higressAIQuotaRedisServiceDefault
+	}
+	config := map[string]any{
+		"service_name": serviceName,
+		"service_port": 6379,
+		"timeout":      higressAIQuotaRedisTimeoutMillis,
+		"database":     0,
 	}
 	if password := strings.TrimSpace(redisPassword); password != "" {
-		mapValue(config["redis"])["password"] = password
+		config["password"] = password
 	}
 	return config
 }
@@ -849,6 +897,14 @@ func (c *RealClient) resolveAIQuotaRedisPassword(ctx context.Context) string {
 		}
 	}
 	return higressAIQuotaRedisPasswordDefault
+}
+
+func (c *RealClient) ResolveAIQuotaRedisServiceName(ctx context.Context) string {
+	return c.resolveAIQuotaRedisServiceName(ctx)
+}
+
+func (c *RealClient) ResolveAIQuotaRedisPassword(ctx context.Context) string {
+	return c.resolveAIQuotaRedisPassword(ctx)
 }
 
 func (c *RealClient) syncRouteAuthRule(ctx context.Context, ingressName string, authConfig map[string]any, internal bool) error {
@@ -1632,8 +1688,24 @@ func buildAIRouteFallbackIngressPayload(name, ingressName, originalRouteName str
 
 func aiIngressHeaders(data map[string]any, extra map[string]any) []map[string]any {
 	headers := toMapSlice(data["headerPredicates"])
+	headers = append(headers, aiModelPredicateHeaders(data["modelPredicates"])...)
 	if extra != nil {
 		headers = append(headers, extra)
+	}
+	return headers
+}
+
+func aiModelPredicateHeaders(value any) []map[string]any {
+	predicates := toMapSlice(value)
+	headers := make([]map[string]any, 0, len(predicates))
+	for _, predicate := range predicates {
+		matchValue := stringValue(predicate["matchValue"])
+		if matchValue == "" {
+			continue
+		}
+		header := cloneMap(predicate)
+		header["key"] = higressAIModelRoutingHeader
+		headers = append(headers, header)
 	}
 	return headers
 }
@@ -2288,6 +2360,10 @@ func builtinWasmPluginSpec(pluginName, namespace string) (map[string]any, string
 	case higressWasmPluginNameAIDataMasking:
 		phase = higressWasmPluginPhaseAuthN
 		priority = higressWasmPluginPriorityAIDataMasking
+	case higressWasmPluginNameClusterKeyRateLimit:
+		priority = higressWasmPluginPriorityClusterKeyRateLimit
+	case higressWasmPluginNameAITokenRateLimit:
+		priority = higressWasmPluginPriorityAITokenRateLimit
 	case higressWasmPluginNameModelRouter:
 		priority = higressWasmPluginPriorityModelRouter
 	case higressWasmPluginNameModelMapper:
@@ -2410,6 +2486,73 @@ func syncAIDataMaskingMatchRules(existing []map[string]any, desired map[string]m
 		return wasmRuleLess(next[i], next[j])
 	})
 	return next
+}
+
+func buildAIModelRateLimitRulesFromProjection(projection map[string]any) map[string]map[string]map[string]any {
+	result := map[string]map[string]map[string]any{
+		higressWasmPluginNameClusterKeyRateLimit: {},
+		higressWasmPluginNameAITokenRateLimit:    {},
+	}
+	for _, item := range toMapSlice(projection["rules"]) {
+		pluginName := stringValue(item["pluginName"])
+		ingressName := stringValue(item["ingress"])
+		config := mapValue(item["config"])
+		if pluginName == "" || ingressName == "" || len(config) == 0 {
+			continue
+		}
+		desired, ok := result[pluginName]
+		if !ok {
+			continue
+		}
+		desired[ingressName] = cloneMap(config)
+	}
+	return result
+}
+
+func syncAIModelRateLimitMatchRules(existing []map[string]any, desired map[string]map[string]any, managedRulePrefix string) []map[string]any {
+	next := make([]map[string]any, 0, len(existing)+len(desired))
+	for _, rule := range existing {
+		if isManagedAIModelRateLimitRule(rule, managedRulePrefix) {
+			continue
+		}
+		next = append(next, cloneMap(rule))
+	}
+	ingresses := make([]string, 0, len(desired))
+	for ingressName := range desired {
+		ingresses = append(ingresses, ingressName)
+	}
+	sort.Strings(ingresses)
+	for _, ingressName := range ingresses {
+		next = append(next, map[string]any{
+			"ingress":       []string{ingressName},
+			"config":        cloneMap(desired[ingressName]),
+			"configDisable": false,
+		})
+	}
+	sort.Slice(next, func(i, j int) bool {
+		return wasmRuleLess(next[i], next[j])
+	})
+	return next
+}
+
+func isManagedAIModelRateLimitRule(rule map[string]any, managedRulePrefix string) bool {
+	if strings.TrimSpace(managedRulePrefix) == "" {
+		return false
+	}
+	config := mapValue(rule["config"])
+	ruleName := stringValue(config["rule_name"])
+	return strings.HasPrefix(ruleName, managedRulePrefix)
+}
+
+func modelRateLimitRulePrefix(pluginName string) string {
+	switch strings.TrimSpace(pluginName) {
+	case higressWasmPluginNameClusterKeyRateLimit:
+		return modelRateLimitRuleNameRPMPrefix
+	case higressWasmPluginNameAITokenRateLimit:
+		return modelRateLimitRuleNameTPMPrefix
+	default:
+		return ""
+	}
 }
 
 func isManagedAIDataMaskingIngress(name string) bool {

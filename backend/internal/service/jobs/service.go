@@ -16,6 +16,7 @@ import (
 
 	"github.com/gogf/gf/v2/os/gcron"
 
+	"github.com/wooveep/aigateway-console/backend/internal/consts"
 	internaljob "github.com/wooveep/aigateway-console/backend/internal/job"
 	gatewaysvc "github.com/wooveep/aigateway-console/backend/internal/service/gateway"
 	portalsvc "github.com/wooveep/aigateway-console/backend/internal/service/portal"
@@ -28,6 +29,13 @@ const (
 	RunStatusSuccess = "success"
 	RunStatusFailed  = "failed"
 	RunStatusSkipped = "skipped"
+
+	modelRateLimitProjectionKind    = "ai-model-rate-limit-projections"
+	modelRateLimitProjectionName    = "default"
+	modelRateLimitPluginRPM         = "cluster-key-rate-limit"
+	modelRateLimitPluginTPM         = "ai-token-ratelimit"
+	modelRateLimitRuleNameRPMPrefix = "model-rate-rpm:"
+	modelRateLimitRuleNameTPMPrefix = "model-rate-tpm:"
 )
 
 type TriggerInput struct {
@@ -252,6 +260,9 @@ func (s *Service) jobsForHook(trigger string) []string {
 	if strings.HasPrefix(trigger, "consumer") || strings.HasPrefix(trigger, "org-") {
 		return []string{"portal-consumer-projection", "portal-consumer-level-auth-reconcile"}
 	}
+	if strings.HasPrefix(trigger, "model-binding-") || trigger == "ai-route-save" || trigger == "ai-route-delete" {
+		return []string{"ai-model-rate-limit-reconcile"}
+	}
 	return nil
 }
 
@@ -265,6 +276,8 @@ func (s *Service) targetVersion(ctx context.Context, name string) (string, error
 		snapshot, err = s.snapshotConsumerLevelAuth(ctx)
 	case "ai-sensitive-projection":
 		snapshot, err = s.snapshotAISensitive(ctx)
+	case "ai-model-rate-limit-reconcile":
+		snapshot, err = s.snapshotAIModelRateLimitProjection(ctx)
 	case "ai-plugin-execution-order-reconcile":
 		snapshot, err = s.snapshotPluginOrder(ctx)
 	default:
@@ -284,6 +297,8 @@ func (s *Service) execute(ctx context.Context, name string) (string, error) {
 		return s.executePortalConsumerLevelAuthReconcile(ctx)
 	case "ai-sensitive-projection":
 		return s.executeAISensitiveProjection(ctx)
+	case "ai-model-rate-limit-reconcile":
+		return s.executeAIModelRateLimitReconcile(ctx)
 	case "ai-plugin-execution-order-reconcile":
 		return s.executePluginExecutionOrderReconcile(ctx)
 	default:
@@ -454,6 +469,145 @@ func (s *Service) executeAISensitiveProjection(ctx context.Context) (string, err
 		return "", err
 	}
 	return fmt.Sprintf("projected detectRules=%d replaceRules=%d systemConfigs=%d", len(detectRules), len(replaceRules), len(systemConfig)), nil
+}
+
+type modelBindingRateLimit struct {
+	BindingID    string
+	AssetID      string
+	ModelID      string
+	Status       string
+	RPM          int
+	TPM          int
+	EffectiveRPM int
+	EffectiveTPM int
+}
+
+func (s *Service) executeAIModelRateLimitReconcile(ctx context.Context) (string, error) {
+	db, err := s.db(ctx)
+	if err != nil {
+		return "", err
+	}
+	if s.k8s == nil {
+		return "", errors.New("ai model rate limit reconcile requires k8s client")
+	}
+
+	bindings, duplicates, err := queryPublishedModelBindingRateLimits(ctx, db)
+	if err != nil {
+		return "", err
+	}
+	routes, err := s.listGatewayKind(ctx, "ai-routes")
+	if err != nil {
+		return "", err
+	}
+
+	rules := make([]map[string]any, 0)
+	skipped := make([]map[string]any, 0)
+	projectedRoutes := 0
+	projectedRPMRules := 0
+	projectedTPMRules := 0
+
+	for _, route := range routes {
+		routeName := strings.TrimSpace(fmt.Sprint(route["name"]))
+		if routeName == "" {
+			continue
+		}
+		modelID, skipReason := resolveAIRouteModelRateLimitEligibility(route, bindings, duplicates)
+		if skipReason != "" {
+			skipped = append(skipped, map[string]any{
+				"routeName": routeName,
+				"reason":    skipReason,
+			})
+			continue
+		}
+		binding := bindings[modelID]
+		targets := aiRouteModelRateLimitRuntimeTargets(route)
+		if len(targets) == 0 {
+			skipped = append(skipped, map[string]any{
+				"routeName": routeName,
+				"modelId":   modelID,
+				"reason":    "route has no runtime ingress targets",
+			})
+			continue
+		}
+		if binding.EffectiveRPM <= 0 && binding.EffectiveTPM <= 0 {
+			skipped = append(skipped, map[string]any{
+				"routeName": routeName,
+				"modelId":   modelID,
+				"reason":    "published binding has no positive rpm/tpm limit",
+			})
+			continue
+		}
+		projectedRoutes++
+		for _, ingressName := range targets {
+			if binding.EffectiveRPM > 0 {
+				rules = append(rules, map[string]any{
+					"pluginName": modelRateLimitPluginRPM,
+					"ingress":    ingressName,
+					"config": buildAIModelRPMRuleConfig(
+						routeName,
+						modelID,
+						binding.EffectiveRPM,
+						s.k8s,
+						ctx,
+					),
+				})
+				projectedRPMRules++
+			}
+			if binding.EffectiveTPM > 0 {
+				rules = append(rules, map[string]any{
+					"pluginName": modelRateLimitPluginTPM,
+					"ingress":    ingressName,
+					"config": buildAIModelTPMRuleConfig(
+						routeName,
+						modelID,
+						binding.EffectiveTPM,
+						s.k8s,
+						ctx,
+					),
+				})
+				projectedTPMRules++
+			}
+		}
+	}
+
+	published := make([]map[string]any, 0, len(bindings))
+	modelIDs := make([]string, 0, len(bindings))
+	for modelID := range bindings {
+		modelIDs = append(modelIDs, modelID)
+	}
+	sort.Strings(modelIDs)
+	for _, modelID := range modelIDs {
+		binding := bindings[modelID]
+		published = append(published, map[string]any{
+			"bindingId":    binding.BindingID,
+			"assetId":      binding.AssetID,
+			"modelId":      binding.ModelID,
+			"status":       binding.Status,
+			"rpm":          binding.RPM,
+			"tpm":          binding.TPM,
+			"effectiveRPM": binding.EffectiveRPM,
+			"effectiveTPM": binding.EffectiveTPM,
+		})
+	}
+
+	payload := map[string]any{
+		"name":             modelRateLimitProjectionName,
+		"rules":            rules,
+		"publishedModels":  published,
+		"duplicatedModels": sortedKeys(duplicates),
+		"skippedRoutes":    skipped,
+		"projectedAt":      time.Now().UTC().Format(time.RFC3339),
+	}
+	if _, err := s.k8s.UpsertResource(ctx, modelRateLimitProjectionKind, modelRateLimitProjectionName, payload); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(
+		"projected routes=%d rpmRules=%d tpmRules=%d skipped=%d",
+		projectedRoutes,
+		projectedRPMRules,
+		projectedTPMRules,
+		len(skipped),
+	), nil
 }
 
 func (s *Service) executePluginExecutionOrderReconcile(ctx context.Context) (string, error) {
@@ -722,6 +876,55 @@ func (s *Service) snapshotAISensitive(ctx context.Context) (any, error) {
 	}, nil
 }
 
+func (s *Service) snapshotAIModelRateLimitProjection(ctx context.Context) (any, error) {
+	db, err := s.db(ctx)
+	if err != nil {
+		return nil, err
+	}
+	bindings, duplicates, err := queryPublishedModelBindingRateLimits(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	routes, err := s.listGatewayKind(ctx, "ai-routes")
+	if err != nil {
+		return nil, err
+	}
+	items := make([]map[string]any, 0, len(routes))
+	for _, route := range routes {
+		routeName := strings.TrimSpace(fmt.Sprint(route["name"]))
+		if routeName == "" {
+			continue
+		}
+		modelID, reason := resolveAIRouteModelRateLimitEligibility(route, bindings, duplicates)
+		items = append(items, map[string]any{
+			"name":          routeName,
+			"modelId":       modelID,
+			"targetIngress": aiRouteModelRateLimitRuntimeTargets(route),
+			"skipReason":    reason,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return strings.TrimSpace(fmt.Sprint(items[i]["name"])) < strings.TrimSpace(fmt.Sprint(items[j]["name"]))
+	})
+	published := make([]map[string]any, 0, len(bindings))
+	for _, modelID := range sortedKeys(bindings) {
+		binding := bindings[modelID]
+		published = append(published, map[string]any{
+			"modelId":      binding.ModelID,
+			"bindingId":    binding.BindingID,
+			"rpm":          binding.RPM,
+			"tpm":          binding.TPM,
+			"effectiveRPM": binding.EffectiveRPM,
+			"effectiveTPM": binding.EffectiveTPM,
+		})
+	}
+	return map[string]any{
+		"publishedModels":  published,
+		"duplicatedModels": sortedKeys(duplicates),
+		"routes":           items,
+	}, nil
+}
+
 func (s *Service) snapshotPluginOrder(ctx context.Context) (any, error) {
 	items, err := s.listGatewayKind(ctx, "wasm-plugins")
 	if err != nil {
@@ -742,6 +945,161 @@ func (s *Service) snapshotPluginOrder(ctx context.Context) (any, error) {
 		return fmt.Sprint(filtered[i]["name"]) < fmt.Sprint(filtered[j]["name"])
 	})
 	return filtered, nil
+}
+
+func queryPublishedModelBindingRateLimits(ctx context.Context, db *sql.DB) (map[string]modelBindingRateLimit, map[string]struct{}, error) {
+	rows, err := queryRows(ctx, db, `
+		SELECT binding_id, asset_id, model_id, status, rpm, tpm
+		FROM portal_model_binding
+		WHERE status = 'published'
+		ORDER BY model_id ASC, binding_id ASC`)
+	if err != nil {
+		return nil, nil, err
+	}
+	result := make(map[string]modelBindingRateLimit, len(rows))
+	duplicates := map[string]struct{}{}
+	for _, row := range rows {
+		modelID := strings.TrimSpace(fmt.Sprint(row["model_id"]))
+		if modelID == "" {
+			continue
+		}
+		if _, exists := result[modelID]; exists {
+			duplicates[modelID] = struct{}{}
+			continue
+		}
+		rpm := toInt(row["rpm"])
+		tpm := toInt(row["tpm"])
+		result[modelID] = modelBindingRateLimit{
+			BindingID:    strings.TrimSpace(fmt.Sprint(row["binding_id"])),
+			AssetID:      strings.TrimSpace(fmt.Sprint(row["asset_id"])),
+			ModelID:      modelID,
+			Status:       strings.TrimSpace(fmt.Sprint(row["status"])),
+			RPM:          rpm,
+			TPM:          tpm,
+			EffectiveRPM: effectiveModelRateLimit(rpm),
+			EffectiveTPM: effectiveModelRateLimit(tpm),
+		}
+	}
+	return result, duplicates, nil
+}
+
+func resolveAIRouteModelRateLimitEligibility(
+	route map[string]any,
+	bindings map[string]modelBindingRateLimit,
+	duplicates map[string]struct{},
+) (string, string) {
+	modelPredicates := toMapSlice(route["modelPredicates"])
+	switch len(modelPredicates) {
+	case 0:
+		return "", "modelPredicates is empty"
+	case 1:
+	default:
+		return "", "modelPredicates must contain exactly one predicate"
+	}
+	predicate := modelPredicates[0]
+	matchType := strings.ToUpper(strings.TrimSpace(fmt.Sprint(predicate["matchType"])))
+	if matchType != "EQUAL" {
+		return "", "modelPredicates only supports EQUAL for automatic rate limit projection"
+	}
+	modelID := strings.TrimSpace(fmt.Sprint(predicate["matchValue"]))
+	if modelID == "" {
+		return "", "modelPredicates.matchValue is empty"
+	}
+	if _, duplicated := duplicates[modelID]; duplicated {
+		return "", "modelId matches multiple published bindings"
+	}
+	if _, ok := bindings[modelID]; !ok {
+		return "", "modelId does not match any published binding"
+	}
+	return modelID, ""
+}
+
+func aiRouteModelRateLimitRuntimeTargets(route map[string]any) []string {
+	name := strings.TrimSpace(fmt.Sprint(route["name"]))
+	if name == "" {
+		return nil
+	}
+	targets := []string{
+		"ai-route-" + name + consts.InternalResourceNameSuffix,
+		"ai-route-" + name + consts.InternalResourceNameSuffix + "-internal",
+	}
+	fallback := mapValue(route["fallbackConfig"])
+	if boolValue(firstNonNil(fallback["enabled"], fallback["enable"])) && len(toMapSlice(fallback["upstreams"])) > 0 {
+		fallbackName := "ai-route-" + name + ".fallback" + consts.InternalResourceNameSuffix
+		targets = append(targets, fallbackName, fallbackName+"-internal")
+	}
+	return targets
+}
+
+func buildAIModelRPMRuleConfig(routeName, modelID string, rpm int, client k8sclient.Client, ctx context.Context) map[string]any {
+	redisServiceName, redisPassword := resolveRedisRuntimeSettings(client, ctx)
+	return map[string]any{
+		"rule_name": modelRateLimitRuleNameRPMPrefix + strings.TrimSpace(routeName) + ":" + strings.TrimSpace(modelID),
+		"rule_items": []map[string]any{{
+			"limit_by_per_consumer": "",
+			"limit_keys": []map[string]any{{
+				"key":              "*",
+				"query_per_minute": rpm,
+			}},
+		}},
+		"redis": buildRedisRuntimeConfigPayload(redisServiceName, redisPassword),
+	}
+}
+
+func buildAIModelTPMRuleConfig(routeName, modelID string, tpm int, client k8sclient.Client, ctx context.Context) map[string]any {
+	redisServiceName, redisPassword := resolveRedisRuntimeSettings(client, ctx)
+	return map[string]any{
+		"rule_name":  modelRateLimitRuleNameTPMPrefix + strings.TrimSpace(routeName) + ":" + strings.TrimSpace(modelID),
+		"limit_unit": "token",
+		"rule_items": []map[string]any{{
+			"limit_by_per_consumer": "",
+			"limit_keys": []map[string]any{{
+				"key":              "*",
+				"token_per_minute": tpm,
+			}},
+		}},
+		"redis": buildRedisRuntimeConfigPayload(redisServiceName, redisPassword),
+	}
+}
+
+func resolveRedisRuntimeSettings(client k8sclient.Client, ctx context.Context) (string, string) {
+	if client == nil {
+		return "redis-server.aigateway-system.svc.cluster.local", "aigateway-redis"
+	}
+	return client.ResolveAIQuotaRedisServiceName(ctx), client.ResolveAIQuotaRedisPassword(ctx)
+}
+
+func buildRedisRuntimeConfigPayload(serviceName, password string) map[string]any {
+	config := map[string]any{
+		"service_name": strings.TrimSpace(serviceName),
+		"service_port": 6379,
+		"timeout":      1000,
+		"database":     0,
+	}
+	if strings.TrimSpace(password) != "" {
+		config["password"] = strings.TrimSpace(password)
+	}
+	return config
+}
+
+func effectiveModelRateLimit(value int) int {
+	if value <= 0 {
+		return 0
+	}
+	effective := (value * 70) / 100
+	if effective < 1 {
+		return 1
+	}
+	return effective
+}
+
+func sortedKeys[T any](items map[string]T) []string {
+	result := make([]string, 0, len(items))
+	for key := range items {
+		result = append(result, key)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func queryInt(ctx context.Context, db *sql.DB, statement string, args ...any) int {
@@ -790,6 +1148,55 @@ func normalizeDBValue(value any) any {
 		return typed.UTC().Format(time.RFC3339)
 	default:
 		return typed
+	}
+}
+
+func mapValue(value any) map[string]any {
+	typed, _ := value.(map[string]any)
+	if typed == nil {
+		return map[string]any{}
+	}
+	return typed
+}
+
+func toMapSlice(value any) []map[string]any {
+	switch typed := value.(type) {
+	case []map[string]any:
+		result := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			result = append(result, mapValue(item))
+		}
+		return result
+	case []any:
+		result := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if mapped, ok := item.(map[string]any); ok {
+				result = append(result, mapped)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+func firstNonNil(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func boolValue(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
 	}
 }
 

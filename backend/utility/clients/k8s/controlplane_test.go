@@ -128,10 +128,9 @@ func TestBuildAIRouteIngressPayloadMapsFrontendContract(t *testing.T) {
 
 	require.Equal(t, []string{"api.example.com"}, publicPayload["domains"])
 	require.Equal(t, "/v1/chat/completions", mapValue(publicPayload["path"])["matchValue"])
-	require.Len(t, toMapSlice(publicPayload["headers"]), 1)
+	require.Len(t, toMapSlice(publicPayload["headers"]), 2)
 	require.Equal(t, "team-a", publicAnnotations["higress.io/exact-match-header-x-tenant"])
-	_, hasModelHeader := publicAnnotations["higress.io/prefix-match-header-x-higress-llm-model"]
-	require.False(t, hasModelHeader)
+	require.Equal(t, "gpt-4", publicAnnotations["higress.io/prefix-match-header-x-higress-llm-model"])
 	require.Equal(t, "gpt-4", publicAnnotations["higress.io/prefix-match-query-model"])
 	require.Equal(t, "GET POST", publicAnnotations[higressAnnotationMatchMethod])
 	require.Equal(t, "dept-a", publicAnnotations[higressAnnotationAuthConsumerDepartments])
@@ -367,6 +366,20 @@ func TestBuiltinWasmPluginManifestSupportsAIDataMasking(t *testing.T) {
 	require.Equal(t, "http://aigateway-plugin-server.aigateway-system.svc.cluster.local/plugins/ai-data-masking/2.0.0/plugin.wasm", spec["url"])
 }
 
+func TestBuiltinWasmPluginManifestSupportsModelRateLimitPlugins(t *testing.T) {
+	clusterManifest, ok := builtinWasmPluginManifest(higressWasmPluginNameClusterKeyRateLimit, "aigateway-system")
+	require.True(t, ok)
+	clusterSpec := mapValue(clusterManifest["spec"])
+	require.EqualValues(t, higressWasmPluginPriorityClusterKeyRateLimit, clusterSpec["priority"])
+	require.Equal(t, "http://aigateway-plugin-server.aigateway-system.svc.cluster.local/plugins/cluster-key-rate-limit/2.0.0/plugin.wasm", clusterSpec["url"])
+
+	tokenManifest, ok := builtinWasmPluginManifest(higressWasmPluginNameAITokenRateLimit, "aigateway-system")
+	require.True(t, ok)
+	tokenSpec := mapValue(tokenManifest["spec"])
+	require.EqualValues(t, higressWasmPluginPriorityAITokenRateLimit, tokenSpec["priority"])
+	require.Equal(t, "http://aigateway-plugin-server.aigateway-system.svc.cluster.local/plugins/ai-token-ratelimit/2.0.0/plugin.wasm", tokenSpec["url"])
+}
+
 func TestMemoryClientSyncAIDataMaskingRuntimeUsesBundledDictionaryFallback(t *testing.T) {
 	client := NewMemoryClient()
 	_, err := client.UpsertResource(context.Background(), "ai-routes", "doubao", map[string]any{
@@ -437,6 +450,71 @@ func TestMemoryClientSyncAIDataMaskingRuntimeUsesBundledDictionaryFallback(t *te
 	require.NotContains(t, config, "audit_sink")
 	require.Len(t, toMapSlice(config["deny_rules"]), 1)
 	require.Len(t, toMapSlice(config["replace_rules"]), 1)
+}
+
+func TestMemoryClientSyncAIModelRateLimitRuntimeUsesProjection(t *testing.T) {
+	client := NewMemoryClient()
+
+	_, err := client.UpsertResource(context.Background(), modelRateLimitProjectionKind, modelRateLimitProjectionName, map[string]any{
+		"name": modelRateLimitProjectionName,
+		"rules": []map[string]any{
+			{
+				"pluginName": higressWasmPluginNameClusterKeyRateLimit,
+				"ingress":    "ai-route-chat-demo.internal",
+				"config": map[string]any{
+					"rule_name": modelRateLimitRuleNameRPMPrefix + "chat-demo:model-a",
+					"rule_items": []map[string]any{{
+						"limit_by_per_consumer": "",
+						"limit_keys": []map[string]any{{
+							"key":              "*",
+							"query_per_minute": 70,
+						}},
+					}},
+					"redis": map[string]any{"service_name": "redis-server.aigateway-system.svc.cluster.local"},
+				},
+			},
+			{
+				"pluginName": higressWasmPluginNameAITokenRateLimit,
+				"ingress":    "ai-route-chat-demo.internal",
+				"config": map[string]any{
+					"rule_name":  modelRateLimitRuleNameTPMPrefix + "chat-demo:model-a",
+					"limit_unit": "token",
+					"rule_items": []map[string]any{{
+						"limit_by_per_consumer": "",
+						"limit_keys": []map[string]any{{
+							"key":              "*",
+							"token_per_minute": 700,
+						}},
+					}},
+					"redis": map[string]any{"service_name": "redis-server.aigateway-system.svc.cluster.local"},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	clusterPlugin, err := client.GetResource(context.Background(), higressWasmPluginResource, builtinWasmPluginResourceName(higressWasmPluginNameClusterKeyRateLimit))
+	require.NoError(t, err)
+	clusterRules := toMapSlice(nestedValue(clusterPlugin, "spec", "matchRules"))
+	require.Len(t, clusterRules, 1)
+	require.Equal(t, "ai-route-chat-demo.internal", normalizeStringSlice(clusterRules[0]["ingress"])[0])
+	require.Equal(t, modelRateLimitRuleNameRPMPrefix+"chat-demo:model-a", mapValue(clusterRules[0]["config"])["rule_name"])
+
+	tokenPlugin, err := client.GetResource(context.Background(), higressWasmPluginResource, builtinWasmPluginResourceName(higressWasmPluginNameAITokenRateLimit))
+	require.NoError(t, err)
+	tokenRules := toMapSlice(nestedValue(tokenPlugin, "spec", "matchRules"))
+	require.Len(t, tokenRules, 1)
+	require.Equal(t, modelRateLimitRuleNameTPMPrefix+"chat-demo:model-a", mapValue(tokenRules[0]["config"])["rule_name"])
+
+	_, err = client.UpsertResource(context.Background(), modelRateLimitProjectionKind, modelRateLimitProjectionName, map[string]any{
+		"name":  modelRateLimitProjectionName,
+		"rules": []map[string]any{},
+	})
+	require.NoError(t, err)
+
+	clusterPlugin, err = client.GetResource(context.Background(), higressWasmPluginResource, builtinWasmPluginResourceName(higressWasmPluginNameClusterKeyRateLimit))
+	require.NoError(t, err)
+	require.Empty(t, toMapSlice(nestedValue(clusterPlugin, "spec", "matchRules")))
 }
 
 func TestDefaultMcpBridgeManifestStartsEmpty(t *testing.T) {

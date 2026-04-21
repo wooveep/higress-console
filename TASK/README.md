@@ -44,6 +44,7 @@
 - 当前重点：
   - 继续把“控制面真相源回归”作为第一优先级，收口 `MCP / AI Route / Provider` 到真实 Higress 运行态对象，而不是 generic ConfigMap。
   - 继续收口 `gateway` 域与旧 Java 在 `CRD / 注解 / 字段级语义` 上的差异。
+  - 收口 `modelPredicates -> x-higress-llm-model` 的 AI Route 运行时匹配，并把模型资产发布的 `RPM/TPM` 投影为每用户每模型的 runtime 限流规则。
   - 稳定 `dev-redeploy / minikube-dev` 本地联调链路，保证 Go console / Portal / plugin-server 可持续冷启动。
   - 启动 `P7`：把 `/dashboard` 与 `/ai/dashboard` 做强分层，统一页面时间范围，并收口主看板与 AI 看板的指标边界。
 
@@ -79,8 +80,10 @@
   - `portal-consumer-projection`
   - `portal-consumer-level-auth-reconcile`
   - `ai-sensitive-projection`
+  - `ai-model-rate-limit-reconcile`
   - `ai-plugin-execution-order-reconcile`
   - 当前处于 `aftercare`：继续补失败重试、运行态观测与失败排查体验
+  - `P3/P5 aftercare` 本轮新增：`modelPredicates` 已真正投影到 `x-higress-llm-model` 运行时匹配；模型资产已开始通过 projection -> builtin `cluster-key-rate-limit / ai-token-ratelimit` 生成每用户每模型规则，并记录 skip reason。
 - 本地开发链路最近已补齐：
   - `console` 镜像改为 monorepo 构建入口，兼容对 `aigateway-portal/backend` 的本地 `replace`
   - `portal` 镜像构建 Go 版本已对齐 `go.mod` 的 `1.25`
@@ -94,6 +97,7 @@
   - `MCP Server` 继续收口到 `Ingress + higress-config + McpBridge/registry + auth/plugin instance` 联合真相源。
   - `MCP Server` 继续收口到更完整的 `Ingress + higress-config + McpBridge/registry + auth/plugin instance` 字段级语义，而不再只是 save strategy parity。
   - 继续补 `AI Route / Provider` 余下的字段级 Java parity，而不只是当前 save / delete runtime 副作用闭环。
+  - 继续补 `model asset RPM/TPM -> AI Route runtime rate-limit rules` 的 live smoke 与 cluster 验证。
 - `P5`
   - 补失败重试与更完整的任务运行验证。
   - 继续完善 jobs 的运行态观测和失败排查体验。

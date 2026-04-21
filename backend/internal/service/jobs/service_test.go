@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -218,4 +219,67 @@ func TestIndexDepartmentDescendantsCollectsNestedChildren(t *testing.T) {
 
 	require.ElementsMatch(t, []string{"dept-child", "dept-grandchild"}, index["dept-parent"])
 	require.ElementsMatch(t, []string{"dept-grandchild"}, index["dept-child"])
+}
+
+func TestExecuteAIModelRateLimitReconcileProjectsRulesAndSkipReasons(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT binding_id, asset_id, model_id, status, rpm, tpm
+		FROM portal_model_binding
+		WHERE status = 'published'
+		ORDER BY model_id ASC, binding_id ASC`)).
+		WillReturnRows(sqlmock.NewRows([]string{"binding_id", "asset_id", "model_id", "status", "rpm", "tpm"}).
+			AddRow("binding-a", "asset-a", "model-a", "published", 100, 1000))
+
+	k8s := k8sclient.NewMemoryClient()
+	_, err = k8s.UpsertResource(context.Background(), "ai-routes", "chat-demo", map[string]any{
+		"name": "chat-demo",
+		"modelPredicates": []any{
+			map[string]any{"matchType": "EQUAL", "matchValue": "model-a"},
+		},
+		"fallbackConfig": map[string]any{"enabled": false},
+	})
+	require.NoError(t, err)
+	_, err = k8s.UpsertResource(context.Background(), "ai-routes", "chat-pre", map[string]any{
+		"name": "chat-pre",
+		"modelPredicates": []any{
+			map[string]any{"matchType": "PRE", "matchValue": "model-a"},
+		},
+		"fallbackConfig": map[string]any{"enabled": false},
+	})
+	require.NoError(t, err)
+
+	service := New(stubPortalDBClient{db: db}, stubPortal{}, nil, k8s)
+	message, err := service.executeAIModelRateLimitReconcile(context.Background())
+	require.NoError(t, err)
+	require.True(t, strings.Contains(message, "projected routes=1"))
+	require.True(t, strings.Contains(message, "rpmRules=2"))
+	require.True(t, strings.Contains(message, "tpmRules=2"))
+
+	projection, err := k8s.GetResource(context.Background(), modelRateLimitProjectionKind, modelRateLimitProjectionName)
+	require.NoError(t, err)
+	rules := toMapSlice(projection["rules"])
+	require.Len(t, rules, 4)
+
+	skipped := toMapSlice(projection["skippedRoutes"])
+	require.Len(t, skipped, 1)
+	require.Equal(t, "chat-pre", skipped[0]["routeName"])
+	require.Contains(t, strings.ToLower(strings.TrimSpace(skipped[0]["reason"].(string))), "equal")
+
+	clusterPlugin, err := k8s.GetResource(context.Background(), "wasmplugin.extensions.higress.io", "cluster-key-rate-limit.internal")
+	require.NoError(t, err)
+	clusterRules := toMapSlice(mapValue(clusterPlugin["spec"])["matchRules"])
+	require.Len(t, clusterRules, 2)
+	require.Equal(t, "model-rate-rpm:chat-demo:model-a", mapValue(clusterRules[0]["config"])["rule_name"])
+
+	tokenPlugin, err := k8s.GetResource(context.Background(), "wasmplugin.extensions.higress.io", "ai-token-ratelimit.internal")
+	require.NoError(t, err)
+	tokenRules := toMapSlice(mapValue(tokenPlugin["spec"])["matchRules"])
+	require.Len(t, tokenRules, 2)
+	require.Equal(t, "model-rate-tpm:chat-demo:model-a", mapValue(tokenRules[0]["config"])["rule_name"])
+
+	require.NoError(t, mock.ExpectationsWereMet())
 }

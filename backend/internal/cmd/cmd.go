@@ -46,6 +46,7 @@ var (
 			gatewayService := gatewaysvc.New(k8sService, portalDomainService)
 			jobsService := jobssvc.New(portalService, portalDomainService, gatewayService, k8sService)
 			portalDomainService.SetHook(jobsService)
+			gatewayService.SetHook(jobsService)
 			if err := jobsService.Start(ctx); err != nil {
 				return err
 			}

@@ -29,6 +29,28 @@ var builtinPluginFallbacks = map[string]map[string]any{
 		"phase":       "UNSPECIFIED_PHASE",
 		"priority":    280,
 	},
+	"cluster-key-rate-limit": {
+		"name":        "cluster-key-rate-limit",
+		"builtIn":     true,
+		"internal":    true,
+		"title":       "Cluster Key Rate Limit",
+		"description": "Provides cluster-wide per-key request rate limiting for AI route runtime rules.",
+		"category":    "traffic",
+		"version":     "2.0.0",
+		"phase":       "UNSPECIFIED_PHASE",
+		"priority":    20,
+	},
+	"ai-token-ratelimit": {
+		"name":        "ai-token-ratelimit",
+		"builtIn":     true,
+		"internal":    true,
+		"title":       "AI Token Ratelimit",
+		"description": "Provides per-consumer AI token rate limiting for AI route runtime rules.",
+		"category":    "ai",
+		"version":     "2.0.0",
+		"phase":       "UNSPECIFIED_PHASE",
+		"priority":    600,
+	},
 }
 
 func (s *Service) mergeWasmPlugins(items []map[string]any) []map[string]any {

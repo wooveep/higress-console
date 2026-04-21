@@ -27,6 +27,12 @@ var PlannedJobs = []Definition{
 		ManualOnly:  false,
 	},
 	{
+		Name:        "ai-model-rate-limit-reconcile",
+		Description: "Project published model RPM/TPM limits into per-user per-model runtime rules",
+		Schedule:    "40 */10 * * * *",
+		ManualOnly:  false,
+	},
+	{
 		Name:        "ai-plugin-execution-order-reconcile",
 		Description: "Reconcile AI plugin execution order in runtime resources",
 		Schedule:    "45 */10 * * * *",

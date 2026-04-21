@@ -46,6 +46,11 @@
 - [x] Route / Service / Wasm / MCP 首批深校验与 builtin metadata 回退测试。
 - [x] AI Route / Provider runtime 副作用与回归测试。
 
+## Aftercare
+
+- [x] `P3-AF-06`：把 `ai-routes.modelPredicates` 真正投影到运行时 `x-higress-llm-model` header 匹配，覆盖 `public/internal/fallback` ingress，并继续禁止用户手工写同名 `headerPredicates`。
+- [x] `P3-AF-06`：补 AI Route 自动限流资格判断的前置约束，当前仅接受“单条 `EQUAL(model_id)` 谓词”的 route 进入模型级 rate-limit 投影，其余 route 记录 skip reason 但不阻断全局 reconcile。
+
 ## 本轮说明
 
 - 当前 P3 已从“HTTP 契约 + 内存版资源存储”推进到“HTTP 契约 + real/fake 双 client”，其中 real client 通过 `kubectl` 落实际 `ConfigMap/Secret` 持久化。
@@ -65,3 +70,4 @@
   - `P3-CP-04` 已完成：`provider` 的 `openaiExtraCustomUrls` 多 IP static registry、`vertex-auth.internal` extra service source、`service-scope ai-proxy instance / ACTIVE_PROVIDER_ID`、以及 `openai/ollama` 变更后的 `ai-route resync` 已完成对齐
   - `P3-CP-06` 已在 `minikube / aigateway-system` 完成 smoke：临时 `provider / ai-route / mcp-server` 的 create/update/delete/cleanup 已通过，同时修复了 live cluster 下 `WasmPlugin update resourceVersion` 与 `MCP higress-config` 真相源两处问题
   - `P3-AF-04 / P3-AF-05` aftercare 已补齐：`ai-providers` 新增 `providerDomain / providerBasePath / promoteThinkingOnEmpty / hiclawMode / bedrockPromptCachePointPositions / promptCacheRetention` 契约，并支持 `vertex tokens[]` Express Mode；builtin wasm metadata 现优先读取 `backend/resource/public/plugin` 快照，`ai-statistics` 默认 `value_length_limit` 已同步为 `32000`
+  - `P3-AF-06` 本轮已落地：`modelPredicates` 不再只是保存态字段，`AI Route` runtime ingress 已把它映射为 `x-higress-llm-model` header 匹配，供 `model-router` 和后续每模型限流规则直接复用。
