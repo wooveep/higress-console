@@ -33,7 +33,7 @@ func TestCreateInviteCode(t *testing.T) {
 			"invite_code", "status", "expires_at", "used_by_consumer", "used_at", "created_at",
 		}).AddRow("ABCD1234", "active", time.Now(), nil, nil, time.Now()))
 
-	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
 	item, err := svc.CreateInviteCode(context.Background(), 7)
 	require.NoError(t, err)
 	require.Equal(t, "active", item.Status)
@@ -50,7 +50,7 @@ func TestUpdateAccountStatus(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`
 		UPDATE portal_user
 		SET status = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE consumer_name = ? AND COALESCE(is_deleted, 0) = 0`)).
+		WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE`)).
 		WithArgs("disabled", "demo").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta(`
@@ -64,17 +64,96 @@ func TestUpdateAccountStatus(t *testing.T) {
 		FROM portal_user u
 		LEFT JOIN org_account_membership m ON m.consumer_name = u.consumer_name
 		LEFT JOIN org_department d ON d.department_id = m.department_id
-		WHERE COALESCE(u.is_deleted, 0) = 0
+		WHERE COALESCE(u.is_deleted, FALSE) = FALSE
 		ORDER BY consumer_name ASC`)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"consumer_name", "display_name", "email", "status", "user_level", "source",
 			"department_id", "parent_consumer_name", "case", "last_login_at",
 		}).AddRow("demo", "Demo", "demo@example.com", "disabled", "normal", "console", nil, nil, false, nil))
 
-	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
 	item, err := svc.UpdateAccountStatus(context.Background(), "demo", "disabled")
 	require.NoError(t, err)
 	require.Equal(t, "disabled", item.Status)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestCreateAccountHandlesRootDepartmentWithNullParent(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	expectSchema(mock)
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT COUNT(1) FROM portal_user WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE`)).
+		WithArgs("demo").
+		WillReturnRows(sqlmock.NewRows([]string{"COUNT(1)"}).AddRow(0))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT department_id, name, parent_department_id, admin_consumer_name
+		FROM org_department
+		WHERE status = 'active' AND department_id <> ?
+		ORDER BY name ASC`)).
+		WithArgs("root").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"department_id", "name", "parent_department_id", "admin_consumer_name",
+		}).AddRow("dept-root-level", "Platform", nil, nil))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT m.department_id, COUNT(1)
+		FROM org_account_membership m
+		INNER JOIN portal_user u ON u.consumer_name = m.consumer_name
+		WHERE COALESCE(u.is_deleted, FALSE) = FALSE AND m.department_id IS NOT NULL AND m.department_id <> '' AND m.department_id <> ?
+		GROUP BY m.department_id`)).
+		WithArgs("root").
+		WillReturnRows(sqlmock.NewRows([]string{"department_id", "count"}))
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO portal_user (
+			consumer_name, display_name, email, status, user_level, source, password_hash
+		) VALUES (?, ?, ?, ?, ?, 'console', ?)`)).
+		WithArgs("demo", "Demo", "demo@example.com", "active", "normal", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO org_account_membership (consumer_name, department_id, parent_consumer_name)
+		VALUES (?, ?, ?)
+		ON CONFLICT (consumer_name) DO UPDATE SET department_id = EXCLUDED.department_id, parent_consumer_name = EXCLUDED.parent_consumer_name, updated_at = CURRENT_TIMESTAMP`)).
+		WithArgs("demo", "dept-root-level", nil).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT department_id, name, parent_department_id, path
+		FROM org_department
+		WHERE status = 'active' AND department_id <> ?`)).
+		WithArgs("root").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"department_id", "name", "parent_department_id", "path",
+		}).AddRow("dept-root-level", "Platform", nil, "Platform"))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT u.consumer_name, u.display_name, u.email, u.status, u.user_level, u.source, m.department_id,
+			m.parent_consumer_name, CASE WHEN d.admin_consumer_name = u.consumer_name THEN 1 ELSE 0 END, u.last_login_at
+		FROM portal_user u
+		LEFT JOIN org_account_membership m ON m.consumer_name = u.consumer_name
+		LEFT JOIN org_department d ON d.department_id = m.department_id
+		WHERE COALESCE(u.is_deleted, FALSE) = FALSE
+		ORDER BY consumer_name ASC`)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"consumer_name", "display_name", "email", "status", "user_level", "source",
+			"department_id", "parent_consumer_name", "case", "last_login_at",
+		}).AddRow("demo", "Demo", "demo@example.com", "active", "normal", "console", "dept-root-level", nil, false, nil))
+
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
+	item, err := svc.CreateAccount(context.Background(), AccountMutation{
+		ConsumerName: "demo",
+		DisplayName:  "Demo",
+		Email:        "demo@example.com",
+		UserLevel:    "normal",
+		Status:       "active",
+		DepartmentID: "dept-root-level",
+		Password:     "secret",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "demo", item.ConsumerName)
+	require.Equal(t, "dept-root-level", item.DepartmentID)
+	require.Equal(t, "Platform", item.DepartmentName)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -85,7 +164,7 @@ func TestHashPasswordUsesBcrypt(t *testing.T) {
 }
 
 func expectSchema(mock sqlmock.Sqlmock) {
-	expectSharedSchema(mock)
+	expectSharedSchemaMigration(mock)
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS portal_model_binding_price_version").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS portal_ai_sensitive_detect_rule").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS portal_ai_sensitive_replace_rule").WillReturnResult(sqlmock.NewResult(0, 0))
@@ -94,16 +173,56 @@ func expectSchema(mock sqlmock.Sqlmock) {
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS portal_ai_quota_balance").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS portal_ai_quota_schedule_rule").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS job_run_record").WillReturnResult(sqlmock.NewResult(0, 0))
-	expectSharedSchema(mock)
+	expectSharedSchemaCheck(mock)
 	expectLegacyTablesAbsent(mock)
 }
 
-func expectSharedSchema(mock sqlmock.Sqlmock) {
+func expectSharedSchemaMigration(mock sqlmock.Sqlmock) {
+	for _, table := range []string{
+		"portal_user",
+		"portal_invite_code",
+		"org_department",
+		"org_account_membership",
+		"asset_grant",
+		"quota_policy_user",
+		"portal_model_asset",
+		"portal_model_binding",
+		"portal_agent_catalog",
+	} {
+		mock.ExpectExec("CREATE TABLE IF NOT EXISTS " + table).WillReturnResult(sqlmock.NewResult(0, 0))
+	}
+	columnQuery := regexp.QuoteMeta(`
+		SELECT COUNT(1)
+		FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA = current_schema()
+		  AND TABLE_NAME = $1
+		  AND COLUMN_NAME = $2`)
+	for _, item := range [][2]string{
+		{"portal_user", "user_level"},
+		{"portal_user", "is_deleted"},
+		{"portal_user", "deleted_at"},
+		{"portal_model_asset", "request_kinds_json"},
+		{"portal_model_asset", "model_type"},
+		{"portal_model_asset", "input_modalities_json"},
+		{"portal_model_asset", "output_modalities_json"},
+		{"portal_model_asset", "feature_flags_json"},
+		{"portal_model_binding", "limits_json"},
+		{"org_department", "admin_consumer_name"},
+	} {
+		mock.ExpectQuery(columnQuery).
+			WithArgs(item[0], item[1]).
+			WillReturnRows(sqlmock.NewRows([]string{"COUNT(1)"}).AddRow(1))
+	}
+	mock.ExpectExec("ALTER TABLE org_department ADD CONSTRAINT uk_org_department_admin_consumer").WillReturnResult(sqlmock.NewResult(0, 0))
+	expectSharedSchemaCheck(mock)
+}
+
+func expectSharedSchemaCheck(mock sqlmock.Sqlmock) {
 	query := regexp.QuoteMeta(`
 		SELECT COUNT(1)
 		FROM information_schema.TABLES
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME = ?`)
+		WHERE TABLE_SCHEMA = current_schema()
+		  AND TABLE_NAME = $1`)
 	for _, table := range []string{
 		"portal_user",
 		"portal_invite_code",
@@ -125,8 +244,8 @@ func expectLegacyTablesAbsent(mock sqlmock.Sqlmock) {
 	query := regexp.QuoteMeta(`
 		SELECT COUNT(1)
 		FROM information_schema.TABLES
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME = ?`)
+		WHERE TABLE_SCHEMA = current_schema()
+		  AND TABLE_NAME = $1`)
 	for _, table := range []string{
 		"portal_users",
 		"portal_departments",

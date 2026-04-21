@@ -58,7 +58,7 @@ func (s *Service) loadPersistedStateLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := ensureConsoleStateTable(ctx, db); err != nil {
+	if err := ensureConsoleStateTable(ctx, db, s.portalClient.Driver()); err != nil {
 		return err
 	}
 
@@ -77,6 +77,7 @@ func (s *Service) loadPersistedStateLocked(ctx context.Context) error {
 	}
 	if record != nil {
 		s.applyPersistedStateLocked(record)
+		s.ensureDefaultGatewayResourcesLocked(ctx)
 	}
 	s.stateLoaded = true
 	return nil
@@ -87,7 +88,7 @@ func (s *Service) persistStateLocked(ctx context.Context) error {
 	if err != nil {
 		return nil
 	}
-	if err := ensureConsoleStateTable(ctx, db); err != nil {
+	if err := ensureConsoleStateTable(ctx, db, s.portalClient.Driver()); err != nil {
 		return err
 	}
 
@@ -108,13 +109,13 @@ func (s *Service) persistStateLocked(ctx context.Context) error {
 			state_key, initialized, admin_username, admin_display_name, admin_password_hash, configs_json
 		)
 		VALUES (?, ?, ?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE
-			initialized = VALUES(initialized),
-			admin_username = VALUES(admin_username),
-			admin_display_name = VALUES(admin_display_name),
-			admin_password_hash = VALUES(admin_password_hash),
-			configs_json = VALUES(configs_json),
-			updated_at = CURRENT_TIMESTAMP`,
+		`+portaldbclient.UpsertClause(s.portalClient.Driver(), []string{"state_key"},
+		portaldbclient.AssignValue(s.portalClient.Driver(), "initialized"),
+		portaldbclient.AssignValue(s.portalClient.Driver(), "admin_username"),
+		portaldbclient.AssignValue(s.portalClient.Driver(), "admin_display_name"),
+		portaldbclient.AssignValue(s.portalClient.Driver(), "admin_password_hash"),
+		portaldbclient.AssignValue(s.portalClient.Driver(), "configs_json"),
+		`updated_at = CURRENT_TIMESTAMP`)+``,
 		consts.DefaultAdminStateKey,
 		initialized,
 		adminUsername,
@@ -191,13 +192,13 @@ func (s *Service) migrateLegacySecretStateLocked(ctx context.Context, db *sql.DB
 			state_key, initialized, admin_username, admin_display_name, admin_password_hash, configs_json
 		)
 		VALUES (?, ?, ?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE
-			initialized = VALUES(initialized),
-			admin_username = VALUES(admin_username),
-			admin_display_name = VALUES(admin_display_name),
-			admin_password_hash = VALUES(admin_password_hash),
-			configs_json = VALUES(configs_json),
-			updated_at = CURRENT_TIMESTAMP`,
+		`+portaldbclient.UpsertClause(s.portalClient.Driver(), []string{"state_key"},
+		portaldbclient.AssignValue(s.portalClient.Driver(), "initialized"),
+		portaldbclient.AssignValue(s.portalClient.Driver(), "admin_username"),
+		portaldbclient.AssignValue(s.portalClient.Driver(), "admin_display_name"),
+		portaldbclient.AssignValue(s.portalClient.Driver(), "admin_password_hash"),
+		portaldbclient.AssignValue(s.portalClient.Driver(), "configs_json"),
+		`updated_at = CURRENT_TIMESTAMP`)+``,
 		consts.DefaultAdminStateKey,
 		true,
 		username,
@@ -242,18 +243,20 @@ func loadPersistedStateRecord(ctx context.Context, db *sql.DB) (*persistedStateR
 	return &record, true, nil
 }
 
-func ensureConsoleStateTable(ctx context.Context, db *sql.DB) error {
-	_, err := db.ExecContext(ctx, `
+func ensureConsoleStateTable(ctx context.Context, db *sql.DB, driver string) error {
+	_ = driver
+	statement := `
 		CREATE TABLE IF NOT EXISTS console_system_state (
 			state_key VARCHAR(64) PRIMARY KEY,
-			initialized TINYINT(1) NOT NULL DEFAULT 0,
+			initialized BOOLEAN NOT NULL DEFAULT FALSE,
 			admin_username VARCHAR(128) NOT NULL DEFAULT '',
 			admin_display_name VARCHAR(255) NOT NULL DEFAULT '',
 			admin_password_hash VARCHAR(255) NOT NULL DEFAULT '',
-			configs_json LONGTEXT NULL,
+			configs_json TEXT NULL,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-		)`)
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`
+	_, err := db.ExecContext(ctx, statement)
 	return err
 }
 

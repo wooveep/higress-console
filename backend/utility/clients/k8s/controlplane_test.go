@@ -1,6 +1,8 @@
 package k8s
 
 import (
+	"context"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -15,6 +17,7 @@ func TestIngressToRouteParsesHigressAnnotations(t *testing.T) {
 				higressAnnotationDestination:              "50% svc-a.default:8080 v1\n50% svc-b.default:8081",
 				higressAnnotationRewriteEnabled:           "true",
 				higressAnnotationRewritePath:              "/landing",
+				higressAnnotationAuthConsumerDepartments:  "dept-a,dept-b",
 				higressAnnotationAuthConsumerLevels:       "normal,pro",
 				higressAnnotationIgnorePathCase:           "true",
 				higressAnnotationMatchMethod:              "GET,POST",
@@ -58,6 +61,7 @@ func TestIngressToRouteParsesHigressAnnotations(t *testing.T) {
 	require.Equal(t, false, route["path"].(map[string]any)["caseSensitive"])
 	require.Equal(t, []string{"GET", "POST"}, route["methods"])
 	require.Equal(t, "/landing", route["rewrite"].(map[string]any)["path"])
+	require.Equal(t, []string{"dept-a", "dept-b"}, route["authConfig"].(map[string]any)["allowedDepartments"])
 	require.Equal(t, []string{"normal", "pro"}, route["authConfig"].(map[string]any)["allowedConsumerLevels"])
 	require.Len(t, route["headers"], 1)
 	require.Equal(t, "x-user-id", route["headers"].([]map[string]any)[0]["key"])
@@ -110,8 +114,9 @@ func TestBuildAIRouteIngressPayloadMapsFrontendContract(t *testing.T) {
 			"timeout":    5,
 		},
 		"authConfig": map[string]any{
-			"enabled":          true,
-			"allowedConsumers": []any{"consumer-a"},
+			"enabled":            true,
+			"allowedConsumers":   []any{"consumer-a"},
+			"allowedDepartments": []any{"dept-a"},
 		},
 	}
 	services := []map[string]any{
@@ -123,11 +128,13 @@ func TestBuildAIRouteIngressPayloadMapsFrontendContract(t *testing.T) {
 
 	require.Equal(t, []string{"api.example.com"}, publicPayload["domains"])
 	require.Equal(t, "/v1/chat/completions", mapValue(publicPayload["path"])["matchValue"])
-	require.Len(t, toMapSlice(publicPayload["headers"]), 2)
+	require.Len(t, toMapSlice(publicPayload["headers"]), 1)
 	require.Equal(t, "team-a", publicAnnotations["higress.io/exact-match-header-x-tenant"])
-	require.Equal(t, "gpt-4", publicAnnotations["higress.io/prefix-match-header-x-higress-llm-model"])
+	_, hasModelHeader := publicAnnotations["higress.io/prefix-match-header-x-higress-llm-model"]
+	require.False(t, hasModelHeader)
 	require.Equal(t, "gpt-4", publicAnnotations["higress.io/prefix-match-query-model"])
 	require.Equal(t, "GET POST", publicAnnotations[higressAnnotationMatchMethod])
+	require.Equal(t, "dept-a", publicAnnotations[higressAnnotationAuthConsumerDepartments])
 	require.Equal(t, "5", publicAnnotations[higressAnnotationProxyNextTimeout])
 
 	internalPayload := buildAIRouteIngressPayload("chat-demo", aiRouteInternalIngressName("chat-demo"), data, services, true)
@@ -228,15 +235,76 @@ func TestSyncMirroredBuiltinIngressRuleSpecRemovesTargetWhenSourceMissing(t *tes
 	require.True(t, wasmRuleMatchesTargets(matchRules[0], map[string][]string{"service": {"llm-doubao.internal.dns"}}))
 }
 
+func TestBuildAIQuotaRuleConfigUsesAmountBillingDefaults(t *testing.T) {
+	config := buildAIQuotaRuleConfig("qwen", "redis-server", "aigateway-redis")
+	redis := mapValue(config["redis"])
+
+	require.Equal(t, higressAIQuotaQuotaUnitAmount, config["quota_unit"])
+	require.Equal(t, higressAIQuotaBalanceKeyPrefix, config["balance_key_prefix"])
+	require.Equal(t, higressAIQuotaPriceKeyPrefix, config["price_key_prefix"])
+	require.Equal(t, higressAIQuotaUsageEventStream, config["usage_event_stream"])
+	require.Equal(t, higressAIQuotaAdminConsumer, config["admin_consumer"])
+	require.Equal(t, "/v1/ai/quotas/routes/qwen/consumers", config["admin_path"])
+	require.Equal(t, "redis-server", redis["service_name"])
+	require.Equal(t, 6379, redis["service_port"])
+	require.Equal(t, higressAIQuotaRedisTimeoutMillis, redis["timeout"])
+	require.Equal(t, 0, redis["database"])
+	require.Equal(t, "aigateway-redis", redis["password"])
+}
+
+func TestBuildAIQuotaRuleConfigFallsBackForBlankRouteAndPassword(t *testing.T) {
+	config := buildAIQuotaRuleConfig("", "", "")
+	redis := mapValue(config["redis"])
+
+	require.Equal(t, "/v1/ai/quotas/routes/default/consumers", config["admin_path"])
+	require.Equal(t, higressAIQuotaRedisServiceDefault, redis["service_name"])
+	_, hasPassword := redis["password"]
+	require.False(t, hasPassword)
+}
+
+func TestWasmRuleLessPrefersRouteSpecificServiceRule(t *testing.T) {
+	matchRules := []map[string]any{
+		{
+			"service": []any{"llm-bailian.internal.dns"},
+			"config":  map[string]any{"activeProviderId": "bailian"},
+		},
+		{
+			"ingress": []any{"ai-route-qwen.internal"},
+			"service": []any{"llm-bailian.internal.dns"},
+			"config":  map[string]any{"provider": map[string]any{"id": "bailian"}},
+		},
+		{
+			"domain": []any{"api.ai.local"},
+			"config": map[string]any{"fallback": true},
+		},
+	}
+
+	sort.Slice(matchRules, func(i, j int) bool {
+		return wasmRuleLess(matchRules[i], matchRules[j])
+	})
+
+	require.True(t, wasmRuleMatchesTargets(matchRules[0], map[string][]string{
+		"ingress": {"ai-route-qwen.internal"},
+		"service": {"llm-bailian.internal.dns"},
+	}))
+	require.True(t, wasmRuleMatchesTargets(matchRules[1], map[string][]string{
+		"service": {"llm-bailian.internal.dns"},
+	}))
+	require.True(t, wasmRuleMatchesTargets(matchRules[2], map[string][]string{
+		"domain": {"api.ai.local"},
+	}))
+}
+
 func TestWasmPluginToProvidersExposesTokensProtocolAndModels(t *testing.T) {
 	item := map[string]any{
 		"spec": map[string]any{
 			"defaultConfig": map[string]any{
 				"providers": []any{
 					map[string]any{
-						"id":       "doubao",
-						"type":     "doubao",
-						"protocol": "openai",
+						"id":           "doubao",
+						"type":         "doubao",
+						"protocol":     "openai",
+						"doubaoDomain": "proxy.example.com",
 						"apiTokens": []any{
 							"token-a",
 							"token-b",
@@ -253,9 +321,136 @@ func TestWasmPluginToProvidersExposesTokensProtocolAndModels(t *testing.T) {
 	providers := wasmPluginToProviders(item)
 	require.Len(t, providers, 1)
 	require.Equal(t, "doubao", providers[0]["name"])
+	require.Equal(t, "volcengine", providers[0]["type"])
 	require.Equal(t, "openai/v1", providers[0]["protocol"])
 	require.Equal(t, []string{"token-a", "token-b"}, providers[0]["tokens"])
 	require.NotEmpty(t, providers[0]["models"])
+	rawConfigs := mapValue(providers[0]["rawConfigs"])
+	require.Equal(t, "volcengine", rawConfigs["type"])
+	require.Equal(t, "proxy.example.com", rawConfigs["providerDomain"])
+	require.Empty(t, rawConfigs["doubaoDomain"])
+}
+
+func TestBuiltinWasmPluginManifestUsesInternalRuntimeName(t *testing.T) {
+	manifest, ok := builtinWasmPluginManifest(higressWasmPluginNameAIProxy, "aigateway-system")
+	require.True(t, ok)
+	require.Equal(t, "extensions.higress.io/v1alpha1", manifest["apiVersion"])
+	require.Equal(t, "WasmPlugin", manifest["kind"])
+
+	metadata := mapValue(manifest["metadata"])
+	require.Equal(t, "ai-proxy.internal", metadata["name"])
+	require.Equal(t, "aigateway-system", metadata["namespace"])
+
+	labels := mapValue(metadata["labels"])
+	require.Equal(t, higressWasmPluginNameAIProxy, labels[higressLabelWasmPluginName])
+	require.Equal(t, higressAnnotationTrueValue, labels[higressLabelInternal])
+	require.Equal(t, "2.0.0", labels[higressLabelWasmPluginVersion])
+
+	spec := mapValue(manifest["spec"])
+	require.Equal(t, higressWasmPluginPhaseUnspecified, spec["phase"])
+	require.EqualValues(t, higressWasmPluginPriorityAIProxy, spec["priority"])
+	require.Equal(t, "http://aigateway-plugin-server.aigateway-system.svc.cluster.local/plugins/ai-proxy/2.0.0/plugin.wasm", spec["url"])
+	require.Equal(t, true, spec["defaultConfigDisable"])
+	require.Empty(t, toMapSlice(spec["matchRules"]))
+}
+
+func TestBuiltinWasmPluginManifestSupportsAIDataMasking(t *testing.T) {
+	manifest, ok := builtinWasmPluginManifest(higressWasmPluginNameAIDataMasking, "aigateway-system")
+	require.True(t, ok)
+
+	metadata := mapValue(manifest["metadata"])
+	require.Equal(t, "ai-data-masking.internal", metadata["name"])
+
+	spec := mapValue(manifest["spec"])
+	require.Equal(t, higressWasmPluginPhaseAuthN, spec["phase"])
+	require.EqualValues(t, higressWasmPluginPriorityAIDataMasking, spec["priority"])
+	require.Equal(t, "http://aigateway-plugin-server.aigateway-system.svc.cluster.local/plugins/ai-data-masking/2.0.0/plugin.wasm", spec["url"])
+}
+
+func TestMemoryClientSyncAIDataMaskingRuntimeUsesBundledDictionaryFallback(t *testing.T) {
+	client := NewMemoryClient()
+	_, err := client.UpsertResource(context.Background(), "ai-routes", "doubao", map[string]any{
+		"name": "doubao",
+		"fallbackConfig": map[string]any{
+			"enabled": false,
+		},
+	})
+	require.NoError(t, err)
+	_, err = client.UpsertResource(context.Background(), "ai-sensitive-projections", "default", map[string]any{
+		"name": "default",
+		"detectRules": []map[string]any{{
+			"pattern":   "敏感词验证词",
+			"matchType": "contains",
+			"priority":  100,
+			"enabled":   true,
+		}},
+		"replaceRules": []map[string]any{{
+			"pattern":      "%{IP}",
+			"replaceType":  "replace",
+			"replaceValue": "***.***.***.***",
+			"restore":      true,
+			"enabled":      true,
+		}},
+		"systemConfig": map[string]any{
+			"systemDenyEnabled": true,
+			"dictionaryText":    "这段内容不应该下发到运行时",
+		},
+		"runtimeConfig": map[string]any{
+			"denyOpenai":      true,
+			"denyJsonpath":    []any{"$.messages[*].content"},
+			"denyRaw":         false,
+			"denyCode":        200,
+			"denyMessage":     "blocked",
+			"denyRawMessage":  "{\"errmsg\":\"blocked\"}",
+			"denyContentType": "application/json",
+			"auditSink": map[string]any{
+				"serviceName": "audit",
+			},
+		},
+	})
+	require.NoError(t, err)
+	_, err = client.UpsertResource(context.Background(), "route-plugin-instances:ai-route-doubao.internal", "ai-data-masking", map[string]any{
+		"name":       "ai-data-masking",
+		"pluginName": "ai-data-masking",
+		"enabled":    true,
+	})
+	require.NoError(t, err)
+
+	plugin, err := client.GetResource(context.Background(), higressWasmPluginResource, builtinWasmPluginResourceName(higressWasmPluginNameAIDataMasking))
+	require.NoError(t, err)
+	spec := mapValue(plugin["spec"])
+	rules := toMapSlice(spec["matchRules"])
+	require.Len(t, rules, 2)
+
+	var publicRule map[string]any
+	for _, rule := range rules {
+		if normalizeStringSlice(rule["ingress"])[0] == "ai-route-doubao.internal" {
+			publicRule = rule
+			break
+		}
+	}
+	require.NotEmpty(t, publicRule)
+	config := mapValue(publicRule["config"])
+	require.Equal(t, true, config["system_deny"])
+	require.Equal(t, "blocked", config["deny_message"])
+	require.NotContains(t, config, "system_deny_words")
+	require.NotContains(t, config, "audit_sink")
+	require.Len(t, toMapSlice(config["deny_rules"]), 1)
+	require.Len(t, toMapSlice(config["replace_rules"]), 1)
+}
+
+func TestDefaultMcpBridgeManifestStartsEmpty(t *testing.T) {
+	manifest := defaultMcpBridgeManifest("aigateway-system")
+	require.Equal(t, "networking.higress.io/v1", manifest["apiVersion"])
+	require.Equal(t, "McpBridge", manifest["kind"])
+
+	metadata := mapValue(manifest["metadata"])
+	require.Equal(t, higressMcpBridgeDefaultName, metadata["name"])
+	require.Equal(t, "aigateway-system", metadata["namespace"])
+
+	spec := mapValue(manifest["spec"])
+	require.Empty(t, toMapSlice(spec["registries"]))
+	require.Empty(t, toMapSlice(spec["proxies"]))
 }
 
 func TestProviderPayloadRoundTripPreservesFailoverAndTokens(t *testing.T) {
@@ -292,6 +487,19 @@ func TestProviderPayloadRoundTripPreservesFailoverAndTokens(t *testing.T) {
 	require.Equal(t, "openai-demo", rawConfigs["id"])
 	require.Equal(t, "https://api.openai.com/v1", rawConfigs["openaiCustomUrl"])
 	require.Equal(t, "keep-me", rawConfigs["note"])
+}
+
+func TestProviderPayloadFromResourceNormalizesLegacyVolcengineFields(t *testing.T) {
+	payload := providerPayloadFromResource("doubao", map[string]any{
+		"type": "doubao",
+		"rawConfigs": map[string]any{
+			"doubaoDomain": "proxy.example.com",
+		},
+	})
+
+	require.Equal(t, "volcengine", payload["type"])
+	require.Equal(t, "proxy.example.com", payload["providerDomain"])
+	require.Empty(t, payload["doubaoDomain"])
 }
 
 func TestRouteAnnotationsRenderMCPMetadataAndRuntimeFields(t *testing.T) {

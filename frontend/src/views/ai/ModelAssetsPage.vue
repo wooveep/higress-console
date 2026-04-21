@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import PageSection from '@/components/common/PageSection.vue';
 import PortalUnavailableState from '@/components/common/PortalUnavailableState.vue';
 import { usePortalAvailability } from '@/composables/usePortalAvailability';
@@ -8,6 +9,8 @@ import { showConfirm, showSuccess, showWarning } from '@/lib/feedback';
 import {
   createModelAsset,
   createModelBinding,
+  deleteModelAsset,
+  deleteModelBinding,
   getModelAssets,
   getModelAssetOptions,
   getModelBindingPriceVersions,
@@ -20,10 +23,13 @@ import {
 import { getLlmProviders } from '@/services/llm-provider';
 import { listAssetGrants, listOrgAccounts, listOrgDepartmentsTree, replaceAssetGrants } from '@/services/organization';
 import { USER_LEVELS } from '@/utils/consumer-level';
+import { formatProviderDisplayName } from '@/features/llm-provider/provider-display';
 import {
   buildGrantAssignments,
+  describeCapabilities,
   describePricing,
   flattenDepartmentOptions,
+  MODEL_TYPE_LABELS,
   splitGrantAssignments,
   statusColorMap,
 } from '@/features/model-assets/model-asset-form';
@@ -33,14 +39,24 @@ const ModelBindingDrawer = defineAsyncComponent(() => import('@/features/model-a
 const ModelBindingHistoryDrawer = defineAsyncComponent(() => import('@/features/model-assets/ModelBindingHistoryDrawer.vue'));
 const ModelBindingGrantDrawer = defineAsyncComponent(() => import('@/features/model-assets/ModelBindingGrantDrawer.vue'));
 const { portalUnavailable } = usePortalAvailability();
+const { t } = useI18n();
 
 const loading = ref(false);
 const search = ref('');
 const assets = ref<any[]>([]);
 const providers = ref<any[]>([]);
 const assetOptions = ref<any>({
-  capabilities: { modalities: [], features: [], requestKinds: [] },
+  capabilities: {
+    modelTypes: [],
+    inputModalities: [],
+    outputModalities: [],
+    featureFlags: [],
+    modalities: [],
+    features: [],
+    requestKinds: [],
+  },
   providerModels: [],
+  publishedBindings: [],
 });
 const accounts = ref<any[]>([]);
 const departments = ref<any[]>([]);
@@ -115,8 +131,17 @@ async function loadSupportData() {
   if (portalUnavailable.value) {
     providers.value = [];
     assetOptions.value = {
-      capabilities: { modalities: [], features: [], requestKinds: [] },
+      capabilities: {
+        modelTypes: [],
+        inputModalities: [],
+        outputModalities: [],
+        featureFlags: [],
+        modalities: [],
+        features: [],
+        requestKinds: [],
+      },
       providerModels: [],
+      publishedBindings: [],
     };
     accounts.value = [];
     departments.value = [];
@@ -124,7 +149,19 @@ async function loadSupportData() {
   }
   const [nextProviders, nextAssetOptions, nextAccounts, nextDepartments] = await Promise.all([
     getLlmProviders().catch(() => []),
-    getModelAssetOptions().catch(() => ({ capabilities: { modalities: [], features: [], requestKinds: [] }, providerModels: [] })),
+    getModelAssetOptions().catch(() => ({
+      capabilities: {
+        modelTypes: [],
+        inputModalities: [],
+        outputModalities: [],
+        featureFlags: [],
+        modalities: [],
+        features: [],
+        requestKinds: [],
+      },
+      providerModels: [],
+      publishedBindings: [],
+    })),
     listOrgAccounts().catch(() => []),
     listOrgDepartmentsTree().catch(() => []),
   ]);
@@ -177,17 +214,23 @@ async function openBindingDrawer(record?: any) {
   }
 }
 
+function selectAsset(assetId: string) {
+  selectedAssetId.value = assetId;
+}
+
 async function saveBinding(payload: any, isEdit: boolean) {
-  if (!selectedAsset.value) {
+  const targetAssetId = payload.assetId || selectedAsset.value?.assetId;
+  if (!targetAssetId) {
     return;
   }
   if (isEdit && editingBinding.value) {
-    await updateModelBinding(selectedAsset.value.assetId, editingBinding.value.bindingId, payload);
+    await updateModelBinding(targetAssetId, editingBinding.value.bindingId, payload);
   } else {
-    await createModelBinding(selectedAsset.value.assetId, payload);
+    await createModelBinding(targetAssetId, payload);
   }
   bindingDrawerOpen.value = false;
-  await loadAssets();
+  selectedAssetId.value = targetAssetId;
+  await Promise.all([loadAssets(), loadSupportData()]);
   showSuccess(isEdit ? '发布绑定已更新' : '发布绑定已创建');
 }
 
@@ -276,6 +319,47 @@ async function saveGrantAssignments(payload: { consumers: string[]; departments:
   }
 }
 
+function removeAsset(record: any) {
+  showConfirm({
+    title: `删除模型资产 ${record.assetId}`,
+    content: '仅空资产可删除；若仍存在绑定，后端会阻止删除。',
+    okText: '删除资产',
+    okButtonProps: { danger: true },
+    cancelText: '取消',
+    async onOk() {
+      await deleteModelAsset(record.assetId);
+      if (selectedAssetId.value === record.assetId) {
+        selectedAssetId.value = '';
+      }
+      await loadAssets();
+      showSuccess('模型资产已删除');
+    },
+  });
+}
+
+function removeBinding(record: any) {
+  const assetId = record.assetId || selectedAsset.value?.assetId;
+  if (!assetId) {
+    return;
+  }
+  showConfirm({
+    title: `删除绑定 ${record.bindingId}`,
+    content: '若绑定仍被发布、授权或 AI 路由引用，后端会阻止删除；价格历史会随绑定一起清理。',
+    okText: '删除绑定',
+    okButtonProps: { danger: true },
+    cancelText: '取消',
+    async onOk() {
+      await deleteModelBinding(assetId, record.bindingId);
+      await Promise.all([loadAssets(), loadSupportData()]);
+      showSuccess('绑定已删除');
+    },
+  });
+}
+
+function providerDisplayName(providerName?: string) {
+  return formatProviderDisplayName(String(providerName || ''), providers.value, t);
+}
+
 onMounted(async () => {
   await Promise.all([loadAssets(), loadSupportData()]);
 });
@@ -302,12 +386,20 @@ onMounted(async () => {
           row-key="assetId"
           :scroll="{ x: 920 }"
           :row-class-name="(record) => record.assetId === selectedAssetId ? 'model-assets-page__selected-row' : ''"
-          :custom-row="(record) => ({ onClick: () => { selectedAssetId = record.assetId; } })"
+          :custom-row="(record) => ({ onClick: () => selectAsset(record.assetId) })"
         >
           <a-table-column key="displayName" title="展示名">
             <template #default="{ record }">{{ record.displayName || record.canonicalName || record.assetId }}</template>
           </a-table-column>
           <a-table-column key="canonicalName" data-index="canonicalName" title="规范名" />
+          <a-table-column key="modelType" title="模型类型" width="140">
+            <template #default="{ record }">
+              {{ MODEL_TYPE_LABELS[record.modelType] || record.modelType || '-' }}
+            </template>
+          </a-table-column>
+          <a-table-column key="capabilities" title="能力摘要">
+            <template #default="{ record }">{{ describeCapabilities(record) }}</template>
+          </a-table-column>
           <a-table-column key="tags" title="标签">
             <template #default="{ record }">
               <a-space wrap size="small">
@@ -318,9 +410,10 @@ onMounted(async () => {
           <a-table-column key="bindings" title="绑定数" width="100">
             <template #default="{ record }">{{ record.bindings?.length || 0 }}</template>
           </a-table-column>
-          <a-table-column key="actions" title="操作" width="120">
+          <a-table-column key="actions" title="操作" width="180">
             <template #default="{ record }">
               <a-button type="link" size="small" @click.stop="openAssetDrawer(record)">编辑</a-button>
+              <a-button type="link" size="small" danger @click.stop="removeAsset(record)">删除</a-button>
             </template>
           </a-table-column>
         </a-table>
@@ -343,18 +436,20 @@ onMounted(async () => {
               <strong>{{ selectedAsset.intro || '-' }}</strong>
             </article>
             <article class="model-assets-page__summary-card">
+              <span>模型类型</span>
+              <strong>{{ MODEL_TYPE_LABELS[selectedAsset.modelType] || selectedAsset.modelType || '-' }}</strong>
+            </article>
+            <article class="model-assets-page__summary-card">
               <span>能力</span>
-              <strong>
-                模态：{{ selectedAsset.capabilities?.modalities?.join(', ') || '-' }}；
-                特性：{{ selectedAsset.capabilities?.features?.join(', ') || '-' }}；
-                请求类型：{{ selectedAsset.capabilities?.requestKinds?.join(', ') || '-' }}
-              </strong>
+              <strong>{{ describeCapabilities(selectedAsset) }}</strong>
             </article>
           </div>
 
           <a-table :data-source="selectedBindings" row-key="bindingId" :scroll="{ x: 1160 }">
             <a-table-column key="modelId" data-index="modelId" title="模型 ID" />
-            <a-table-column key="providerName" data-index="providerName" title="Provider" />
+            <a-table-column key="providerName" title="Provider">
+              <template #default="{ record }">{{ providerDisplayName(record.providerName) }}</template>
+            </a-table-column>
             <a-table-column key="targetModel" data-index="targetModel" title="目标模型" />
             <a-table-column key="status" title="状态" width="120">
               <template #default="{ record }">
@@ -362,15 +457,16 @@ onMounted(async () => {
               </template>
             </a-table-column>
             <a-table-column key="pricing" title="当前草稿价格">
-              <template #default="{ record }">{{ describePricing(record.pricing) }}</template>
+              <template #default="{ record }">{{ describePricing(record.pricing, selectedAsset?.modelType) }}</template>
             </a-table-column>
-            <a-table-column key="actions" title="操作" width="320" fixed="right">
+            <a-table-column key="actions" title="操作" width="380" fixed="right">
               <template #default="{ record }">
                 <a-space wrap size="small">
                   <a-button type="link" size="small" @click="openBindingDrawer(record)">编辑</a-button>
                   <a-button type="link" size="small" @click="toggleBinding(record)">{{ record.status === 'published' ? '下架' : '发布' }}</a-button>
                   <a-button type="link" size="small" @click="openGrantDrawer(record)">授权</a-button>
                   <a-button type="link" size="small" @click="openHistoryDrawer(record)">价格历史</a-button>
+                  <a-button type="link" size="small" danger @click="removeBinding(record)">删除</a-button>
                 </a-space>
               </template>
             </a-table-column>
@@ -396,6 +492,8 @@ onMounted(async () => {
     <ModelBindingDrawer
       v-model:open="bindingDrawerOpen"
       :binding="editingBinding"
+      :assets="assets"
+      :selected-asset-id="selectedAssetId"
       :providers="providers"
       :asset-options="assetOptions"
       :active-price-version="activePriceVersion"

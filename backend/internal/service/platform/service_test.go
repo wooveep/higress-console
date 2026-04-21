@@ -84,7 +84,7 @@ func TestServiceLoadsPersistedAdminState(t *testing.T) {
 	svc := New(
 		k8sclient.NewMemoryClient(),
 		grafanaclient.New(grafanaclient.Config{}),
-		portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql"}, db),
+		portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres"}, db),
 	)
 
 	require.True(t, svc.IsSystemInitialized(context.Background()))
@@ -98,6 +98,45 @@ func TestServiceLoadsPersistedAdminState(t *testing.T) {
 	validated, err := svc.ValidateSessionToken(context.Background(), token)
 	require.NoError(t, err)
 	require.Equal(t, "admin", validated.Username)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestServiceLoadsPersistedAdminStateEnsuresDefaultGatewayResources(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	hash, err := hashAdminPassword("secret")
+	require.NoError(t, err)
+
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS console_system_state").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT initialized, admin_username, admin_display_name, admin_password_hash, configs_json").
+		WithArgs(consts.DefaultAdminStateKey).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"initialized", "admin_username", "admin_display_name", "admin_password_hash", "configs_json",
+		}).AddRow(true, "admin", "Admin", hash, `{"system.initialized":true,"route.default.initialized":true}`))
+
+	client := k8sclient.NewMemoryClient()
+	svc := New(
+		client,
+		grafanaclient.New(grafanaclient.Config{}),
+		portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres"}, db),
+	)
+
+	require.True(t, svc.IsSystemInitialized(context.Background()))
+
+	route, err := client.GetResource(context.Background(), "routes", consts.DefaultRouteName)
+	require.NoError(t, err)
+	require.Equal(t, consts.DefaultRouteName, route["name"])
+
+	domain, err := client.GetResource(context.Background(), "domains", consts.DefaultDomainName)
+	require.NoError(t, err)
+	require.Equal(t, consts.DefaultTLSCertificateName, domain["certIdentifier"])
+
+	tls, err := client.GetResource(context.Background(), "tls-certificates", consts.DefaultTLSCertificateName)
+	require.NoError(t, err)
+	require.Equal(t, consts.DefaultTLSCertificateName, tls["name"])
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -132,7 +171,7 @@ func TestServiceMigratesLegacySecretStateToDatabase(t *testing.T) {
 	svc := New(
 		client,
 		grafanaclient.New(grafanaclient.Config{}),
-		portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql"}, db),
+		portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres"}, db),
 	)
 
 	require.True(t, svc.IsSystemInitialized(context.Background()))
@@ -362,7 +401,7 @@ func TestNativeDashboardBuildsAIRows(t *testing.T) {
 	svc := New(
 		k8sclient.NewMemoryClient(),
 		grafanaclient.New(grafanaclient.Config{Enabled: true, BaseURL: "http://grafana.local/grafana"}),
-		portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql"}, db),
+		portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres"}, db),
 	)
 
 	from := time.Now().Add(-time.Hour).UnixMilli()
@@ -398,7 +437,7 @@ func TestNativeDashboardRequestCountFallsBackToPrometheus(t *testing.T) {
 	svc := New(
 		k8sclient.NewMemoryClient(),
 		grafanaclient.New(grafanaclient.Config{Enabled: true, BaseURL: "http://grafana.local/grafana"}),
-		portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql"}, db),
+		portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres"}, db),
 	)
 
 	from := time.Now().Add(-time.Hour).UnixMilli()
@@ -409,6 +448,40 @@ func TestNativeDashboardRequestCountFallsBackToPrometheus(t *testing.T) {
 	require.NotNil(t, data.Rows[0].Panels[0].Stat.Value)
 	require.Equal(t, 42.0, *data.Rows[0].Panels[0].Stat.Value)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestQueryNativeDashboardExceptionRouteTopTableUsesPostgresDurationExpr(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	svc := New(
+		k8sclient.NewMemoryClient(),
+		grafanaclient.New(grafanaclient.Config{}),
+		portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "pgx-rebind"}, db),
+	)
+
+	mock.ExpectQuery(`EXTRACT\(EPOCH FROM \(finished_at - started_at\)\) \* 1000`).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), 10).
+		WillReturnRows(sqlmock.NewRows([]string{"route", "latency_ms"}).
+			AddRow("/v1/chat/completions", 6200))
+
+	table, err := svc.queryNativeDashboardExceptionRouteTopTable(context.Background(), time.Now().Add(-time.Hour).UnixMilli(), time.Now().UnixMilli(), "slow", 10)
+	require.NoError(t, err)
+	require.Len(t, table.Rows, 1)
+	require.Equal(t, "/v1/chat/completions", table.Rows[0]["route"])
+	require.Equal(t, 6200.0, table.Rows[0]["latencyMs"])
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestNativeDashboardSlowRequestSQLHelpers(t *testing.T) {
+	postgresExpr := nativeDashboardServiceDurationMillisExpr("postgres")
+	require.Contains(t, postgresExpr, "EXTRACT(EPOCH FROM (finished_at - started_at)) * 1000")
+	require.NotContains(t, postgresExpr, "TIMESTAMPDIFF")
+	require.Contains(t, nativeDashboardSlowRequestFilterClause("postgres"), postgresExpr+" > 5000")
+
+	pgxRebindExpr := nativeDashboardServiceDurationMillisExpr("pgx-rebind")
+	require.Equal(t, postgresExpr, pgxRebindExpr)
 }
 
 func expectNativeDashboardAIQueries(mock sqlmock.Sqlmock, requestCount, successCount, totalTokens, costMicroYuan int64) {
@@ -428,7 +501,7 @@ func expectNativeDashboardAIQueries(mock sqlmock.Sqlmock, requestCount, successC
 			"occurred_at", "request_id", "trace_id", "consumer_name", "request_path", "route_name", "model_id",
 			"request_status", "http_status", "error_code", "error_message", "total_tokens", "cost_micro_yuan", "service_duration_ms",
 		}).AddRow(time.Now(), "req-failed", "trace-failed", "alice", "/v1/chat/completions", "chat-route", "qwen", "failed", 500, "upstream_error", "boom", 123, 4500, 0))
-	mock.ExpectQuery("TIMESTAMPDIFF\\(MICROSECOND, started_at, finished_at\\) > 5000000").
+	mock.ExpectQuery("started_at IS NOT NULL AND finished_at IS NOT NULL AND CAST\\(FLOOR\\(GREATEST\\(EXTRACT\\(EPOCH FROM \\(finished_at - started_at\\)\\) \\* 1000, 0\\)\\) AS BIGINT\\) > 5000").
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), 10).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"occurred_at", "request_id", "trace_id", "consumer_name", "request_path", "route_name", "model_id",
@@ -477,14 +550,14 @@ func newNativeDashboardPrometheusServer() *httptest.Server {
 	}))
 }
 
-func TestResolveNativeDashboardUsageBucketExprMariaDBCompatible(t *testing.T) {
+func TestResolveNativeDashboardUsageBucketExprPostgresCompatible(t *testing.T) {
 	expr := resolveNativeDashboardUsageBucketExpr(
+		"pgx-rebind",
 		time.Now().Add(-2*time.Hour).UnixMilli(),
 		time.Now().UnixMilli(),
 	)
 
-	require.Contains(t, expr, "FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(occurred_at) / 300) * 300)")
-	require.NotContains(t, expr, "% 5 MINUTE")
+	require.Contains(t, expr, "TO_TIMESTAMP(FLOOR(EXTRACT(EPOCH FROM occurred_at) / 300) * 300)")
 }
 
 func TestResolveNativeDashboardPrometheusRateRange(t *testing.T) {

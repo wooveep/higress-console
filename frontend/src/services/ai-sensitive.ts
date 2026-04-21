@@ -4,6 +4,7 @@ import {
   AiSensitiveDetectRule,
   AiSensitiveMenuState,
   AiSensitiveReplaceRule,
+  AiSensitiveRuntimeConfig,
   AiSensitiveStatus,
   AiSensitiveSystemConfig,
 } from '@/interfaces/ai-sensitive';
@@ -78,4 +79,14 @@ export const updateAiSensitiveSystemConfig = (
   payload: AiSensitiveSystemConfig,
 ): Promise<AiSensitiveSystemConfig> => {
   return request.put<any, AiSensitiveSystemConfig>(`${BASE_URL}/system-config`, payload);
+};
+
+export const getAiSensitiveRuntimeConfig = (): Promise<AiSensitiveRuntimeConfig> => {
+  return request.get<any, AiSensitiveRuntimeConfig>(`${BASE_URL}/runtime-config`, QUIET_MENU_REQUEST_OPTIONS);
+};
+
+export const updateAiSensitiveRuntimeConfig = (
+  payload: AiSensitiveRuntimeConfig,
+): Promise<AiSensitiveRuntimeConfig> => {
+  return request.put<any, AiSensitiveRuntimeConfig>(`${BASE_URL}/runtime-config`, payload);
 };

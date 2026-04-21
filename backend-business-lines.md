@@ -11,7 +11,7 @@
 
 这 4 条线共享两类底座：
 
-- 外部系统：Kubernetes、Portal MySQL、Grafana
+- 外部系统：Kubernetes、Portal PostgreSQL、Grafana
 - 通用能力：统一响应、鉴权、配置、日志、trace、任务调度
 
 ## 2. 系统与会话线
@@ -149,7 +149,7 @@ AiRoutesController / LlmProvidersController
 
 ### 4.1 核心目标
 
-- 控制面直接管理 Portal 共库中的用户、组织、邀请码、模型资产、账务和统计。
+- 控制面直接管理 Portal 共享 PostgreSQL 中的用户、组织、邀请码、模型资产、账务和统计。
 
 ### 4.2 关键入口
 
@@ -207,7 +207,7 @@ ModelAssetsController
 
 ### 4.5 GoFrame 重写思路
 
-- Portal 业务线是最适合 GoFrame 的一条线，因为其真相源主要是 MySQL。
+- Portal 业务线是最适合 GoFrame 的一条线，因为其真相源主要是 PostgreSQL。
 - 建议结构：
   - `internal/dao`
   - `internal/model/do`

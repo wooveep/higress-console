@@ -42,8 +42,8 @@ var (
 			portalService := portaldbclient.New(deps.Portal)
 
 			platformService := platformsvc.New(k8sService, grafanaService, portalService)
-			gatewayService := gatewaysvc.New(k8sService)
 			portalDomainService := portalsvc.New(portalService, k8sService)
+			gatewayService := gatewaysvc.New(k8sService, portalDomainService)
 			jobsService := jobssvc.New(portalService, portalDomainService, gatewayService, k8sService)
 			portalDomainService.SetHook(jobsService)
 			if err := jobsService.Start(ctx); err != nil {

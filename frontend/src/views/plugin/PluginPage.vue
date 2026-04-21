@@ -35,9 +35,11 @@ import {
 import { getAiRoute, updateAiRoute } from '@/services/ai-route';
 import { getGatewayRouteDetail, updateRouteConfig } from '@/services/route';
 import { BUILTIN_ROUTE_PLUGIN_LIST } from '@/plugins/constants';
+import { resolvePluginSchema } from '@/features/plugin/plugin-config';
 import {
   QueryType,
   filterVisiblePlugins,
+  resolveDedicatedPluginPath,
   resolvePluginVisibilityScope,
 } from '@/plugins/visibility';
 
@@ -76,10 +78,16 @@ const isTargetMode = computed(() => Boolean(queryType.value && queryName.value))
 const visibilityScope = computed(() => resolvePluginVisibilityScope(queryType.value));
 const selectedPlugin = computed(() => rows.value.find((item) => item.name === selectedPluginName.value) || null);
 const selectedPluginSchemaText = computed(() => (
-  selectedPluginSchema.value ? JSON.stringify(selectedPluginSchema.value, null, 2) : ''
+  resolvePluginSchema(selectedPluginSchema.value) ? JSON.stringify(resolvePluginSchema(selectedPluginSchema.value), null, 2) : ''
+));
+const isAiDataMaskingRouteBindingRecord = computed(() => (
+  queryType.value === QueryType.AI_ROUTE
+  && configuring.value?.name === 'ai-data-masking'
 ));
 const canDeleteCurrentBinding = computed(() => (
-  Boolean(configuring.value && !configuring.value.builtIn && currentInstanceData.value)
+  Boolean(configuring.value && currentInstanceData.value && (
+    !isBuiltInPlugin(configuring.value.name) || isAiDataMaskingRouteBindingRecord.value
+  ))
 ));
 
 const backPath = computed(() => {
@@ -105,10 +113,10 @@ function isBuiltInPlugin(name: string) {
 
 function getBuiltInPluginReadme(record: any) {
   const detailByName: Record<string, string> = {
-    rewrite: '内置路由能力，用于修改请求的 Host 与 Path。请通过“配置”直接编辑路由上的重写规则。',
-    headerModify: '内置路由能力，用于修改请求头和响应头。AI 路由场景下会直接写入路由的 Header 配置，不依赖 wasm 插件资源。',
-    cors: '内置路由能力，用于配置跨域访问规则。请通过“配置”直接编辑路由上的跨域策略。',
-    retries: '内置路由能力，用于配置后端重试策略。请通过“配置”直接编辑路由上的重试规则。',
+    rewrite: '内置路由能力，用于修改请求的 Host 与 Path。此处仅控制该能力是否在当前路由上启用。',
+    headerModify: '内置路由能力，用于修改请求头和响应头。此处仅控制该能力是否在当前路由上启用。',
+    cors: '内置路由能力，用于配置跨域访问规则。此处仅控制该能力是否在当前路由上启用。',
+    retries: '内置路由能力，用于配置后端重试策略。此处仅控制该能力是否在当前路由上启用。',
   };
 
   return detailByName[record.name]
@@ -130,14 +138,10 @@ function getBuiltInEnabled(name: string) {
 }
 
 function getBuiltInRows() {
-  if (queryType.value !== QueryType.ROUTE && queryType.value !== QueryType.AI_ROUTE) {
+  if (queryType.value !== QueryType.ROUTE) {
     return [];
   }
-  const list = queryType.value === QueryType.AI_ROUTE
-    ? BUILTIN_ROUTE_PLUGIN_LIST.filter((item) => item.enabledInAiRoute !== false)
-    : BUILTIN_ROUTE_PLUGIN_LIST;
-
-  return list.map((item) => ({
+  return BUILTIN_ROUTE_PLUGIN_LIST.map((item) => ({
     ...item,
     name: item.key,
     enabled: getBuiltInEnabled(item.key),
@@ -174,8 +178,8 @@ function getPluginTargetAliases() {
   }
   return [
     `ai-route-${queryName.value}.internal-internal`,
-    `ai-route-${queryName.value}-fallback.internal`,
-    `ai-route-${queryName.value}-fallback.internal-internal`,
+    `ai-route-${queryName.value}.fallback.internal`,
+    `ai-route-${queryName.value}.fallback.internal-internal`,
   ];
 }
 
@@ -200,19 +204,33 @@ async function load() {
       }
 
       merged = visiblePlugins.map((item: any) => {
-        const enabledInstance = enabledList.find((plugin: any) => plugin.pluginName === item.name);
+        const enabledInstance = enabledList.find((plugin: any) => {
+          const pluginKey = String(plugin?.pluginName || plugin?.name || '');
+          return pluginKey === item.name;
+        });
+        const enabled = Boolean(enabledInstance?.enabled ?? enabledInstance?.runtimeEnabled);
         return {
           ...item,
-          enabled: Boolean(enabledInstance?.enabled),
-          boundStatus: enabledInstance ? (enabledInstance.enabled ? '已绑定' : '已创建') : '未绑定',
+          enabled,
+          boundStatus: enabledInstance ? (enabled ? '已绑定' : '已创建') : '未绑定',
         };
       });
       merged = [...getBuiltInRows(), ...merged];
     } else {
-      merged = visiblePlugins.map((item: any) => ({
-        ...item,
-        boundStatus: item.internal ? '内置' : '可配置',
+      const instances = await Promise.all(visiblePlugins.map(async (item: any) => {
+        const instance = await getGlobalPluginInstance(item.name).catch(() => null);
+        return [item.name, instance] as const;
       }));
+      const instanceMap = new Map(instances);
+      merged = visiblePlugins.map((item: any) => {
+        const instance = instanceMap.get(item.name);
+        const enabled = Boolean(instance?.enabled ?? instance?.runtimeEnabled);
+        return {
+          ...item,
+          enabled,
+          boundStatus: instance ? (enabled ? '已配置' : '已禁用') : (item.internal ? '内置' : '可配置'),
+        };
+      });
     }
 
     rows.value = merged;
@@ -237,7 +255,7 @@ async function loadPluginDetail(record: any | null) {
 
   detailLoading.value = true;
   try {
-    if (record.builtIn || isBuiltInPlugin(record.name)) {
+    if (isBuiltInPlugin(record.name)) {
       selectedPluginReadme.value = getBuiltInPluginReadme(record);
       return;
     }
@@ -246,7 +264,7 @@ async function loadPluginDetail(record: any | null) {
       getWasmPluginsConfig(record.name).catch(() => null),
       getWasmPluginReadme(record.name).catch(() => ''),
     ]);
-    selectedPluginSchema.value = configData?.schema?.jsonSchema || null;
+    selectedPluginSchema.value = configData || null;
     selectedPluginReadme.value = typeof readme === 'string' ? readme : '';
   } finally {
     detailLoading.value = false;
@@ -258,7 +276,23 @@ function openWasmDrawer(record?: any) {
   wasmDrawerOpen.value = true;
 }
 
+function resolveConfigPath(record: any) {
+  const dedicatedPath = resolveDedicatedPluginPath(record?.name);
+  if (!dedicatedPath) {
+    return '';
+  }
+  if (queryType.value === QueryType.AI_ROUTE && record?.name === 'ai-data-masking') {
+    return '';
+  }
+  return dedicatedPath;
+}
+
 function openPluginDetail(record: any) {
+  const dedicatedPath = resolveConfigPath(record);
+  if (dedicatedPath) {
+    void router.push(dedicatedPath);
+    return;
+  }
   selectedPluginName.value = record.name;
   void loadPluginDetail(record);
 }
@@ -275,12 +309,17 @@ async function submitWasm(payload: any, isEdit: boolean) {
 }
 
 async function openConfig(record: any) {
+  const dedicatedPath = resolveConfigPath(record);
+  if (dedicatedPath) {
+    await router.push(dedicatedPath);
+    return;
+  }
   configuring.value = { ...record, queryType: queryType.value };
   currentConfigData.value = null;
   currentInstanceData.value = null;
   configDrawerOpen.value = true;
 
-  if (record.builtIn) {
+  if (isBuiltInPlugin(record.name)) {
     return;
   }
 

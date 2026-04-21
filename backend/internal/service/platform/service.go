@@ -124,6 +124,17 @@ func (s *Service) IsSystemInitialized(ctx context.Context) bool {
 	return initialized
 }
 
+func (s *Service) ensureDefaultGatewayResourcesLocked(ctx context.Context) {
+	initialized, _ := s.userConfigs["system.initialized"].(bool)
+	defaultRouteInitialized, _ := s.userConfigs["route.default.initialized"].(bool)
+	if !initialized || !defaultRouteInitialized {
+		return
+	}
+	if err := s.ensureDefaultGatewayResources(ctx); err != nil {
+		g.Log().Warningf(ctx, "failed to ensure default gateway resources: %v", err)
+	}
+}
+
 func (s *Service) InitializeSystem(ctx context.Context, user *response.User, configs map[string]any) error {
 	_ = s.ensurePersistedStateLoaded(ctx)
 
@@ -325,6 +336,43 @@ func (s *Service) bootstrapDefaultResourcesLocked(ctx context.Context, adminPass
 	}); err != nil {
 		return err
 	}
+	defaultDomainName := s.bootstrapDefaultDomainName(ctx)
+	if err := s.ensureBootstrapResource(ctx, "tls-certificates", consts.DefaultTLSCertificateName, map[string]any{
+		"name":          consts.DefaultTLSCertificateName,
+		"cert":          "placeholder-cert",
+		"key":           "placeholder-key",
+		"domains":       []string{consts.DefaultTLSCertificateHost},
+		"validityStart": time.Now().UTC().Format(time.RFC3339),
+		"validityEnd":   time.Now().UTC().Add(365 * 24 * time.Hour).Format(time.RFC3339),
+	}); err != nil {
+		return err
+	}
+	if err := s.ensureBootstrapResource(ctx, "domains", defaultDomainName, map[string]any{
+		"name":           defaultDomainName,
+		"certIdentifier": consts.DefaultTLSCertificateName,
+		"enableHttps":    "on",
+	}); err != nil {
+		return err
+	}
+	return s.ensureBootstrapResource(ctx, "routes", consts.DefaultRouteName, map[string]any{
+		"name":    consts.DefaultRouteName,
+		"domains": []string{defaultDomainName},
+		"path": map[string]any{
+			"matchType":  "EQUAL",
+			"matchValue": "/",
+		},
+		"services": []map[string]any{{
+			"name": consts.DefaultConsoleServiceHost,
+			"port": consts.DefaultConsoleServicePort,
+		}},
+		"rewrite": map[string]any{
+			"enabled": true,
+			"path":    "/landing",
+		},
+	})
+}
+
+func (s *Service) ensureDefaultGatewayResources(ctx context.Context) error {
 	defaultDomainName := s.bootstrapDefaultDomainName(ctx)
 	if err := s.ensureBootstrapResource(ctx, "tls-certificates", consts.DefaultTLSCertificateName, map[string]any{
 		"name":          consts.DefaultTLSCertificateName,

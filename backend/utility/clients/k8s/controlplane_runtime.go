@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,15 +32,21 @@ const (
 	higressMCPServerTypeKey                 = "type"
 	higressWasmPluginNameAIProxy            = "ai-proxy"
 	higressWasmPluginNameAIQuota            = "ai-quota"
+	higressWasmPluginNameAIDataMasking      = "ai-data-masking"
 	higressWasmPluginNameModelRouter        = "model-router"
 	higressWasmPluginNameModelMapper        = "model-mapper"
 	higressWasmPluginNameAIStatistics       = "ai-statistics"
 	higressWasmPluginNameKeyAuth            = "key-auth"
 	higressWasmPluginNameMCPServer          = "mcp-server"
-	higressWasmPluginVersionDefault         = "1.0.0"
+	higressWasmPluginVersionDefault         = "2.0.0"
+	higressPluginServerServiceNameDefault   = "aigateway-plugin-server"
+	higressPluginServerClusterDomainDefault = "cluster.local"
+	higressAdminWasmPluginURLPatternEnv     = "HIGRESS_ADMIN_WASM_PLUGIN_CUSTOM_IMAGE_URL_PATTERN"
 	higressWasmPluginPriorityModelRouter    = 900
 	higressWasmPluginPriorityModelMapper    = 800
 	higressWasmPluginPriorityAIProxy        = 100
+	higressWasmPluginPriorityAIQuota        = 280
+	higressWasmPluginPriorityAIDataMasking  = 100
 	higressWasmPluginPriorityAIStatistics   = 900
 	higressWasmPluginPriorityKeyAuth        = 310
 	higressWasmPluginPriorityMCPServer      = 999
@@ -59,6 +66,17 @@ const (
 	higressAIProxyActiveProviderKey         = "activeProviderId"
 	higressModelRouterHeaderKey             = "modelToHeader"
 	higressAIStatisticsDefaultAttrsKey      = "use_default_response_attributes"
+	higressAIQuotaQuotaUnitAmount           = "amount"
+	higressAIQuotaBalanceKeyPrefix          = "billing:balance:"
+	higressAIQuotaPriceKeyPrefix            = "billing:model-price:"
+	higressAIQuotaUsageEventStream          = "billing:usage:stream"
+	higressAIQuotaAdminConsumer             = "administrator"
+	higressAIQuotaRedisServiceDefault       = "redis-server"
+	higressAIQuotaRedisServiceAlt           = "redis-server-master"
+	higressAIQuotaRedisSecretDefault        = "redis-server"
+	higressAIQuotaRedisPasswordKey          = "redis-password"
+	higressAIQuotaRedisPasswordDefault      = "aigateway-redis"
+	higressAIQuotaRedisTimeoutMillis        = 1000
 	higressMCPConfigSectionKey              = "mcpServer"
 	higressMCPMatchListKey                  = "match_list"
 	higressMCPServersKey                    = "servers"
@@ -100,11 +118,22 @@ var providerDefaultEndpoints = map[string]providerEndpoint{
 	"gemini":     {Type: higressDNSRegistryType, Protocol: higressTransportHTTPS, Domain: "generativelanguage.googleapis.com", Port: 443},
 	"mistral":    {Type: higressDNSRegistryType, Protocol: higressTransportHTTPS, Domain: "api.mistral.ai", Port: 443},
 	"cohere":     {Type: higressDNSRegistryType, Protocol: higressTransportHTTPS, Domain: "api.cohere.com", Port: 443},
-	"doubao":     {Type: higressDNSRegistryType, Protocol: higressTransportHTTPS, Domain: "ark.cn-beijing.volces.com", Port: 443},
+	"volcengine": {Type: higressDNSRegistryType, Protocol: higressTransportHTTPS, Domain: "ark.cn-beijing.volces.com", Port: 443},
 	"coze":       {Type: higressDNSRegistryType, Protocol: higressTransportHTTPS, Domain: "api.coze.cn", Port: 443},
 	"openrouter": {Type: higressDNSRegistryType, Protocol: higressTransportHTTPS, Domain: "openrouter.ai", Port: 443},
 	"grok":       {Type: higressDNSRegistryType, Protocol: higressTransportHTTPS, Domain: "api.x.ai", Port: 443},
 	"claude":     {Type: higressDNSRegistryType, Protocol: higressTransportHTTPS, Domain: "api.anthropic.com", Port: 443},
+}
+
+var builtinWasmPluginVersions = map[string]string{
+	higressWasmPluginNameAIProxy:       "2.0.0",
+	higressWasmPluginNameAIQuota:       "1.1.0",
+	higressWasmPluginNameAIDataMasking: "2.0.0",
+	higressWasmPluginNameModelRouter:   "2.0.0",
+	higressWasmPluginNameModelMapper:   "2.0.0",
+	higressWasmPluginNameAIStatistics:  "2.0.0",
+	higressWasmPluginNameKeyAuth:       "2.0.0",
+	higressWasmPluginNameMCPServer:     "2.0.0",
 }
 
 type providerEndpoint struct {
@@ -403,6 +432,12 @@ func (c *RealClient) syncAIRouteRuntime(ctx context.Context, name string, data m
 			return err
 		}
 	}
+	if err := c.syncAIRouteAIProxy(ctx, publicName, data["upstreams"]); err != nil {
+		return err
+	}
+	if err := c.syncAIRouteAIProxy(ctx, internalName, data["upstreams"]); err != nil {
+		return err
+	}
 	if err := c.syncAIRouteModelMapper(ctx, publicName, data); err != nil {
 		return err
 	}
@@ -413,6 +448,9 @@ func (c *RealClient) syncAIRouteRuntime(ctx context.Context, name string, data m
 		return err
 	}
 	if err := c.syncAIStatisticsRule(ctx, internalName, true); err != nil {
+		return err
+	}
+	if err := c.syncAIQuotaRule(ctx, name, publicName, true); err != nil {
 		return err
 	}
 	if err := c.syncAIQuotaMirrorRule(ctx, publicName, internalName); err != nil {
@@ -434,7 +472,10 @@ func (c *RealClient) syncAIRouteFallbackRuntime(ctx context.Context, name string
 		_ = c.deleteObjectIfExists(ctx, higressEnvoyFilterResource, aiRouteInternalIngressName(name))
 		_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIStatistics, map[string][]string{"ingress": {aiRouteFallbackIngressName(name)}})
 		_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIStatistics, map[string][]string{"ingress": {aiRouteInternalFallbackIngressName(name)}})
+		_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIQuota, map[string][]string{"ingress": {aiRouteFallbackIngressName(name)}})
 		_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIQuota, map[string][]string{"ingress": {aiRouteInternalFallbackIngressName(name)}})
+		_ = c.removeAIProxyRulesForIngress(ctx, aiRouteFallbackIngressName(name))
+		_ = c.removeAIProxyRulesForIngress(ctx, aiRouteInternalFallbackIngressName(name))
 		_ = c.removeModelMapperRulesForIngress(ctx, aiRouteFallbackIngressName(name))
 		_ = c.removeModelMapperRulesForIngress(ctx, aiRouteInternalFallbackIngressName(name))
 		_ = c.syncRouteAuthRule(ctx, aiRouteFallbackIngressName(name), nil, false)
@@ -442,7 +483,7 @@ func (c *RealClient) syncAIRouteFallbackRuntime(ctx context.Context, name string
 		return nil
 	}
 	fallbackData := cloneMap(data)
-	fallbackData["upstreams"] = fallback["upstreams"]
+	fallbackData["upstreams"] = normalizeAIRouteFallbackUpstreams(fallback)
 	services, err := c.aiUpstreamServices(ctx, fallbackData["upstreams"])
 	if err != nil {
 		return err
@@ -461,6 +502,12 @@ func (c *RealClient) syncAIRouteFallbackRuntime(ctx context.Context, name string
 	if err := c.syncRouteAuthRule(ctx, aiRouteInternalFallbackIngressName(name), mapValue(data["authConfig"]), true); err != nil {
 		return err
 	}
+	if err := c.syncAIRouteAIProxy(ctx, aiRouteFallbackIngressName(name), fallbackData["upstreams"]); err != nil {
+		return err
+	}
+	if err := c.syncAIRouteAIProxy(ctx, aiRouteInternalFallbackIngressName(name), fallbackData["upstreams"]); err != nil {
+		return err
+	}
 	if err := c.syncAIRouteModelMapper(ctx, aiRouteFallbackIngressName(name), fallbackData); err != nil {
 		return err
 	}
@@ -471,6 +518,9 @@ func (c *RealClient) syncAIRouteFallbackRuntime(ctx context.Context, name string
 		return err
 	}
 	if err := c.syncAIStatisticsRule(ctx, aiRouteInternalFallbackIngressName(name), true); err != nil {
+		return err
+	}
+	if err := c.syncAIQuotaRule(ctx, name, aiRouteFallbackIngressName(name), true); err != nil {
 		return err
 	}
 	if err := c.syncAIQuotaMirrorRule(ctx, aiRouteFallbackIngressName(name), aiRouteInternalFallbackIngressName(name)); err != nil {
@@ -486,6 +536,41 @@ func (c *RealClient) syncAIRouteFallbackRuntime(ctx context.Context, name string
 	return c.applyEnvoyFilter(ctx, aiRouteInternalIngressName(name), renderFallbackEnvoyFilter(aiRouteInternalIngressName(name), responseCodes))
 }
 
+func normalizeAIRouteFallbackUpstreams(fallback map[string]any) []map[string]any {
+	upstreams := toMapSlice(fallback["upstreams"])
+	if len(upstreams) == 0 {
+		return nil
+	}
+	strategy := canonicalAIRouteFallbackStrategy(firstNonEmpty(
+		stringValue(fallback["fallbackStrategy"]),
+		stringValue(fallback["strategy"]),
+	))
+	if strategy == "" {
+		strategy = "RAND"
+	}
+	if strategy == "SEQ" {
+		return []map[string]any{cloneMap(upstreams[0])}
+	}
+	result := make([]map[string]any, 0, len(upstreams))
+	for _, upstream := range upstreams {
+		item := cloneMap(upstream)
+		item["weight"] = 1
+		result = append(result, item)
+	}
+	return result
+}
+
+func canonicalAIRouteFallbackStrategy(value string) string {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "", "RAND", "RANDOM":
+		return "RAND"
+	case "SEQ", "SEQUENCE":
+		return "SEQ"
+	default:
+		return strings.ToUpper(strings.TrimSpace(value))
+	}
+}
+
 func (c *RealClient) deleteAIRouteResource(ctx context.Context, name string) error {
 	_ = c.deleteObjectIfExists(ctx, "configmap", aiRouteConfigMapName(name))
 	_ = c.deleteObjectIfExists(ctx, "ingress", aiRouteIngressName(name))
@@ -498,8 +583,14 @@ func (c *RealClient) deleteAIRouteResource(ctx context.Context, name string) err
 	_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIStatistics, map[string][]string{"ingress": {aiRouteInternalIngressName(name)}})
 	_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIStatistics, map[string][]string{"ingress": {aiRouteFallbackIngressName(name)}})
 	_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIStatistics, map[string][]string{"ingress": {aiRouteInternalFallbackIngressName(name)}})
+	_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIQuota, map[string][]string{"ingress": {aiRouteIngressName(name)}})
 	_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIQuota, map[string][]string{"ingress": {aiRouteInternalIngressName(name)}})
+	_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIQuota, map[string][]string{"ingress": {aiRouteFallbackIngressName(name)}})
 	_ = c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIQuota, map[string][]string{"ingress": {aiRouteInternalFallbackIngressName(name)}})
+	_ = c.removeAIProxyRulesForIngress(ctx, aiRouteIngressName(name))
+	_ = c.removeAIProxyRulesForIngress(ctx, aiRouteInternalIngressName(name))
+	_ = c.removeAIProxyRulesForIngress(ctx, aiRouteFallbackIngressName(name))
+	_ = c.removeAIProxyRulesForIngress(ctx, aiRouteInternalFallbackIngressName(name))
 	_ = c.removeModelMapperRulesForIngress(ctx, aiRouteIngressName(name))
 	_ = c.removeModelMapperRulesForIngress(ctx, aiRouteInternalIngressName(name))
 	_ = c.removeModelMapperRulesForIngress(ctx, aiRouteFallbackIngressName(name))
@@ -508,7 +599,7 @@ func (c *RealClient) deleteAIRouteResource(ctx context.Context, name string) err
 	_ = c.syncRouteAuthRule(ctx, aiRouteInternalIngressName(name), nil, true)
 	_ = c.syncRouteAuthRule(ctx, aiRouteFallbackIngressName(name), nil, false)
 	_ = c.syncRouteAuthRule(ctx, aiRouteInternalFallbackIngressName(name), nil, true)
-	return nil
+	return c.SyncAIDataMaskingRuntime(ctx)
 }
 
 func (c *RealClient) syncAIProviderRuntime(ctx context.Context, name string, data map[string]any, previous map[string]any, deleting bool) error {
@@ -625,6 +716,41 @@ func (c *RealClient) syncAIRouteModelMapper(ctx context.Context, ingressName str
 	return nil
 }
 
+func (c *RealClient) syncAIRouteAIProxy(ctx context.Context, ingressName string, value any) error {
+	if err := c.removeAIProxyRulesForIngress(ctx, ingressName); err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	for _, upstream := range toMapSlice(value) {
+		providerName := stringValue(upstream["provider"])
+		if providerName == "" {
+			continue
+		}
+		provider, err := c.getAIProviderResource(ctx, providerName)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			return err
+		}
+		serviceRef, _, err := c.deriveAIProviderServiceRef(ctx, providerName)
+		if err != nil {
+			return err
+		}
+		if serviceRef == nil || stringValue(serviceRef["name"]) == "" {
+			continue
+		}
+		if err := c.upsertBuiltinPluginRule(ctx, higressWasmPluginNameAIProxy, map[string][]string{
+			"ingress": {ingressName},
+			"service": {stringValue(serviceRef["name"])},
+		}, map[string]any{
+			"provider": providerPayloadFromResource(providerName, provider),
+		}, true, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *RealClient) enableModelRouter(ctx context.Context) error {
 	return c.upsertBuiltinGlobalPlugin(ctx, higressWasmPluginNameModelRouter, map[string]any{
 		higressModelRouterHeaderKey: higressAIModelRoutingHeader,
@@ -640,12 +766,89 @@ func (c *RealClient) syncAIStatisticsRule(ctx context.Context, ingressName strin
 	}, true, nil)
 }
 
+func (c *RealClient) syncAIQuotaRule(ctx context.Context, routeName, ingressName string, enabled bool) error {
+	if !enabled {
+		return c.removeBuiltinPluginRule(ctx, higressWasmPluginNameAIQuota, map[string][]string{"ingress": {ingressName}})
+	}
+	serviceName := c.resolveAIQuotaRedisServiceName(ctx)
+	password := c.resolveAIQuotaRedisPassword(ctx)
+	return c.upsertBuiltinPluginRule(ctx, higressWasmPluginNameAIQuota, map[string][]string{"ingress": {ingressName}},
+		buildAIQuotaRuleConfig(routeName, serviceName, password), true, nil)
+}
+
 func (c *RealClient) syncAIQuotaMirrorRule(ctx context.Context, sourceIngress, targetIngress string) error {
 	return c.mutateBuiltinWasmPlugin(ctx, higressWasmPluginNameAIQuota, func(plugin map[string]any) error {
 		spec := ensureMap(plugin, "spec")
 		syncMirroredBuiltinIngressRuleSpec(spec, sourceIngress, targetIngress)
 		return nil
 	})
+}
+
+func (c *RealClient) SyncAIDataMaskingRuntime(ctx context.Context) error {
+	desiredRules, err := c.buildDesiredAIDataMaskingRules(ctx)
+	if err != nil {
+		return err
+	}
+	_, lookupErr := c.getBuiltinWasmPlugin(ctx, higressWasmPluginNameAIDataMasking)
+	if lookupErr != nil && !errors.Is(lookupErr, ErrNotFound) {
+		return lookupErr
+	}
+	if len(desiredRules) == 0 && errors.Is(lookupErr, ErrNotFound) {
+		return nil
+	}
+	return c.mutateBuiltinWasmPlugin(ctx, higressWasmPluginNameAIDataMasking, func(plugin map[string]any) error {
+		spec := ensureMap(plugin, "spec")
+		spec["matchRules"] = syncAIDataMaskingMatchRules(toMapSlice(spec["matchRules"]), desiredRules)
+		return nil
+	})
+}
+
+func buildAIQuotaRuleConfig(routeName, redisServiceName, redisPassword string) map[string]any {
+	trimmedRouteName := strings.TrimSpace(routeName)
+	if trimmedRouteName == "" {
+		trimmedRouteName = "default"
+	}
+	serviceName := strings.TrimSpace(redisServiceName)
+	if serviceName == "" {
+		serviceName = higressAIQuotaRedisServiceDefault
+	}
+	config := map[string]any{
+		"quota_unit":         higressAIQuotaQuotaUnitAmount,
+		"balance_key_prefix": higressAIQuotaBalanceKeyPrefix,
+		"price_key_prefix":   higressAIQuotaPriceKeyPrefix,
+		"usage_event_stream": higressAIQuotaUsageEventStream,
+		"admin_consumer":     higressAIQuotaAdminConsumer,
+		"admin_path":         "/v1/ai/quotas/routes/" + trimmedRouteName + "/consumers",
+		"redis": map[string]any{
+			"service_name": serviceName,
+			"service_port": 6379,
+			"timeout":      higressAIQuotaRedisTimeoutMillis,
+			"database":     0,
+		},
+	}
+	if password := strings.TrimSpace(redisPassword); password != "" {
+		mapValue(config["redis"])["password"] = password
+	}
+	return config
+}
+
+func (c *RealClient) resolveAIQuotaRedisServiceName(ctx context.Context) string {
+	for _, candidate := range []string{higressAIQuotaRedisServiceDefault, higressAIQuotaRedisServiceAlt} {
+		if _, err := c.getObject(ctx, "service", candidate); err == nil {
+			return fmt.Sprintf("%s.%s.svc.%s", candidate, c.namespace, higressPluginServerClusterDomainDefault)
+		}
+	}
+	return fmt.Sprintf("%s.%s.svc.%s", higressAIQuotaRedisServiceDefault, c.namespace, higressPluginServerClusterDomainDefault)
+}
+
+func (c *RealClient) resolveAIQuotaRedisPassword(ctx context.Context) string {
+	secret, err := c.ReadSecret(ctx, higressAIQuotaRedisSecretDefault)
+	if err == nil {
+		if password := strings.TrimSpace(secret[higressAIQuotaRedisPasswordKey]); password != "" {
+			return password
+		}
+	}
+	return higressAIQuotaRedisPasswordDefault
 }
 
 func (c *RealClient) syncRouteAuthRule(ctx context.Context, ingressName string, authConfig map[string]any, internal bool) error {
@@ -701,7 +904,7 @@ func (c *RealClient) upsertBuiltinPluginRule(ctx context.Context, pluginName str
 			next = append(next, nextRule)
 		}
 		sort.Slice(next, func(i, j int) bool {
-			return wasmRuleSortKey(next[i]) < wasmRuleSortKey(next[j])
+			return wasmRuleLess(next[i], next[j])
 		})
 		spec["matchRules"] = next
 		return nil
@@ -732,6 +935,14 @@ func (c *RealClient) removeBuiltinPluginRule(ctx context.Context, pluginName str
 func (c *RealClient) mutateBuiltinWasmPlugin(ctx context.Context, pluginName string, mutate func(map[string]any) error) error {
 	plugin, err := c.getBuiltinWasmPlugin(ctx, pluginName)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			if ensureErr := c.ensureBuiltinWasmPlugin(ctx, pluginName); ensureErr != nil {
+				return ensureErr
+			}
+			plugin, err = c.getBuiltinWasmPlugin(ctx, pluginName)
+		}
+	}
+	if err != nil {
 		return err
 	}
 	working := cloneMap(plugin)
@@ -761,6 +972,19 @@ func (c *RealClient) getBuiltinWasmPlugin(ctx context.Context, pluginName string
 	return items[0], nil
 }
 
+func (c *RealClient) ensureBuiltinWasmPlugin(ctx context.Context, pluginName string) error {
+	manifest, ok := builtinWasmPluginManifest(pluginName, c.namespace)
+	if !ok {
+		return ErrNotFound
+	}
+	payload, err := yaml.Marshal(manifest)
+	if err != nil {
+		return err
+	}
+	_, err = c.run(ctx, payload, "apply", "-f", "-")
+	return err
+}
+
 func (c *RealClient) loadBuiltinPluginRules(ctx context.Context, pluginName string) (map[string]map[string]any, error) {
 	plugin, err := c.getBuiltinWasmPlugin(ctx, pluginName)
 	if err != nil {
@@ -787,16 +1011,29 @@ func (c *RealClient) loadRouteAuthRules(ctx context.Context) (map[string]map[str
 }
 
 func (c *RealClient) removeModelMapperRulesForIngress(ctx context.Context, ingressName string) error {
-	return c.mutateBuiltinWasmPlugin(ctx, higressWasmPluginNameModelMapper, func(plugin map[string]any) error {
+	return c.removeBuiltinPluginRulesForIngress(ctx, higressWasmPluginNameModelMapper, ingressName)
+}
+
+func (c *RealClient) removeAIProxyRulesForIngress(ctx context.Context, ingressName string) error {
+	return c.removeBuiltinPluginRulesForIngress(ctx, higressWasmPluginNameAIProxy, ingressName)
+}
+
+func (c *RealClient) removeBuiltinPluginRulesForIngress(ctx context.Context, pluginName, ingressName string) error {
+	return c.mutateBuiltinWasmPlugin(ctx, pluginName, func(plugin map[string]any) error {
 		spec := ensureMap(plugin, "spec")
 		matchRules := toMapSlice(spec["matchRules"])
 		next := make([]map[string]any, 0, len(matchRules))
+		found := false
 		for _, rule := range matchRules {
 			ingresses := normalizeStringSlice(rule["ingress"])
 			if len(ingresses) > 0 && ingresses[0] == ingressName {
+				found = true
 				continue
 			}
 			next = append(next, rule)
+		}
+		if !found {
+			return ErrNotFound
 		}
 		spec["matchRules"] = next
 		return nil
@@ -914,6 +1151,14 @@ func (c *RealClient) loadMcpBridgeRegistries(ctx context.Context) (map[string]ma
 func (c *RealClient) upsertMcpBridgeRegistry(ctx context.Context, registry map[string]any) error {
 	bridge, err := c.getObject(ctx, "mcpbridge.networking.higress.io", higressMcpBridgeDefaultName)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			if ensureErr := c.ensureDefaultMcpBridge(ctx); ensureErr != nil {
+				return ensureErr
+			}
+			bridge, err = c.getObject(ctx, "mcpbridge.networking.higress.io", higressMcpBridgeDefaultName)
+		}
+	}
+	if err != nil {
 		return err
 	}
 	working := cloneMap(bridge)
@@ -964,6 +1209,15 @@ func (c *RealClient) removeMcpBridgeRegistry(ctx context.Context, name string) e
 	spec["registries"] = next
 	sanitizeObjectForApply(working)
 	payload, err := yaml.Marshal(working)
+	if err != nil {
+		return err
+	}
+	_, err = c.run(ctx, payload, "apply", "-f", "-")
+	return err
+}
+
+func (c *RealClient) ensureDefaultMcpBridge(ctx context.Context) error {
+	payload, err := yaml.Marshal(defaultMcpBridgeManifest(c.namespace))
 	if err != nil {
 		return err
 	}
@@ -1378,15 +1632,6 @@ func buildAIRouteFallbackIngressPayload(name, ingressName, originalRouteName str
 
 func aiIngressHeaders(data map[string]any, extra map[string]any) []map[string]any {
 	headers := toMapSlice(data["headerPredicates"])
-	modelPredicates := toMapSlice(data["modelPredicates"])
-	for _, predicate := range modelPredicates {
-		headers = append(headers, map[string]any{
-			"key":           higressAIModelRoutingHeader,
-			"matchType":     firstNonEmpty(stringValue(predicate["matchType"]), "EQUAL"),
-			"matchValue":    stringValue(predicate["matchValue"]),
-			"caseSensitive": true,
-		})
-	}
 	if extra != nil {
 		headers = append(headers, extra)
 	}
@@ -1742,8 +1987,68 @@ func wasmRuleMatchesTargets(rule map[string]any, targets map[string][]string) bo
 	return true
 }
 
-func wasmRuleSortKey(rule map[string]any) string {
-	return strings.Join(normalizeStringSlice(rule["service"]), ",") + "|" + strings.Join(normalizeStringSlice(rule["ingress"]), ",") + "|" + strings.Join(normalizeStringSlice(rule["domain"]), ",")
+func wasmRuleLess(left, right map[string]any) bool {
+	return wasmRuleCompare(left, right) < 0
+}
+
+func wasmRuleCompare(left, right map[string]any) int {
+	leftServices := normalizeStringSlice(left["service"])
+	rightServices := normalizeStringSlice(right["service"])
+	if ret := compareOrderedStringSlices(leftServices, rightServices); ret != 0 {
+		return ret
+	}
+
+	leftIngresses := normalizeStringSlice(left["ingress"])
+	rightIngresses := normalizeStringSlice(right["ingress"])
+	leftHasIngress := len(leftIngresses) > 0
+	rightHasIngress := len(rightIngresses) > 0
+	if leftHasIngress != rightHasIngress {
+		if leftHasIngress {
+			return -1
+		}
+		return 1
+	}
+	if ret := compareOrderedStringSlices(leftIngresses, rightIngresses); ret != 0 {
+		return ret
+	}
+
+	leftDomains := normalizeStringSlice(left["domain"])
+	rightDomains := normalizeStringSlice(right["domain"])
+	leftHasDomain := len(leftDomains) > 0
+	rightHasDomain := len(rightDomains) > 0
+	if leftHasDomain != rightHasDomain {
+		if leftHasDomain {
+			return 1
+		}
+		return -1
+	}
+	return compareOrderedStringSlices(leftDomains, rightDomains)
+}
+
+func compareOrderedStringSlices(left, right []string) int {
+	leftEmpty := len(left) == 0
+	rightEmpty := len(right) == 0
+	if leftEmpty && rightEmpty {
+		return 0
+	}
+	if leftEmpty != rightEmpty {
+		if leftEmpty {
+			return 1
+		}
+		return -1
+	}
+	for i := 0; i < len(left) || i < len(right); i++ {
+		switch {
+		case i >= len(left):
+			return -1
+		case i >= len(right):
+			return 1
+		}
+		if ret := strings.Compare(left[i], right[i]); ret != 0 {
+			return ret
+		}
+	}
+	return 0
 }
 
 func applyWasmTargets(rule map[string]any, targets map[string][]string) {
@@ -1778,7 +2083,7 @@ func syncMirroredBuiltinIngressRuleSpec(spec map[string]any, sourceIngress, targ
 		applyWasmTargets(sourceRule, map[string][]string{"ingress": {targetIngress}})
 		next = append(next, sourceRule)
 		sort.Slice(next, func(i, j int) bool {
-			return wasmRuleSortKey(next[i]) < wasmRuleSortKey(next[j])
+			return wasmRuleLess(next[i], next[j])
 		})
 	}
 	spec["matchRules"] = next
@@ -1940,4 +2245,454 @@ func llmRegistryName(providerName string) string {
 
 func llmServiceName(providerName, sourceType string) string {
 	return llmRegistryName(providerName) + "." + sourceType
+}
+
+func builtinWasmPluginResourceName(pluginName string) string {
+	return strings.TrimSpace(pluginName) + consts.InternalResourceNameSuffix
+}
+
+func builtinWasmPluginManifest(pluginName, namespace string) (map[string]any, bool) {
+	spec, version, ok := builtinWasmPluginSpec(pluginName, namespace)
+	if !ok {
+		return nil, false
+	}
+	return map[string]any{
+		"apiVersion": "extensions.higress.io/v1alpha1",
+		"kind":       "WasmPlugin",
+		"metadata": map[string]any{
+			"name":      builtinWasmPluginResourceName(pluginName),
+			"namespace": namespace,
+			"labels": map[string]any{
+				higressLabelWasmPluginName:    pluginName,
+				higressLabelResourceDefiner:   higressLabelResourceDefinerValue,
+				higressLabelInternal:          higressAnnotationTrueValue,
+				higressLabelWasmPluginVersion: version,
+			},
+		},
+		"spec": spec,
+	}, true
+}
+
+func builtinWasmPluginSpec(pluginName, namespace string) (map[string]any, string, bool) {
+	var (
+		phase                = higressWasmPluginPhaseUnspecified
+		priority             = 0
+		defaultConfigDisable = true
+	)
+
+	switch strings.TrimSpace(pluginName) {
+	case higressWasmPluginNameAIProxy:
+		priority = higressWasmPluginPriorityAIProxy
+	case higressWasmPluginNameAIQuota:
+		priority = higressWasmPluginPriorityAIQuota
+	case higressWasmPluginNameAIDataMasking:
+		phase = higressWasmPluginPhaseAuthN
+		priority = higressWasmPluginPriorityAIDataMasking
+	case higressWasmPluginNameModelRouter:
+		priority = higressWasmPluginPriorityModelRouter
+	case higressWasmPluginNameModelMapper:
+		priority = higressWasmPluginPriorityModelMapper
+	case higressWasmPluginNameAIStatistics:
+		phase = higressWasmPluginPhaseStats
+		priority = higressWasmPluginPriorityAIStatistics
+	case higressWasmPluginNameKeyAuth:
+		phase = higressWasmPluginPhaseAuthN
+		priority = higressWasmPluginPriorityKeyAuth
+	case higressWasmPluginNameMCPServer:
+		priority = higressWasmPluginPriorityMCPServer
+	default:
+		return nil, "", false
+	}
+	version := builtinWasmPluginVersions[strings.TrimSpace(pluginName)]
+	if version == "" {
+		version = higressWasmPluginVersionDefault
+	}
+
+	return map[string]any{
+		"phase":                phase,
+		"priority":             priority,
+		"url":                  builtinWasmPluginURL(pluginName, version, namespace),
+		"defaultConfig":        map[string]any{},
+		"defaultConfigDisable": defaultConfigDisable,
+		"matchRules":           []map[string]any{},
+	}, version, true
+}
+
+func builtinWasmPluginURL(pluginName, version, namespace string) string {
+	pattern := strings.TrimSpace(os.Getenv(higressAdminWasmPluginURLPatternEnv))
+	if pattern == "" {
+		pattern = fmt.Sprintf(
+			"http://%s.%s.svc.%s/plugins/${name}/${version}/plugin.wasm",
+			higressPluginServerServiceNameDefault,
+			strings.TrimSpace(namespace),
+			higressPluginServerClusterDomainDefault,
+		)
+	}
+	return strings.NewReplacer(
+		"${name}", strings.TrimSpace(pluginName),
+		"${version}", strings.TrimSpace(version),
+	).Replace(pattern)
+}
+
+func (c *RealClient) buildDesiredAIDataMaskingRules(ctx context.Context) (map[string]map[string]any, error) {
+	projection, err := c.GetResource(ctx, "ai-sensitive-projections", "default")
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	if errors.Is(err, ErrNotFound) {
+		projection = map[string]any{}
+	}
+	desiredConfig := buildAIDataMaskingRuntimeConfig(projection)
+	routes, err := c.listAIRouteResources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]map[string]any)
+	for _, route := range routes {
+		bound, err := c.aiDataMaskingRouteBound(ctx, route)
+		if err != nil {
+			return nil, err
+		}
+		if !bound {
+			continue
+		}
+		for _, ingressName := range aiDataMaskingRouteRuntimeTargets(route) {
+			result[ingressName] = cloneMap(desiredConfig)
+		}
+	}
+	return result, nil
+}
+
+func (c *RealClient) aiDataMaskingRouteBound(ctx context.Context, route map[string]any) (bool, error) {
+	name := stringValue(route["name"])
+	if name == "" {
+		return false, nil
+	}
+	for _, target := range aiDataMaskingRouteLookupTargets(name) {
+		items, err := c.ListResources(ctx, routePluginInstanceKind(target))
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return false, err
+		}
+		for _, item := range items {
+			if !isAIDataMaskingPluginInstance(item) {
+				continue
+			}
+			if aiDataMaskingPluginInstanceEnabled(item) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func syncAIDataMaskingMatchRules(existing []map[string]any, desired map[string]map[string]any) []map[string]any {
+	pending := make(map[string]map[string]any, len(desired))
+	for ingressName, config := range desired {
+		pending[ingressName] = cloneMap(config)
+	}
+
+	next := make([]map[string]any, 0, len(existing)+len(desired))
+	for _, rule := range existing {
+		ingresses := normalizeStringSlice(rule["ingress"])
+		if areManagedAIDataMaskingIngresses(ingresses) {
+			continue
+		}
+		next = append(next, rule)
+	}
+	for ingressName, config := range pending {
+		next = append(next, map[string]any{
+			"config":        cloneMap(config),
+			"configDisable": false,
+			"ingress":       []string{ingressName},
+		})
+	}
+	sort.Slice(next, func(i, j int) bool {
+		return wasmRuleLess(next[i], next[j])
+	})
+	return next
+}
+
+func isManagedAIDataMaskingIngress(name string) bool {
+	return strings.HasPrefix(strings.TrimSpace(name), higressAIRoutePrefix)
+}
+
+func areManagedAIDataMaskingIngresses(items []string) bool {
+	if len(items) == 0 {
+		return false
+	}
+	for _, item := range items {
+		if !isManagedAIDataMaskingIngress(item) {
+			return false
+		}
+	}
+	return true
+}
+
+func buildAIDataMaskingRuntimeConfig(projection map[string]any) map[string]any {
+	runtime := aiDataMaskingProjectionRuntimeConfig(mapValue(projection["runtimeConfig"]))
+	config := map[string]any{
+		"deny_openai":       runtime.DenyOpenai,
+		"deny_jsonpath":     runtime.DenyJsonpath,
+		"deny_raw":          runtime.DenyRaw,
+		"system_deny":       aiDataMaskingProjectionSystemDenyEnabled(projection["systemConfig"]),
+		"deny_code":         runtime.DenyCode,
+		"deny_message":      runtime.DenyMessage,
+		"deny_raw_message":  runtime.DenyRawMessage,
+		"deny_content_type": runtime.DenyContentType,
+	}
+	if detectRules := aiDataMaskingProjectionDetectRules(projection["detectRules"]); len(detectRules) > 0 {
+		config["deny_rules"] = detectRules
+	}
+	if replaceRules := aiDataMaskingProjectionReplaceRules(projection["replaceRules"]); len(replaceRules) > 0 {
+		config["replace_rules"] = replaceRules
+	}
+	return config
+}
+
+type aiDataMaskingRuntimeConfig struct {
+	DenyOpenai      bool
+	DenyJsonpath    []string
+	DenyRaw         bool
+	DenyCode        int
+	DenyMessage     string
+	DenyRawMessage  string
+	DenyContentType string
+}
+
+func defaultAIDataMaskingRuntimeConfig() aiDataMaskingRuntimeConfig {
+	return aiDataMaskingRuntimeConfig{
+		DenyOpenai:      true,
+		DenyJsonpath:    []string{"$.messages[*].content"},
+		DenyRaw:         false,
+		DenyCode:        200,
+		DenyMessage:     "提问或回答中包含敏感词，已被屏蔽",
+		DenyRawMessage:  "{\"errmsg\":\"提问或回答中包含敏感词，已被屏蔽\"}",
+		DenyContentType: "application/json",
+	}
+}
+
+func aiDataMaskingProjectionRuntimeConfig(payload map[string]any) aiDataMaskingRuntimeConfig {
+	config := defaultAIDataMaskingRuntimeConfig()
+	if len(payload) == 0 {
+		return config
+	}
+	config.DenyOpenai = aiDataMaskingReadBool(firstNonNil(payload["denyOpenai"], payload["deny_openai"]), config.DenyOpenai)
+	config.DenyJsonpath = aiDataMaskingReadStringSlice(firstNonNil(payload["denyJsonpath"], payload["deny_jsonpath"]))
+	if len(config.DenyJsonpath) == 0 {
+		config.DenyJsonpath = defaultAIDataMaskingRuntimeConfig().DenyJsonpath
+	}
+	config.DenyRaw = aiDataMaskingReadBool(firstNonNil(payload["denyRaw"], payload["deny_raw"]), config.DenyRaw)
+	config.DenyCode = aiDataMaskingReadInt(firstNonNil(payload["denyCode"], payload["deny_code"]), config.DenyCode)
+	config.DenyMessage = firstNonEmpty(stringValue(firstNonNil(payload["denyMessage"], payload["deny_message"])), config.DenyMessage)
+	config.DenyRawMessage = firstNonEmpty(stringValue(firstNonNil(payload["denyRawMessage"], payload["deny_raw_message"])), config.DenyRawMessage)
+	config.DenyContentType = firstNonEmpty(stringValue(firstNonNil(payload["denyContentType"], payload["deny_content_type"])), config.DenyContentType)
+	return config
+}
+
+func aiDataMaskingProjectionSystemDenyEnabled(value any) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		return aiDataMaskingReadBool(firstNonNil(typed["systemDenyEnabled"], typed["system_deny_enabled"]), false)
+	case []map[string]any:
+		if len(typed) == 0 {
+			return false
+		}
+		return aiDataMaskingProjectionSystemDenyEnabled(typed[0])
+	case []any:
+		for _, item := range typed {
+			if mapped, ok := item.(map[string]any); ok {
+				return aiDataMaskingProjectionSystemDenyEnabled(mapped)
+			}
+		}
+	}
+	return false
+}
+
+func aiDataMaskingProjectionDetectRules(value any) []map[string]any {
+	items := toMapSlice(value)
+	result := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		pattern := stringValue(item["pattern"])
+		if pattern == "" {
+			continue
+		}
+		result = append(result, map[string]any{
+			"pattern":     pattern,
+			"match_type":  firstNonEmpty(stringValue(firstNonNil(item["matchType"], item["match_type"])), "contains"),
+			"description": stringValue(item["description"]),
+			"priority":    aiDataMaskingReadInt(item["priority"], 0),
+			"enabled":     aiDataMaskingReadBool(item["enabled"], true),
+		})
+	}
+	return result
+}
+
+func aiDataMaskingProjectionReplaceRules(value any) []map[string]any {
+	items := toMapSlice(value)
+	result := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		pattern := stringValue(item["pattern"])
+		if pattern == "" {
+			continue
+		}
+		result = append(result, map[string]any{
+			"pattern":       pattern,
+			"replace_type":  firstNonEmpty(stringValue(firstNonNil(item["replaceType"], item["replace_type"])), "replace"),
+			"replace_value": stringValue(firstNonNil(item["replaceValue"], item["replace_value"])),
+			"restore":       aiDataMaskingReadBool(item["restore"], false),
+			"description":   stringValue(item["description"]),
+			"priority":      aiDataMaskingReadInt(item["priority"], 0),
+			"enabled":       aiDataMaskingReadBool(item["enabled"], true),
+		})
+	}
+	return result
+}
+
+func aiDataMaskingReadBool(value any, fallback bool) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		trimmed := strings.TrimSpace(strings.ToLower(typed))
+		if trimmed == "true" || trimmed == "1" {
+			return true
+		}
+		if trimmed == "false" || trimmed == "0" {
+			return false
+		}
+	case int:
+		return typed != 0
+	case int64:
+		return typed != 0
+	case float64:
+		return typed != 0
+	}
+	return fallback
+}
+
+func aiDataMaskingReadInt(value any, fallback int) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int32:
+		return int(typed)
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(typed))
+		if err == nil {
+			return parsed
+		}
+	}
+	return fallback
+}
+
+func aiDataMaskingReadStringSlice(value any) []string {
+	switch typed := value.(type) {
+	case string:
+		parts := strings.Split(typed, "\n")
+		items := make([]string, 0, len(parts))
+		for _, item := range parts {
+			trimmed := strings.TrimSpace(item)
+			if trimmed == "" {
+				continue
+			}
+			items = append(items, trimmed)
+		}
+		sort.Strings(items)
+		return items
+	default:
+		return normalizeStringSlice(value)
+	}
+}
+
+func aiDataMaskingRouteLookupTargets(routeName string) []string {
+	return []string{
+		aiRouteIngressName(routeName),
+		aiRouteInternalIngressName(routeName),
+		aiRouteFallbackIngressName(routeName),
+		aiRouteInternalFallbackIngressName(routeName),
+	}
+}
+
+func aiDataMaskingRouteRuntimeTargets(route map[string]any) []string {
+	name := stringValue(route["name"])
+	if name == "" {
+		return nil
+	}
+	targets := []string{
+		aiRouteIngressName(name),
+		aiRouteInternalIngressName(name),
+	}
+	fallback := mapValue(route["fallbackConfig"])
+	if aiDataMaskingReadBool(firstNonNil(fallback["enabled"], fallback["enable"]), false) && len(toMapSlice(fallback["upstreams"])) > 0 {
+		targets = append(targets, aiRouteFallbackIngressName(name), aiRouteInternalFallbackIngressName(name))
+	}
+	return targets
+}
+
+func routePluginInstanceKind(target string) string {
+	return "route-plugin-instances:" + strings.TrimSpace(target)
+}
+
+func isAIDataMaskingPluginInstance(item map[string]any) bool {
+	name := stringValue(firstNonNil(item["pluginName"], item["name"]))
+	return name == higressWasmPluginNameAIDataMasking
+}
+
+func aiDataMaskingPluginInstanceEnabled(item map[string]any) bool {
+	return aiDataMaskingReadBool(item["enabled"], true) || aiDataMaskingReadBool(item["runtimeEnabled"], false)
+}
+
+func (c *MemoryClient) buildDesiredAIDataMaskingRulesLocked(projection map[string]any) map[string]map[string]any {
+	desiredConfig := buildAIDataMaskingRuntimeConfig(projection)
+	result := make(map[string]map[string]any)
+	for _, route := range c.resources["ai-routes"] {
+		if !c.aiDataMaskingRouteBoundLocked(route) {
+			continue
+		}
+		for _, ingressName := range aiDataMaskingRouteRuntimeTargets(route) {
+			result[ingressName] = cloneMap(desiredConfig)
+		}
+	}
+	return result
+}
+
+func (c *MemoryClient) aiDataMaskingRouteBoundLocked(route map[string]any) bool {
+	name := stringValue(route["name"])
+	if name == "" {
+		return false
+	}
+	for _, target := range aiDataMaskingRouteLookupTargets(name) {
+		for _, item := range c.resources[routePluginInstanceKind(target)] {
+			if !isAIDataMaskingPluginInstance(item) {
+				continue
+			}
+			if aiDataMaskingPluginInstanceEnabled(item) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func defaultMcpBridgeManifest(namespace string) map[string]any {
+	return map[string]any{
+		"apiVersion": "networking.higress.io/v1",
+		"kind":       "McpBridge",
+		"metadata": map[string]any{
+			"name":      higressMcpBridgeDefaultName,
+			"namespace": namespace,
+			"labels": map[string]any{
+				higressLabelResourceDefiner: higressLabelResourceDefinerValue,
+				higressLabelInternal:        higressAnnotationTrueValue,
+			},
+		},
+		"spec": map[string]any{
+			"registries": []map[string]any{},
+			"proxies":    []map[string]any{},
+		},
+	}
 }

@@ -74,6 +74,8 @@ export interface AiSensitiveStatus {
   systemDictionaryWordCount?: number;
   systemDictionaryUpdatedAt?: AiSensitiveDateTimeValue;
   projectedInstanceCount: number;
+  enabledRouteCount: number;
+  enabledRoutes?: string[];
   lastReconciledAt?: AiSensitiveDateTimeValue;
   lastMigratedAt?: AiSensitiveDateTimeValue;
   lastError?: string;
@@ -84,6 +86,25 @@ export interface AiSensitiveSystemConfig {
   dictionaryText: string;
   updatedAt?: AiSensitiveDateTimeValue;
   updatedBy?: string;
+}
+
+export interface AiSensitiveRuntimeAuditSink {
+  serviceName?: string;
+  namespace?: string;
+  port?: number;
+  path?: string;
+  timeoutMs?: number;
+}
+
+export interface AiSensitiveRuntimeConfig {
+  denyOpenai: boolean;
+  denyJsonpath?: string[];
+  denyRaw: boolean;
+  denyCode: number;
+  denyMessage: string;
+  denyRawMessage: string;
+  denyContentType: string;
+  auditSink?: AiSensitiveRuntimeAuditSink;
 }
 
 export interface AiSensitiveAuditQuery {

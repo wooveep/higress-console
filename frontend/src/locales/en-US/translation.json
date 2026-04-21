@@ -133,7 +133,8 @@
     "tabs": {
       "detect": "Detect Rules",
       "replace": "Replace Rules",
-      "audit": "Block Audits"
+      "audit": "Block Audits",
+      "runtime": "Plugin Config"
     },
     "status": {
       "detectRuleCount": "Detect Rules",
@@ -142,6 +143,7 @@
       "systemDenyEnabled": "System Dictionary Enabled",
       "systemDictionaryWordCount": "System Dictionary Words",
       "systemDictionaryUpdatedAt": "System Dictionary Updated At",
+      "enabledRouteCount": "Bound AI Routes",
       "projectedInstanceCount": "Projected Instances",
       "lastReconciledAt": "Last Reconciled At",
       "lastMigratedAt": "Last Migrated At"
@@ -153,6 +155,8 @@
       "addReplaceRule": "Add Replace Rule",
       "editSystemDictionary": "Edit System Dictionary",
       "selectReplacePreset": "Select Preset",
+      "selectDetectPreset": "Select Detect Preset",
+      "saveRuntimeConfig": "Save Plugin Config",
       "search": "Search",
       "reset": "Reset"
     },
@@ -178,13 +182,26 @@
       "blockedBy": "Blocked By",
       "blockedReason": "Blocked Reason",
       "startTime": "Start Time",
-      "endTime": "End Time"
+      "endTime": "End Time",
+      "denyOpenai": "Intercept OpenAI conversations",
+      "denyJsonpath": "Intercept JSONPath fields",
+      "denyRaw": "Intercept raw body",
+      "denyCode": "HTTP status code",
+      "denyMessage": "OpenAI denial message",
+      "denyRawMessage": "Raw denial response body",
+      "denyContentType": "Raw response Content-Type"
     },
     "placeholders": {
       "consumerName": "Input consumer_name",
       "displayName": "Input display_name",
       "routeName": "Input route_name",
-      "replacePreset": "Select a preset to prefill the rule"
+      "replacePreset": "Select a preset to prefill the rule",
+      "detectPreset": "Select a preset to prefill the detect rule",
+      "jsonpathPreset": "Select common field presets",
+      "denyJsonpath": "One JSONPath per line, for example $.messages[*].content",
+      "denyMessage": "The question or answer contains sensitive content and has been blocked.",
+      "denyRawMessage": "{\"errmsg\":\"The request contains sensitive content and has been blocked.\"}",
+      "denyContentType": "application/json"
     },
     "matchTypes": {
       "contains": "Contains",
@@ -202,9 +219,28 @@
       "replaceDeleted": "Replace rule deleted",
       "reconciled": "Rules reconciled to plugin instances",
       "systemConfigSaved": "System dictionary settings saved",
+      "runtimeConfigSaved": "Plugin configuration saved",
       "auditQueryFailed": "Failed to query audit records. Please check your login status or the backend service.",
       "deleteDetectConfirm": "Delete this detect rule?",
       "deleteReplaceConfirm": "Delete this replace rule?"
+    },
+    "detectPreset": {
+      "apiKey": {
+        "label": "API Key Detect",
+        "description": "Detect OpenAI style keys prefixed with sk-."
+      },
+      "mobilePhone": {
+        "label": "Mobile Detect",
+        "description": "Detect mobile phone numbers with a GROK pattern."
+      },
+      "email": {
+        "label": "Email Detect",
+        "description": "Detect email addresses with a GROK pattern."
+      },
+      "idCard": {
+        "label": "ID Card Detect",
+        "description": "Detect ID card numbers with a GROK pattern."
+      }
     },
     "replacePreset": {
       "help": "Selecting a preset prefills the recommended matching rule. For numeric data, a single-character replace value keeps the first 3 digits and the last 1 digit while filling the middle digits with that character.",
@@ -220,6 +256,36 @@
       "bankCard": {
         "label": "Bank Card Masking",
         "description": "Matches 16 to 19 digit bank card numbers and masks the middle digits."
+      },
+      "ip": {
+        "label": "IP Masking",
+        "description": "Matches IPv4 addresses and restores the original value in the response."
+      },
+      "idCard": {
+        "label": "ID Card Masking",
+        "description": "Matches ID card numbers and replaces them with a fixed placeholder."
+      },
+      "apiKey": {
+        "label": "API Key Hash",
+        "description": "Matches sk- prefixed keys and replaces them with a recoverable hash."
+      }
+    },
+    "jsonpathPreset": {
+      "messagesContent": {
+        "label": "User Request Content",
+        "description": "Matches every `content` field in OpenAI `messages`, which works well for multi-turn chat requests."
+      },
+      "userMessages": {
+        "label": "User Message Content",
+        "description": "Matches only messages with `role=user`, which is useful when you only want to inspect user input."
+      },
+      "systemPrompt": {
+        "label": "System Prompt",
+        "description": "Matches system messages in `messages` and the root-level `system` field."
+      },
+      "responsesInput": {
+        "label": "Responses API Input",
+        "description": "Matches `input[].content[].text` in the Responses API. AI response content is handled by OpenAI conversation interception instead of JSONPath."
       }
     },
     "modals": {
@@ -232,7 +298,8 @@
     "rules": {
       "patternRequired": "Please input the pattern",
       "matchTypeRequired": "Please select a match type",
-      "replaceTypeRequired": "Please select a replace type"
+      "replaceTypeRequired": "Please select a replace type",
+      "replaceValueRequired": "Please input the replacement value"
     },
     "systemConfig": {
       "title": "System Dictionary",
@@ -241,7 +308,23 @@
       "currentStatus": "Current Status",
       "updatedBy": "Updated By",
       "updatedAt": "Updated At",
-      "dictionaryHelp": "One word per line. Empty lines are removed, surrounding spaces are trimmed, and duplicate entries are deduplicated on save."
+      "dictionaryHelp": "The system dictionary comes from the plugin's built-in file. This page no longer expands the full dictionary and only supports keyword lookup.",
+      "searchLabel": "Dictionary Keyword Lookup",
+      "searchPlaceholder": "Enter a keyword to check whether it exists in the system dictionary",
+      "searchHint": "This section only performs lookup and does not render the full dictionary content.",
+      "searchMatched": "The system dictionary contains entries related to \"{keyword}\"",
+      "searchNotFound": "No entries related to \"{keyword}\" were found in the system dictionary",
+      "searchResultCount": "{count} entries matched",
+      "searchResultTruncated": "Only the first {count} matched entries are shown."
+    },
+    "runtime": {
+      "bindingTitle": "Route Binding",
+      "bindingHelp": "This section shows which AI routes are currently bound to `ai-data-masking`. Plugin enablement follows the AI route policy binding instead of a separate global switch on this page.",
+      "bindingCount": "{count} AI routes are currently bound",
+      "scopeTitle": "Processing Scope",
+      "scopeHelp": "OpenAI mode processes conversation content by default. JSONPath and raw body interception can be enabled as needed.",
+      "responseTitle": "Deny Response",
+      "responseHelp": "When sensitive content is found in the selected processing scope, the request is blocked and the configured response is returned."
     }
   },
   "aiQuota": {
@@ -752,14 +835,16 @@
       "coze": "Coze",
       "deepl": "DeepL",
       "deepseek": "DeepSeek",
-      "doubao": "Doubao",
       "gemini": "Google Gemini",
       "github": "GitHub Models",
       "groq": "Groq",
       "grok": "Grok",
+      "vertex": "Vertex AI / Gemini",
+      "volcengine": "Volcengine Ark",
       "hunyuan": "Tencent Hunyuan",
       "minimax": "MiniMax",
       "mistral": "Mistral",
+      "bedrock": "AWS Bedrock",
       "ollama": "Ollama",
       "openrouter": "OpenRouter",
       "together-ai": "Together AI",
@@ -773,7 +858,8 @@
         "portalModelMeta": "Model Metadata (Portal Display)",
         "modelPricing": "Model Pricing",
         "cachePricing": "Cache Pricing",
-        "imagePricing": "Image Pricing"
+        "imagePricing": "Image Pricing",
+        "retryOnFailure": "Request Retry"
       },
       "actions": {
         "addTag": "Add Tag",
@@ -825,6 +911,14 @@
         "serviceName": "Service Name",
         "successThreshold": "Min Consecuitive Sucesses to Mark Up a Token",
         "azureServiceUrl": "Azure Service URL",
+        "volcengineBaseUrl": "Ark Base URL",
+        "volcengineClientRequestId": "X-Client-Request-Id",
+        "volcengineEnableEncryption": "Enable Session Encryption",
+        "volcengineEnableTrace": "Enable Fornax Trace Reporting",
+        "retryOnFailureEnabled": "Enable Request Retry",
+        "retryOnFailureMaxRetries": "Max Retries",
+        "retryOnFailureTimeout": "Retry Timeout (ms)",
+        "retryOnFailureStatusText": "Retry Status Rules",
         "ollamaServerHost": "Ollama Service Host",
         "ollamaServerPort": "Ollama Service Port",
         "openaiServerType": "OpenAI Service Type",
@@ -869,6 +963,11 @@
         "protocol": "Please select a request protocol",
         "successThresholdRequired": "Please input min consecuitive sucesses to mark up a token",
         "azureServiceUrlRequired": "Please input Azure service URL",
+        "volcengineBaseUrlRequired": "Please input a valid Ark base URL",
+        "volcengineBaseUrlNoPort": "Ark base URL must not include a custom port",
+        "volcengineBaseUrlNoQuery": "Ark base URL must not contain query parameters or fragments",
+        "retryOnFailureMaxRetriesRequired": "Please input a valid max retry count",
+        "retryOnFailureTimeoutRequired": "Please input a valid retry timeout (ms)",
         "ollamaServerHostRequired": "Please input Ollama service host",
         "ollamaServerPortRequired": "Please input Ollama service port",
         "openaiCustomUrlRequired": "Please input a valid custom OpenAI service base URL",
@@ -899,7 +998,8 @@
         "zhipuDomainTooltip": "Custom domain for Zhipu AI service. Leave empty to use the default domain (open.bigmodel.cn). Use 'api.z.ai' for international service.",
         "zhipuCodePlanModeTooltip": "Enable Code Plan mode for optimized code generation capabilities.",
         "claudeVersionTooltip": "Anthropic API version header. Default: 2023-06-01",
-        "claudeCodeModeTooltip": "Enable Claude Code mode to use OAuth token authentication instead of API key. Run 'claude setup-token' to get your OAuth token."
+        "claudeCodeModeTooltip": "Enable Claude Code mode to use OAuth token authentication instead of API key. Run 'claude setup-token' to get your OAuth token.",
+        "retryOnFailureStatusTextTooltip": "Use comma-separated status match rules such as 4.*,5.*. Leave blank to use Higress defaults."
       },
       "placeholder": {
         "modelIntro": "Describe the positioning, target workload, and recommended scenarios of this model",
@@ -911,6 +1011,9 @@
         "openaiCustomUrlPlaceholder": "Sample: https://api.openai.com/v1",
         "openaiCustomServiceHostPlaceholder": "Sample: api.openai.com",
         "openaiCustomServicePathPlaceholder": "Sample: /v1",
+        "volcengineBaseUrlPlaceholder": "Sample: https://ark.cn-beijing.volces.com/api/v3",
+        "volcengineClientRequestIdPlaceholder": "Sample: my-request-id",
+        "retryOnFailureStatusTextPlaceholder": "Sample: 4.*, 5.*",
         "qwenDomainPlaceholder": "Sample: dashscope-finance.aliyuncs.com",
         "qwenFileIdsPlaceholder": "Sample: file-fe-xxx",
         "zhipuDomainPlaceholder": "Sample: api.z.ai (for international service)"
@@ -972,67 +1075,42 @@
     "configForm": {
       "targetDomain": "Target Domain: ",
       "targetRoute": "Target Route: ",
-      "enableStatus": "Enabled",
+      "routeEnableStatus": "Enabled on Current Route",
+      "routeEnableHint": "This drawer only controls whether the capability is enabled on the current route. Existing detailed settings are preserved and are not edited here.",
       "globalConfigWarning": "Note: Configurations above will be applied to all domains the routes. Please edit with caution."
     },
     "builtIns": {
       "rewrite": {
         "missingParamError": "At least one of rewritten path and host shall be provided.",
         "path": "Path",
-        "originalPath": "Original Path",
-        "rewritePath": "Rewritten Path",
-        "rewritePathPlaceholder": "e.g.: /a",
         "rewriteType": {
           "PRE": "Prefix Rewrite",
           "EQUAL": "Exact Rewrite",
           "REGULAR": "Regex Rewrite"
         },
-        "host": "Host",
-        "originalHost": "Original Host",
-        "rewriteHost": "Rewritten Host",
-        "rewriteHostPlaceholder": "e.g.: example.com"
+        "host": "Host"
       },
       "headerControl": {
         "headerType": "Header Type",
-        "request": "Request",
-        "response": "Response",
         "actionType": "Operation Type",
-        "add": "Add",
-        "set": "Set",
-        "remove": "Remove",
         "action": "Action",
-        "addNewRule": "Add New Rule",
         "headerTypeRequired": "Please select header type",
         "actionTypeRequired": "Please select action type",
         "keyRequired": "Please input header key",
         "valueRequired": "Please input header value"
       },
       "cors": {
-        "allowOrigins": "Allow Origins",
         "allowOriginsRequired": "Please input allow origins",
-        "allowMethods": "Allow Methods",
         "allowMethodsRequired": "Please select allow methods",
-        "allowHeaders": "Allow Headers",
         "allowHeadersRequired": "Please input allow headers",
-        "exposeHeaders": "Expose Headers",
         "exposeHeadersRequired": "Please input expose headers",
-        "allowCredentials": "Allow Credentials",
         "allow": "Allow",
         "disallow": "Disallow",
-        "maxAge": "Max Age of Pre-flight Requests",
         "maxAgeRequired": "Please input the max cache age of pre-flight requests"
       },
       "retries": {
-        "attempts": "Retry Attempts",
         "attemptsRequired": "Please input retry attempts",
-        "conditions": "Retry Conditions",
         "conditionsRequired": "Please select retry conditions",
-        "condition": {
-          "error": "error: Unable to establish connections",
-          "timeout": "timeout: Timeout when trying to establish connections",
-          "non_idempotent": "non_idempotent: Retry when a non-idempotent request fails"
-        },
-        "timeout": "Timeout",
         "timeoutRequired": "Please input timeout value"
       }
     },

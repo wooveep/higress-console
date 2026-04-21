@@ -133,7 +133,8 @@
     "tabs": {
       "detect": "拦截规则",
       "replace": "替换规则",
-      "audit": "拦截审计"
+      "audit": "拦截审计",
+      "runtime": "插件配置"
     },
     "status": {
       "detectRuleCount": "拦截规则数",
@@ -142,6 +143,7 @@
       "systemDenyEnabled": "系统词库开关",
       "systemDictionaryWordCount": "系统词条数",
       "systemDictionaryUpdatedAt": "系统词库更新时间",
+      "enabledRouteCount": "已绑定 AI 路由",
       "projectedInstanceCount": "已投影实例数",
       "lastReconciledAt": "最近同步时间",
       "lastMigratedAt": "最近迁移时间"
@@ -153,6 +155,8 @@
       "addReplaceRule": "新增替换规则",
       "editSystemDictionary": "编辑系统词库",
       "selectReplacePreset": "选择预置模板",
+      "selectDetectPreset": "选择拦截模板",
+      "saveRuntimeConfig": "保存插件配置",
       "search": "查询",
       "reset": "重置"
     },
@@ -178,13 +182,26 @@
       "blockedBy": "拦截来源",
       "blockedReason": "拦截详情",
       "startTime": "开始时间",
-      "endTime": "结束时间"
+      "endTime": "结束时间",
+      "denyOpenai": "拦截 OpenAI 对话内容",
+      "denyJsonpath": "拦截 JSONPath 字段",
+      "denyRaw": "拦截原始 Body",
+      "denyCode": "拦截状态码",
+      "denyMessage": "OpenAI 拦截消息",
+      "denyRawMessage": "Raw 拦截响应体",
+      "denyContentType": "Raw 响应 Content-Type"
     },
     "placeholders": {
       "consumerName": "输入 consumer_name",
       "displayName": "输入 display_name",
       "routeName": "输入 route_name",
-      "replacePreset": "选择一个预置模板快速填充规则"
+      "replacePreset": "选择一个预置模板快速填充规则",
+      "detectPreset": "选择一个预置模板快速填充拦截规则",
+      "jsonpathPreset": "选择常用字段预置",
+      "denyJsonpath": "一行一个 JSONPath，例如 $.messages[*].content",
+      "denyMessage": "提问或回答中包含敏感词，已被屏蔽",
+      "denyRawMessage": "{\"errmsg\":\"提问或回答中包含敏感词，已被屏蔽\"}",
+      "denyContentType": "application/json"
     },
     "matchTypes": {
       "contains": "包含匹配",
@@ -202,9 +219,28 @@
       "replaceDeleted": "替换规则已删除",
       "reconciled": "规则已同步到插件实例",
       "systemConfigSaved": "系统词库配置已保存",
+      "runtimeConfigSaved": "插件配置已保存",
       "auditQueryFailed": "审计记录查询失败，请检查登录状态或后端服务。",
       "deleteDetectConfirm": "确认删除这条拦截规则？",
       "deleteReplaceConfirm": "确认删除这条替换规则？"
+    },
+    "detectPreset": {
+      "apiKey": {
+        "label": "API Key 拦截",
+        "description": "拦截 sk- 开头的 OpenAI 风格密钥。"
+      },
+      "mobilePhone": {
+        "label": "手机号拦截",
+        "description": "用 GROK 规则识别手机号。"
+      },
+      "email": {
+        "label": "邮箱拦截",
+        "description": "用 GROK 规则识别邮箱地址。"
+      },
+      "idCard": {
+        "label": "身份证拦截",
+        "description": "用 GROK 规则识别身份证号。"
+      }
     },
     "replacePreset": {
       "help": "选择预置模板后会自动填充推荐的匹配规则。数字类数据使用单字符替换值时，会保留前3位和末1位，中间位使用该字符填充。",
@@ -220,6 +256,36 @@
       "bankCard": {
         "label": "银行卡号脱敏",
         "description": "匹配 16 到 19 位银行卡号，并对中间数字做掩码替换。"
+      },
+      "ip": {
+        "label": "IP 脱敏",
+        "description": "匹配 IPv4 地址，并将返回内容恢复为原值。"
+      },
+      "idCard": {
+        "label": "身份证脱敏",
+        "description": "匹配身份证号并用固定占位符替换。"
+      },
+      "apiKey": {
+        "label": "API Key 哈希",
+        "description": "匹配 sk- 开头的密钥，并使用哈希值替换后再恢复。"
+      }
+    },
+    "jsonpathPreset": {
+      "messagesContent": {
+        "label": "用户请求内容",
+        "description": "匹配 OpenAI `messages` 中的全部 `content` 字段，适合处理多轮对话请求。"
+      },
+      "userMessages": {
+        "label": "用户消息内容",
+        "description": "仅匹配 `role=user` 的消息内容，适合只检查用户输入。"
+      },
+      "systemPrompt": {
+        "label": "系统预置 Prompt",
+        "description": "匹配 `messages` 中的 system 消息和根级 `system` 字段，适合检查系统提示词。"
+      },
+      "responsesInput": {
+        "label": "Responses 输入内容",
+        "description": "匹配 Responses API `input[].content[].text` 文本输入。AI 返回内容不走 JSONPath，而是由 OpenAI 对话拦截统一处理。"
       }
     },
     "modals": {
@@ -232,7 +298,8 @@
     "rules": {
       "patternRequired": "请输入规则内容",
       "matchTypeRequired": "请选择匹配类型",
-      "replaceTypeRequired": "请选择替换类型"
+      "replaceTypeRequired": "请选择替换类型",
+      "replaceValueRequired": "请输入替换值"
     },
     "systemConfig": {
       "title": "系统词库",
@@ -241,7 +308,23 @@
       "currentStatus": "当前状态",
       "updatedBy": "最近更新人",
       "updatedAt": "最近更新时间",
-      "dictionaryHelp": "一行一个词。保存时会自动去除空行、裁剪首尾空白并去重。"
+      "dictionaryHelp": "系统词库由插件内置文件提供，这里不展开整库，只支持检索是否命中关键词。",
+      "searchLabel": "词库关键词检索",
+      "searchPlaceholder": "输入关键词，检查系统词库是否包含该词",
+      "searchHint": "这里只做系统词库检索，不展示完整词库内容。",
+      "searchMatched": "系统词库中存在关键词“{keyword}”相关词条",
+      "searchNotFound": "系统词库中未检索到关键词“{keyword}”",
+      "searchResultCount": "共匹配到 {count} 条词条",
+      "searchResultTruncated": "当前仅展示前 {count} 条匹配结果。"
+    },
+    "runtime": {
+      "bindingTitle": "路由绑定状态",
+      "bindingHelp": "这里展示哪些 AI 路由已绑定 `ai-data-masking`。插件是否启用由 AI 路由策略绑定决定，不在本页单独开关。",
+      "bindingCount": "当前已绑定 {count} 条 AI 路由",
+      "scopeTitle": "处理数据范围",
+      "scopeHelp": "OpenAI 协议默认处理请求/返回对话内容；JSONPath 和 Raw 可按需补充。",
+      "responseTitle": "敏感词拦截响应",
+      "responseHelp": "处理数据范围中出现敏感词时，直接拦截并返回预设错误信息。"
     }
   },
   "aiQuota": {
@@ -752,14 +835,16 @@
       "coze": "扣子",
       "deepl": "DeepL",
       "deepseek": "DeepSeek",
-      "doubao": "豆包",
       "gemini": "Google Gemini",
       "github": "GitHub模型",
       "groq": "Groq",
       "grok": "Grok",
+      "vertex": "Vertex AI / Gemini",
+      "volcengine": "火山引擎方舟",
       "hunyuan": "混元",
       "minimax": "MiniMax",
       "mistral": "Mistral",
+      "bedrock": "AWS Bedrock",
       "ollama": "Ollama",
       "openrouter": "OpenRouter",
       "together-ai": "Together AI",
@@ -773,7 +858,8 @@
         "portalModelMeta": "模型元数据（Portal 展示）",
         "modelPricing": "模型定价",
         "cachePricing": "缓存定价",
-        "imagePricing": "图像定价"
+        "imagePricing": "图像定价",
+        "retryOnFailure": "请求重试"
       },
       "actions": {
         "addTag": "添加标签",
@@ -825,6 +911,14 @@
         "serviceName": "服务名称",
         "successThreshold": "令牌可用时需满足的最小连续健康检测成功次数",
         "azureServiceUrl": "Azure 服务 URL",
+        "volcengineBaseUrl": "方舟 Base URL",
+        "volcengineClientRequestId": "X-Client-Request-Id",
+        "volcengineEnableEncryption": "启用会话数据加密",
+        "volcengineEnableTrace": "启用 Fornax Trace 上报",
+        "retryOnFailureEnabled": "启用请求重试",
+        "retryOnFailureMaxRetries": "最大重试次数",
+        "retryOnFailureTimeout": "重试超时时间（毫秒）",
+        "retryOnFailureStatusText": "触发重试的状态码规则",
         "ollamaServerHost": "Ollama 服务主机名",
         "ollamaServerPort": "Ollama 服务端口",
         "openaiServerType": "OpenAI 服务类型",
@@ -869,6 +963,11 @@
         "protocol": "请选择请求协议",
         "successThresholdRequired": "请输入最小连续健康检测成功次数",
         "azureServiceUrlRequired": "请输入 Azure 服务 URL",
+        "volcengineBaseUrlRequired": "请输入合法的方舟 Base URL",
+        "volcengineBaseUrlNoPort": "方舟 Base URL 不能包含自定义端口",
+        "volcengineBaseUrlNoQuery": "方舟 Base URL 不能包含查询参数或锚点",
+        "retryOnFailureMaxRetriesRequired": "请输入合法的最大重试次数",
+        "retryOnFailureTimeoutRequired": "请输入合法的重试超时时间（毫秒）",
         "ollamaServerHostRequired": "请输入 Ollama 服务主机名",
         "ollamaServerPortRequired": "请输入 Ollama 服务端口",
         "openaiCustomUrlRequired": "请输入合法的自定义 OpenAI 服务 BaseURL",
@@ -899,7 +998,8 @@
         "zhipuDomainTooltip": "智谱 AI 服务的自定义域名。留空则使用默认域名（open.bigmodel.cn）。国际版请使用 'api.z.ai'。",
         "zhipuCodePlanModeTooltip": "启用 Code Plan 模式以获得优化的代码生成能力。",
         "claudeVersionTooltip": "Anthropic API 版本号。默认值：2023-06-01",
-        "claudeCodeModeTooltip": "启用 Claude Code 模式以使用 OAuth 令牌认证（而非 API Key）。运行 'claude setup-token' 获取 OAuth 令牌。"
+        "claudeCodeModeTooltip": "启用 Claude Code 模式以使用 OAuth 令牌认证（而非 API Key）。运行 'claude setup-token' 获取 OAuth 令牌。",
+        "retryOnFailureStatusTextTooltip": "使用逗号分隔状态码匹配规则，例如：4.*,5.*。留空时使用 Higress 默认规则。"
       },
       "placeholder": {
         "modelIntro": "介绍该模型的定位、适用场景等",
@@ -911,6 +1011,9 @@
         "openaiCustomUrlPlaceholder": "示例：https://api.openai.com/v1",
         "openaiCustomServiceHostPlaceholder": "示例：api.openai.com",
         "openaiCustomServicePathPlaceholder": "示例：/v1",
+        "volcengineBaseUrlPlaceholder": "示例：https://ark.cn-beijing.volces.com/api/v3",
+        "volcengineClientRequestIdPlaceholder": "示例：my-request-id",
+        "retryOnFailureStatusTextPlaceholder": "示例：4.*, 5.*",
         "qwenDomainPlaceholder": "示例：dashscope-finance.aliyuncs.com",
         "qwenFileIdsPlaceholder": "示例：file-fe-xxx",
         "zhipuDomainPlaceholder": "示例：api.z.ai（国际版服务）"
@@ -972,67 +1075,42 @@
     "configForm": {
       "targetDomain": "作用域名：",
       "targetRoute": "作用路由：",
-      "enableStatus": "开启状态",
+      "routeEnableStatus": "当前路由启用",
+      "routeEnableHint": "这里只控制该能力是否在当前路由上启用，已存在的详细配置会被保留，不在此处编辑。",
       "globalConfigWarning": "注意：以上配置将会在所有域名和路由上生效。请谨慎配置。"
     },
     "builtIns": {
       "rewrite": {
         "missingParamError": "重写路径和重写主机域必须要至少填一个",
         "path": "路径（Path）",
-        "originalPath": "原路径（Path）",
-        "rewritePath": "重写路径（Path）",
-        "rewritePathPlaceholder": "例如：/a",
         "rewriteType": {
           "PRE": "前缀重写",
           "EQUAL": "精确重写",
           "REGULAR": "正则重写"
         },
-        "host": "主机域（Host）",
-        "originalHost": "原主机域（Host）",
-        "rewriteHost": "重写主机域（Host）",
-        "rewriteHostPlaceholder": "例如：example.com"
+        "host": "主机域（Host）"
       },
       "headerControl": {
         "headerType": "Header类型",
-        "request": "请求",
-        "response": "响应",
         "actionType": "操作类型",
-        "add": "新增",
-        "set": "更新",
-        "remove": "删除",
         "action": "操作",
-        "addNewRule": "添加新规则",
         "headerTypeRequired": "请选择Header类型",
         "actionTypeRequired": "请选择操作类型",
         "keyRequired": "请输入Header Key",
         "valueRequired": "请输入Header Value"
       },
       "cors": {
-        "allowOrigins": "允许的访问来源",
         "allowOriginsRequired": "请输入允许的访问来源",
-        "allowMethods": "允许的方法",
         "allowMethodsRequired": "请选择允许的方法",
-        "allowHeaders": "允许的请求头部",
         "allowHeadersRequired": "请输入允许的请求头部",
-        "exposeHeaders": "允许的响应头部",
         "exposeHeadersRequired": "请输入允许的响应头部",
-        "allowCredentials": "允许携带凭证",
         "allow": "允许",
         "disallow": "不允许",
-        "maxAge": "预检的过期时间",
         "maxAgeRequired": "请输入预检的过期时间"
       },
       "retries": {
-        "attempts": "重试次数",
         "attemptsRequired": "请输入重试次数",
-        "conditions": "重试条件",
         "conditionsRequired": "请选择重试条件",
-        "condition": {
-          "error": "error：建立连接失败",
-          "timeout": "timeout：建立连接超时",
-          "non_idempotent": "non_idempotent：对于非幂等请求出错时进行重试"
-        },
-        "timeout": "超时",
         "timeoutRequired": "请输入超时时间"
       }
     },

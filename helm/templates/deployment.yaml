@@ -2,7 +2,8 @@
 {{- $pluginImageRegistry := .Values.pluginServer.imageRegistry | default .Values.global.hub }}
 {{- $pluginImageNamespace := .Values.pluginServer.imageNamespace | default .Values.global.pluginNamespace }}
 {{- $portalDB := .Values.portalDatabase }}
-{{- $portalDBHost := $portalDB.host | default (printf "%s-aigateway-core-mysql" .Release.Name) }}
+{{- $portalDBDriver := $portalDB.driver | default "postgres" }}
+{{- $portalDBHost := $portalDB.host | default (printf "%s-aigateway-core-postgresql-pgpool" .Release.Name) }}
 {{- $portalDBSecretName := $portalDB.secretName | default (printf "%s-aigateway-core-db" .Release.Name) }}
 apiVersion: apps/v1
 kind: Deployment
@@ -71,27 +72,29 @@ spec:
               value: {{ ternary "true" "false" $portalDB.enabled | quote }}
             {{- if $portalDB.enabled }}
             - name: AIGATEWAY_CONSOLE_PORTALDB_DRIVER
-              value: "mysql"
-            - name: PORTAL_MYSQL_HOST
+              value: {{ $portalDBDriver | quote }}
+            - name: PORTAL_DB_DRIVER
+              value: {{ $portalDBDriver | quote }}
+            - name: PORTAL_DB_HOST
               value: {{ $portalDBHost | quote }}
-            - name: PORTAL_MYSQL_PORT
+            - name: PORTAL_DB_PORT
               value: {{ $portalDB.port | quote }}
-            - name: PORTAL_MYSQL_USER
+            - name: PORTAL_DB_USER
               valueFrom:
                 secretKeyRef:
                   name: {{ $portalDBSecretName }}
                   key: {{ $portalDB.usernameKey }}
-            - name: PORTAL_MYSQL_PASSWORD
+            - name: PORTAL_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ $portalDBSecretName }}
                   key: {{ $portalDB.passwordKey }}
-            - name: PORTAL_MYSQL_DATABASE
+            - name: PORTAL_DB_NAME
               value: {{ $portalDB.database | quote }}
-            - name: PORTAL_MYSQL_PARAMS
-              value: {{ $portalDB.params | default "parseTime=true&charset=utf8mb4&loc=UTC" | quote }}
+            - name: PORTAL_DB_PARAMS
+              value: {{ $portalDB.params | default "sslmode=disable" | quote }}
             - name: HIGRESS_PORTAL_DB_URL
-              value: "jdbc:mysql://{{ $portalDBHost }}:{{ $portalDB.port }}/{{ $portalDB.database }}?{{ $portalDB.jdbcParams }}"
+              value: {{ printf "jdbc:postgresql://%s:%v/%s?%s" $portalDBHost $portalDB.port $portalDB.database ($portalDB.jdbcParams | default "sslmode=disable") | quote }}
             - name: HIGRESS_PORTAL_DB_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -195,6 +198,10 @@ spec:
       {{- end }}
       {{- with .Values.affinity }}
       affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.tolerations }}

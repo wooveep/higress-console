@@ -5,11 +5,11 @@
 
 ## 目标
 
-- 迁移 Portal MySQL 真相源相关能力，并统一成 GoFrame DAO/DO/Entity 模式。
+- 迁移 Portal PostgreSQL 真相源相关能力，并统一成 GoFrame DAO/DO/Entity 模式。
 
 ## 任务
 
-- [x] 建立 Portal DB client、Schema bootstrap 与 MySQL 接入骨架。
+- [x] 建立 Portal DB client、Schema bootstrap 与 PostgreSQL 接入骨架。
 - [x] 建立 Portal DB DAO、DO、Entity 首批基础模型。
 - [x] 迁移 Consumer 首批接口。
 - [x] 迁移组织树与账号管理首批 CRUD。
@@ -28,7 +28,7 @@
 
 - [x] Portal service sqlmock 测试。
 - [x] Model Assets / Grants / Agent Catalog 服务测试。
-- [x] MySQL testcontainers 集成测试。
+- [x] PostgreSQL testcontainers 集成测试。
 - [x] Consumer / Org / Invite Code / Model Assets / Agent Catalog / AI Quota / AI Sensitive 契约测试。
 
 ## Aftercare
@@ -48,7 +48,7 @@
 - 本轮进一步把共享表真相源收口到 `aigateway-portal/backend/schema/shared`，`aigateway-console` 只校验共享表存在并仅对 Console 自有表做 `autoMigrate`。
 - `Consumer / Org / Invite / Grant / Model Assets / Agent Catalog / AI Quota` 已切到 `portal_user / org_department / org_account_membership / asset_grant / quota_policy_user / portal_model_* / portal_agent_catalog` 这组 Portal 真表名。
 - 新增一次性 legacy 数据迁移命令 `backend/main.go portal-legacy-migrate`，用于把 `portal_users / portal_departments / portal_asset_grant / portal_ai_quota_user_policy` 搬迁到真表。
-- 已补共享 MySQL testcontainers 集成测试，并新增 Portal 侧兼容校验，验证 Console 写入共享表后 Portal 的用户、模型、Agent、Quota 读取链路可用。
+- 已补共享 PostgreSQL testcontainers 集成测试，并新增 Portal 侧兼容校验，验证 Console 写入共享表后 Portal 的用户、模型、Agent、Quota 读取链路可用。
 - 本轮完成 `P4-AF-01 ~ P4-AF-03`：
   - `Invite / Asset Grant / AI Quota / AI Sensitive` 的高频写读路径已收口到统一持久化 helper，减少 service 层直接散落的表名和 SQL 片段。
   - 新增 `Consumer / Org / Invite / Model Assets / Agent Catalog / AI Quota / AI Sensitive` HTTP 契约测试与 fixture，补齐 Portal 域回归基线。

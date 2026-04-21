@@ -11,9 +11,24 @@ import (
 )
 
 var builtinPluginResourceDirs = []string{
+	"resource/public/plugin",
 	"backend/resource/public/plugin",
 	"backend-java-legacy/sdk/src/main/resources/plugins",
 	"backend/sdk/src/main/resources/plugins",
+}
+
+var builtinPluginFallbacks = map[string]map[string]any{
+	"ai-quota": {
+		"name":        "ai-quota",
+		"builtIn":     true,
+		"internal":    true,
+		"title":       "AI Quota",
+		"description": "Provides AI quota control and billing runtime enforcement for AI routes.",
+		"category":    "ai",
+		"version":     "1.1.0",
+		"phase":       "UNSPECIFIED_PHASE",
+		"priority":    280,
+	},
 }
 
 func (s *Service) mergeWasmPlugins(items []map[string]any) []map[string]any {
@@ -45,9 +60,6 @@ func (s *Service) mergeWasmPlugins(items []map[string]any) []map[string]any {
 
 func (s *Service) listBuiltinWasmPlugins() []map[string]any {
 	roots := resolveBuiltinPluginRoots()
-	if len(roots) == 0 {
-		return []map[string]any{}
-	}
 	index := map[string]map[string]any{}
 	for _, root := range roots {
 		entries, err := os.ReadDir(root)
@@ -67,6 +79,12 @@ func (s *Service) listBuiltinWasmPlugins() []map[string]any {
 			}
 		}
 	}
+	for key, item := range builtinPluginFallbacks {
+		if index[key] != nil {
+			continue
+		}
+		index[key] = clonePayload(item)
+	}
 	items := make([]map[string]any, 0, len(index))
 	for _, item := range index {
 		items = append(items, item)
@@ -79,6 +97,9 @@ func (s *Service) loadBuiltinWasmPlugin(name string) (map[string]any, bool) {
 		if item, ok := loadBuiltinWasmPluginFromRoot(root, name); ok {
 			return item, true
 		}
+	}
+	if item, ok := builtinPluginFallbacks[strings.TrimSpace(strings.ToLower(name))]; ok {
+		return clonePayload(item), true
 	}
 	return nil, false
 }

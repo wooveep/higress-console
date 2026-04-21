@@ -189,7 +189,7 @@ func (s *Service) ListConsumers(ctx context.Context) ([]ConsumerRecord, error) {
 		FROM portal_user u
 		LEFT JOIN org_account_membership m ON m.consumer_name = u.consumer_name
 		LEFT JOIN org_department d ON d.department_id = m.department_id AND d.status = 'active'
-		WHERE COALESCE(u.is_deleted, 0) = 0
+		WHERE COALESCE(u.is_deleted, FALSE) = FALSE
 		ORDER BY u.consumer_name ASC`)
 	if err != nil {
 		return nil, portaldbclient.WrapExecError("list consumers", err)
@@ -234,7 +234,7 @@ func (s *Service) GetConsumer(ctx context.Context, consumerName string) (*Consum
 		FROM portal_user u
 		LEFT JOIN org_account_membership m ON m.consumer_name = u.consumer_name
 		LEFT JOIN org_department d ON d.department_id = m.department_id AND d.status = 'active'
-		WHERE COALESCE(u.is_deleted, 0) = 0 AND u.consumer_name = ?`, name).
+		WHERE COALESCE(u.is_deleted, FALSE) = FALSE AND u.consumer_name = ?`, name).
 		Scan(
 			&item.Name,
 			&item.PortalDisplayName,
@@ -378,7 +378,7 @@ func (s *Service) SaveConsumer(ctx context.Context, mutation ConsumerMutation, c
 			query += `, password_hash = ?`
 			args = append(args, passwordHash)
 		}
-		query += ` WHERE consumer_name = ? AND COALESCE(is_deleted, 0) = 0`
+		query += ` WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE`
 		args = append(args, name)
 		_, err = tx.ExecContext(ctx, query, args...)
 	}
@@ -388,7 +388,9 @@ func (s *Service) SaveConsumer(ctx context.Context, mutation ConsumerMutation, c
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO org_account_membership (consumer_name, department_id, parent_consumer_name)
 		VALUES (?, ?, NULL)
-		ON DUPLICATE KEY UPDATE department_id = VALUES(department_id), updated_at = CURRENT_TIMESTAMP`,
+		`+portaldbclient.UpsertClause(s.client.Driver(), []string{"consumer_name"},
+		portaldbclient.AssignValue(s.client.Driver(), "department_id"),
+		`updated_at = CURRENT_TIMESTAMP`)+``,
 		name,
 		nullIfEmpty(departmentID),
 	); err != nil {
@@ -421,7 +423,7 @@ func (s *Service) DeleteConsumer(ctx context.Context, consumerName string) error
 
 	result, err := db.ExecContext(ctx, `
 		UPDATE portal_user SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-		WHERE consumer_name = ? AND COALESCE(is_deleted, 0) = 0`, name)
+		WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE`, name)
 	if err != nil {
 		return portaldbclient.WrapExecError("delete consumer", err)
 	}
@@ -445,7 +447,7 @@ func (s *Service) UpdateConsumerStatus(ctx context.Context, consumerName, status
 
 	result, err := db.ExecContext(ctx, `
 		UPDATE portal_user SET status = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE consumer_name = ? AND COALESCE(is_deleted, 0) = 0`, normalized, name)
+		WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE`, normalized, name)
 	if err != nil {
 		return nil, err
 	}
@@ -477,7 +479,7 @@ func (s *Service) ResetPassword(ctx context.Context, consumerName string) (*Rese
 	result, err := db.ExecContext(ctx, `
 		UPDATE portal_user
 		SET password_hash = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE consumer_name = ? AND COALESCE(is_deleted, 0) = 0`,
+		WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE`,
 		passwordHash,
 		name,
 	)
@@ -726,7 +728,7 @@ func (s *Service) DeleteDepartment(ctx context.Context, departmentID string) err
 		SELECT COUNT(1)
 		FROM org_account_membership m
 		INNER JOIN portal_user u ON u.consumer_name = m.consumer_name
-		WHERE m.department_id = ? AND COALESCE(u.is_deleted, 0) = 0`, id).Scan(&memberCount); err != nil {
+		WHERE m.department_id = ? AND COALESCE(u.is_deleted, FALSE) = FALSE`, id).Scan(&memberCount); err != nil {
 		return err
 	}
 	if memberCount > 0 {
@@ -763,7 +765,7 @@ func (s *Service) ListAccounts(ctx context.Context) ([]OrgAccountRecord, error) 
 		FROM portal_user u
 		LEFT JOIN org_account_membership m ON m.consumer_name = u.consumer_name
 		LEFT JOIN org_department d ON d.department_id = m.department_id
-		WHERE COALESCE(u.is_deleted, 0) = 0
+		WHERE COALESCE(u.is_deleted, FALSE) = FALSE
 		ORDER BY consumer_name ASC`)
 	if err != nil {
 		return nil, err
@@ -859,7 +861,10 @@ func (s *Service) CreateAccount(ctx context.Context, mutation AccountMutation) (
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO org_account_membership (consumer_name, department_id, parent_consumer_name)
 		VALUES (?, ?, ?)
-		ON DUPLICATE KEY UPDATE department_id = VALUES(department_id), parent_consumer_name = VALUES(parent_consumer_name), updated_at = CURRENT_TIMESTAMP`,
+		`+portaldbclient.UpsertClause(s.client.Driver(), []string{"consumer_name"},
+		portaldbclient.AssignValue(s.client.Driver(), "department_id"),
+		portaldbclient.AssignValue(s.client.Driver(), "parent_consumer_name"),
+		`updated_at = CURRENT_TIMESTAMP`)+``,
 		name,
 		nullIfEmpty(strings.TrimSpace(mutation.DepartmentID)),
 		nullIfEmpty(strings.TrimSpace(mutation.ParentConsumerName)),
@@ -906,7 +911,7 @@ func (s *Service) UpdateAccount(ctx context.Context, consumerName string, mutati
 		query += `, password_hash = ?`
 		args = append(args, passwordHash)
 	}
-	query += ` WHERE consumer_name = ? AND COALESCE(is_deleted, 0) = 0`
+	query += ` WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE`
 	args = append(args, name)
 
 	tx, err := db.BeginTx(ctx, nil)
@@ -926,7 +931,10 @@ func (s *Service) UpdateAccount(ctx context.Context, consumerName string, mutati
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO org_account_membership (consumer_name, department_id, parent_consumer_name)
 		VALUES (?, ?, ?)
-		ON DUPLICATE KEY UPDATE department_id = VALUES(department_id), parent_consumer_name = VALUES(parent_consumer_name), updated_at = CURRENT_TIMESTAMP`,
+		`+portaldbclient.UpsertClause(s.client.Driver(), []string{"consumer_name"},
+		portaldbclient.AssignValue(s.client.Driver(), "department_id"),
+		portaldbclient.AssignValue(s.client.Driver(), "parent_consumer_name"),
+		`updated_at = CURRENT_TIMESTAMP`)+``,
 		name,
 		nullIfEmpty(strings.TrimSpace(mutation.DepartmentID)),
 		nullIfEmpty(strings.TrimSpace(mutation.ParentConsumerName)),
@@ -962,7 +970,10 @@ func (s *Service) UpdateAccountAssignment(ctx context.Context, consumerName, dep
 	result, err := db.ExecContext(ctx, `
 		INSERT INTO org_account_membership (consumer_name, department_id, parent_consumer_name)
 		VALUES (?, ?, ?)
-		ON DUPLICATE KEY UPDATE department_id = VALUES(department_id), parent_consumer_name = VALUES(parent_consumer_name), updated_at = CURRENT_TIMESTAMP`,
+		`+portaldbclient.UpsertClause(s.client.Driver(), []string{"consumer_name"},
+		portaldbclient.AssignValue(s.client.Driver(), "department_id"),
+		portaldbclient.AssignValue(s.client.Driver(), "parent_consumer_name"),
+		`updated_at = CURRENT_TIMESTAMP`)+``,
 		name,
 		nullIfEmpty(strings.TrimSpace(departmentID)),
 		nullIfEmpty(strings.TrimSpace(parentConsumerName)),
@@ -990,7 +1001,7 @@ func (s *Service) UpdateAccountStatus(ctx context.Context, consumerName, status 
 	result, err := db.ExecContext(ctx, `
 		UPDATE portal_user
 		SET status = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE consumer_name = ? AND COALESCE(is_deleted, 0) = 0`,
+		WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE`,
 		normalizeStatus(status, false),
 		name,
 	)
@@ -1025,7 +1036,7 @@ func (s *Service) CreateInviteCode(ctx context.Context, expiresInDays int) (*Inv
 	}
 	expiresAt := time.Now().Add(time.Duration(expiresInDays) * 24 * time.Hour)
 	record.ExpiresAt = &expiresAt
-	if err := newPortalStore(db).insertInviteCode(ctx, do.PortalInviteCode{
+	if err := newPortalStore(db, s.client.Driver()).insertInviteCode(ctx, do.PortalInviteCode{
 		InviteCode: record.InviteCode,
 		Status:     record.Status,
 		ExpiresAt:  wrapGTime(expiresAt),
@@ -1040,7 +1051,7 @@ func (s *Service) ListInviteCodes(ctx context.Context, query InviteCodeQuery) ([
 	if err != nil {
 		return nil, err
 	}
-	items, err := newPortalStore(db).listInviteCodes(ctx)
+	items, err := newPortalStore(db, s.client.Driver()).listInviteCodes(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1085,7 +1096,7 @@ func (s *Service) UpdateInviteCodeStatus(ctx context.Context, inviteCode, status
 		return nil, errors.New("status must be 'active' or 'disabled'")
 	}
 
-	updated, err := newPortalStore(db).updateInviteCodeStatus(ctx, code, normalized)
+	updated, err := newPortalStore(db, s.client.Driver()).updateInviteCodeStatus(ctx, code, normalized)
 	if err != nil {
 		return nil, err
 	}
@@ -1115,7 +1126,7 @@ func (s *Service) consumerExists(ctx context.Context, queryable interface {
 }, consumerName string) (bool, error) {
 	var count int
 	if err := queryable.QueryRowContext(ctx,
-		`SELECT COUNT(1) FROM portal_user WHERE consumer_name = ? AND COALESCE(is_deleted, 0) = 0`,
+		`SELECT COUNT(1) FROM portal_user WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE`,
 		consumerName,
 	).Scan(&count); err != nil {
 		return false, err
@@ -1192,7 +1203,7 @@ func (s *Service) departmentMemberCounts(ctx context.Context, db *sql.DB) (map[s
 		SELECT m.department_id, COUNT(1)
 		FROM org_account_membership m
 		INNER JOIN portal_user u ON u.consumer_name = m.consumer_name
-		WHERE COALESCE(u.is_deleted, 0) = 0 AND m.department_id IS NOT NULL AND m.department_id <> '' AND m.department_id <> ?
+		WHERE COALESCE(u.is_deleted, FALSE) = FALSE AND m.department_id IS NOT NULL AND m.department_id <> '' AND m.department_id <> ?
 		GROUP BY m.department_id`, orgRootDepartmentID)
 	if err != nil {
 		return nil, err
@@ -1234,11 +1245,16 @@ func (s *Service) departmentMaps(ctx context.Context, db *sql.DB) (map[string]st
 	departments := map[string]departmentRef{}
 	paths := map[string]string{}
 	for rows.Next() {
-		var id, name, parent, path string
+		var (
+			id     string
+			name   string
+			parent sql.NullString
+			path   string
+		)
 		if err := rows.Scan(&id, &name, &parent, &path); err != nil {
 			return nil, nil, err
 		}
-		departments[id] = departmentRef{name: name, parent: parent}
+		departments[id] = departmentRef{name: name, parent: parent.String}
 		paths[id] = strings.TrimSpace(path)
 	}
 	if err := rows.Err(); err != nil {
@@ -1305,7 +1321,7 @@ func (s *Service) getInviteCode(ctx context.Context, inviteCode string) (*Invite
 	if err != nil {
 		return nil, err
 	}
-	item, err := newPortalStore(db).getInviteCode(ctx, inviteCode)
+	item, err := newPortalStore(db, s.client.Driver()).getInviteCode(ctx, inviteCode)
 	if err != nil {
 		return nil, err
 	}

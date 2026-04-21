@@ -4,6 +4,13 @@ import type { WasmPluginData } from '@/interfaces/wasm-plugin';
 export const AI_DATA_MASKING_PLUGIN_NAME = 'ai-data-masking';
 
 export const AI_DATA_MASKING_MANAGED_KEYS = [
+  'deny_openai',
+  'deny_jsonpath',
+  'deny_raw',
+  'deny_code',
+  'deny_message',
+  'deny_raw_message',
+  'deny_content_type',
   'deny_words',
   'deny_rules',
   'replace_roles',
@@ -23,6 +30,23 @@ export type SchemaNode = {
   enum?: Array<string | number | boolean>;
   [key: string]: any;
 };
+
+export function resolvePluginSchema(configData: any): SchemaNode | null {
+  const schema = configData?.schema;
+  if (!schema || typeof schema !== 'object') {
+    return null;
+  }
+  if (schema.jsonSchema && typeof schema.jsonSchema === 'object') {
+    return schema.jsonSchema as SchemaNode;
+  }
+  if (schema.openAPIV3Schema && typeof schema.openAPIV3Schema === 'object') {
+    return schema.openAPIV3Schema as SchemaNode;
+  }
+  if (schema.type || schema.properties || schema.items) {
+    return schema as SchemaNode;
+  }
+  return null;
+}
 
 export function cloneDeep<T>(value: T): T {
   return JSON.parse(JSON.stringify(value ?? null)) as T;
@@ -61,14 +85,19 @@ export function getExampleRaw(configData: any, isGlobalAuthPlugin = false) {
 }
 
 export function omitManagedSchema(configData: any) {
-  if (!configData?.schema?.jsonSchema?.properties) {
+  const schema = resolvePluginSchema(configData);
+  if (!schema?.properties) {
     return configData;
   }
   const next = cloneDeep(configData);
+  const targetSchema = resolvePluginSchema(next);
+  if (!targetSchema?.properties) {
+    return next;
+  }
   AI_DATA_MASKING_MANAGED_KEYS.forEach((key) => {
-    delete next.schema.jsonSchema.properties[key];
-    if (Array.isArray(next.schema.jsonSchema.required)) {
-      next.schema.jsonSchema.required = next.schema.jsonSchema.required.filter((item: string) => item !== key);
+    delete targetSchema.properties?.[key];
+    if (Array.isArray(targetSchema.required)) {
+      targetSchema.required = targetSchema.required.filter((item: string) => item !== key);
     }
   });
   return next;

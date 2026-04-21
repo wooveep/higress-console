@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/require"
 	portalshared "higress-portal-backend/schema/shared"
 
@@ -22,15 +21,15 @@ import (
 
 func TestPortalServiceUsesSharedSchemaAndConsoleOwnedTables(t *testing.T) {
 	ctx := context.Background()
-	db := openPortalMySQL(t, ctx, "console_portal_service_it")
+	db := openPortalPostgres(t, ctx, "console_portal_service_it")
 
-	require.NoError(t, portalshared.ApplyToSQL(ctx, db))
+	require.NoError(t, portalshared.ApplyToSQLWithDriver(ctx, db, "postgres"))
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO org_department (department_id, name, parent_department_id, admin_consumer_name, path, level, sort_order, status)
 		VALUES ('root', 'Root', NULL, NULL, 'Root', 0, 0, 'active')`)
 	require.NoError(t, err)
 
-	client := portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db)
+	client := portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db)
 	k8s := k8sclient.NewMemoryClient()
 	_, err = k8s.UpsertResource(ctx, "mcp-servers", "mcp-demo", map[string]any{
 		"name": "mcp-demo",
@@ -163,18 +162,19 @@ func TestPortalServiceUsesSharedSchemaAndConsoleOwnedTables(t *testing.T) {
 	require.Equal(t, 1, count)
 }
 
-func openPortalMySQL(t *testing.T, ctx context.Context, databaseName string) *sql.DB {
+func openPortalPostgres(t *testing.T, ctx context.Context, databaseName string) *sql.DB {
 	t.Helper()
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        "mysql:8.4",
-			ExposedPorts: []string{"3306/tcp"},
+			Image:        "postgres:16-alpine",
+			ExposedPorts: []string{"5432/tcp"},
 			Env: map[string]string{
-				"MYSQL_ROOT_PASSWORD": "root",
-				"MYSQL_DATABASE":      databaseName,
+				"POSTGRES_PASSWORD": "postgres",
+				"POSTGRES_USER":     "postgres",
+				"POSTGRES_DB":       databaseName,
 			},
-			WaitingFor: wait.ForListeningPort("3306/tcp").WithStartupTimeout(90 * time.Second),
+			WaitingFor: wait.ForListeningPort("5432/tcp").WithStartupTimeout(90 * time.Second),
 		},
 		Started: true,
 	})
@@ -185,11 +185,11 @@ func openPortalMySQL(t *testing.T, ctx context.Context, databaseName string) *sq
 
 	host, err := container.Host(ctx)
 	require.NoError(t, err)
-	port, err := container.MappedPort(ctx, "3306/tcp")
+	port, err := container.MappedPort(ctx, "5432/tcp")
 	require.NoError(t, err)
 
-	dsn := fmt.Sprintf("root:root@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&loc=UTC", host, port.Port(), databaseName)
-	db, err := sql.Open("mysql", dsn)
+	dsn := fmt.Sprintf("host=%s port=%s user=postgres password=postgres dbname=%s sslmode=disable", host, port.Port(), databaseName)
+	db, err := sql.Open("pgx-rebind", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = db.Close()

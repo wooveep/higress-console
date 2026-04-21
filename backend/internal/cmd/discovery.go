@@ -134,7 +134,12 @@ func resolveRuntimeDependencies(values runtimeConfigValues, lookup func(string) 
 }
 
 func resolvePortalDBConfig(values runtimeConfigValues, lookup func(string) string) portaldbclient.Config {
-	driver := firstNonEmpty(lookup("AIGATEWAY_CONSOLE_PORTALDB_DRIVER"), values.PortalDBDriver, "mysql")
+	driver := normalizeDBDriver(firstNonEmpty(
+		lookup("AIGATEWAY_CONSOLE_PORTALDB_DRIVER"),
+		lookup("PORTAL_DB_DRIVER"),
+		values.PortalDBDriver,
+		"postgres",
+	))
 	dsn, discovered := resolvePortalDBDSN(values, lookup)
 	enabled := values.PortalDBEnabled
 	if override, ok := parseOptionalBool(lookup("AIGATEWAY_CONSOLE_PORTALDB_ENABLED")); ok {
@@ -158,41 +163,43 @@ func resolvePortalDBConfig(values runtimeConfigValues, lookup func(string) strin
 func resolvePortalDBDSN(values runtimeConfigValues, lookup func(string) string) (string, bool) {
 	if dsn := firstNonEmpty(
 		lookup("AIGATEWAY_CONSOLE_PORTALDB_DSN"),
-		lookup("PORTAL_MYSQL_DSN"),
+		lookup("PORTAL_DB_DSN"),
 		values.PortalDBDSN,
 	); dsn != "" {
 		return dsn, true
 	}
 
-	if hasPortalMySQLConnEnv(lookup) {
-		dsn := buildMySQLDSN(
-			firstNonEmpty(lookup("PORTAL_MYSQL_HOST"), "127.0.0.1"),
-			firstNonEmpty(lookup("PORTAL_MYSQL_PORT"), "3306"),
-			firstNonEmpty(lookup("PORTAL_MYSQL_USER"), "root"),
-			firstNonEmpty(lookup("PORTAL_MYSQL_PASSWORD"), "root"),
-			firstNonEmpty(lookup("PORTAL_MYSQL_DATABASE"), "aigateway_portal"),
-			firstNonEmpty(lookup("PORTAL_MYSQL_PARAMS"), "parseTime=true&charset=utf8mb4&loc=UTC"),
-		)
-		return dsn, true
+	driver := normalizeDBDriver(firstNonEmpty(lookup("AIGATEWAY_CONSOLE_PORTALDB_DRIVER"), lookup("PORTAL_DB_DRIVER"), values.PortalDBDriver))
+	if hasPortalGenericConnEnv(lookup) {
+		return buildPostgresDSN(
+			firstNonEmpty(lookup("PORTAL_DB_HOST"), "127.0.0.1"),
+			firstNonEmpty(lookup("PORTAL_DB_PORT"), "5432"),
+			firstNonEmpty(lookup("PORTAL_DB_USER"), "postgres"),
+			firstNonEmpty(lookup("PORTAL_DB_PASSWORD"), "postgres"),
+			firstNonEmpty(lookup("PORTAL_DB_NAME"), "aigateway_portal"),
+			firstNonEmpty(lookup("PORTAL_DB_PARAMS"), "sslmode=disable"),
+		), true
 	}
 
 	rawURL := firstNonEmpty(lookup("PORTAL_CORE_DB_URL"), lookup("HIGRESS_PORTAL_DB_URL"))
 	if strings.TrimSpace(rawURL) == "" {
 		return "", false
 	}
-	host, port, database, params, err := parseMySQLJDBCURL(rawURL)
+	if driver != "postgres" {
+		return "", false
+	}
+	host, port, database, params, err := parsePostgresJDBCURL(rawURL)
 	if err != nil {
 		return "", false
 	}
-	dsn := buildMySQLDSN(
+	return buildPostgresDSN(
 		host,
 		port,
-		firstNonEmpty(lookup("PORTAL_CORE_DB_USERNAME"), lookup("HIGRESS_PORTAL_DB_USERNAME"), "root"),
-		firstNonEmpty(lookup("PORTAL_CORE_DB_PASSWORD"), lookup("HIGRESS_PORTAL_DB_PASSWORD"), "root"),
+		firstNonEmpty(lookup("PORTAL_CORE_DB_USERNAME"), lookup("HIGRESS_PORTAL_DB_USERNAME"), "postgres"),
+		firstNonEmpty(lookup("PORTAL_CORE_DB_PASSWORD"), lookup("HIGRESS_PORTAL_DB_PASSWORD"), "postgres"),
 		database,
 		params,
-	)
-	return dsn, true
+	), true
 }
 
 func resolveGrafanaConfig(values runtimeConfigValues, lookup func(string) string, namespace, clusterDomain string) grafanaclient.Config {
@@ -225,14 +232,14 @@ func resolveGrafanaConfig(values runtimeConfigValues, lookup func(string) string
 	}
 }
 
-func hasPortalMySQLConnEnv(lookup func(string) string) bool {
+func hasPortalGenericConnEnv(lookup func(string) string) bool {
 	keys := []string{
-		"PORTAL_MYSQL_HOST",
-		"PORTAL_MYSQL_PORT",
-		"PORTAL_MYSQL_USER",
-		"PORTAL_MYSQL_PASSWORD",
-		"PORTAL_MYSQL_DATABASE",
-		"PORTAL_MYSQL_PARAMS",
+		"PORTAL_DB_HOST",
+		"PORTAL_DB_PORT",
+		"PORTAL_DB_USER",
+		"PORTAL_DB_PASSWORD",
+		"PORTAL_DB_NAME",
+		"PORTAL_DB_PARAMS",
 	}
 	for _, key := range keys {
 		if strings.TrimSpace(lookup(key)) != "" {
@@ -242,8 +249,8 @@ func hasPortalMySQLConnEnv(lookup func(string) string) bool {
 	return false
 }
 
-func buildMySQLDSN(host, port, user, password, database, params string) string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?%s", user, password, host, port, database, normalizeMySQLParams(params))
+func buildPostgresDSN(host, port, user, password, database, params string) string {
+	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s %s", host, port, user, password, database, normalizePostgresParams(params))
 }
 
 func buildClusterServiceURL(scheme, service, namespace, clusterDomain, port, path string) string {
@@ -280,50 +287,47 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func parseMySQLJDBCURL(raw string) (host string, port string, database string, params string, err error) {
-	const prefix = "jdbc:mysql://"
+func parsePostgresJDBCURL(raw string) (host string, port string, database string, params string, err error) {
+	const prefix = "jdbc:postgresql://"
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw)), prefix) {
-		return "", "", "", "", fmt.Errorf("unsupported jdbc mysql url")
+		return "", "", "", "", fmt.Errorf("unsupported jdbc postgresql url")
 	}
-	parsed, err := url.Parse("mysql://" + strings.TrimSpace(raw)[len(prefix):])
+	parsed, err := url.Parse("postgres://" + strings.TrimSpace(raw)[len(prefix):])
 	if err != nil {
 		return "", "", "", "", err
 	}
 	host = parsed.Hostname()
 	port = parsed.Port()
 	if port == "" {
-		port = "3306"
+		port = "5432"
 	}
 	database = strings.TrimPrefix(parsed.Path, "/")
 	if database == "" {
-		return "", "", "", "", fmt.Errorf("missing database in jdbc mysql url")
+		return "", "", "", "", fmt.Errorf("missing database in jdbc postgresql url")
 	}
-	params = normalizeMySQLParams(parsed.RawQuery)
+	params = normalizePostgresParams(parsed.RawQuery)
 	return host, port, database, params, nil
 }
 
-func normalizeMySQLParams(raw string) string {
-	const defaultParams = "parseTime=true&charset=utf8mb4&loc=UTC"
+func normalizePostgresParams(raw string) string {
 	if strings.TrimSpace(raw) == "" {
-		return defaultParams
+		return "sslmode=disable"
 	}
-
 	query, err := url.ParseQuery(raw)
 	if err != nil {
 		return raw
 	}
+	if query.Get("sslmode") == "" {
+		query.Set("sslmode", "disable")
+	}
+	return strings.ReplaceAll(query.Encode(), "&", " ")
+}
 
-	if query.Get("parseTime") == "" {
-		query.Set("parseTime", "true")
+func normalizeDBDriver(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "postgres", "postgresql", "pgx":
+		return "postgres"
+	default:
+		return "postgres"
 	}
-	if query.Get("charset") == "" {
-		if encoding := strings.TrimSpace(query.Get("characterEncoding")); encoding != "" {
-			query.Set("charset", encoding)
-		} else {
-			query.Set("charset", "utf8mb4")
-		}
-	}
-	query.Set("loc", "UTC")
-	query.Del("serverTimezone")
-	return query.Encode()
 }

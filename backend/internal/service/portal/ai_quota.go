@@ -105,7 +105,7 @@ func (s *Service) ListAIQuotaRoutes(ctx context.Context) ([]AIQuotaRouteSummary,
 
 	scheduleCounts := map[string]int{}
 	if db, err := s.db(ctx); err == nil {
-		items, queryErr := newPortalStore(db).listAIQuotaScheduleCounts(ctx)
+		items, queryErr := newPortalStore(db, s.client.Driver()).listAIQuotaScheduleCounts(ctx)
 		if queryErr == nil {
 			scheduleCounts = items
 		}
@@ -149,7 +149,7 @@ func (s *Service) ListAIQuotaConsumers(ctx context.Context, routeName string) ([
 	names := map[string]struct{}{
 		builtinQuotaAdminConsumer: {},
 	}
-	users, err := newPortalStore(db).listActivePortalUsers(ctx)
+	users, err := newPortalStore(db, s.client.Driver()).listActivePortalUsers(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +157,7 @@ func (s *Service) ListAIQuotaConsumers(ctx context.Context, routeName string) ([
 		names[item.ConsumerName] = struct{}{}
 	}
 
-	legacyBalances, err := newPortalStore(db).listAIQuotaBalances(ctx, routeName)
+	legacyBalances, err := newPortalStore(db, s.client.Driver()).listAIQuotaBalances(ctx, routeName)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +171,7 @@ func (s *Service) ListAIQuotaConsumers(ctx context.Context, routeName string) ([
 		consumerNames = append(consumerNames, consumerName)
 	}
 	sort.Strings(consumerNames)
-	if walletBalances, walletErr := newPortalStore(db).listPortalBillingBalances(ctx, consumerNames); walletErr == nil {
+	if walletBalances, walletErr := newPortalStore(db, s.client.Driver()).listPortalBillingBalances(ctx, consumerNames); walletErr == nil {
 		for consumerName, balance := range walletBalances {
 			balances[consumerName] = balance
 		}
@@ -200,11 +200,11 @@ func (s *Service) RefreshAIQuota(ctx context.Context, routeName, consumerName st
 	if routeName == "" || consumerName == "" {
 		return nil, errors.New("routeName and consumerName are required")
 	}
-	next, err := newPortalStore(db).refreshPortalBillingBalance(ctx, consumerName, value, routeName)
+	next, err := newPortalStore(db, s.client.Driver()).refreshPortalBillingBalance(ctx, consumerName, value, routeName)
 	if err != nil {
 		return nil, err
 	}
-	if err := newPortalStore(db).saveAIQuotaBalance(ctx, do.PortalAIQuotaBalance{
+	if err := newPortalStore(db, s.client.Driver()).saveAIQuotaBalance(ctx, do.PortalAIQuotaBalance{
 		RouteName:    routeName,
 		ConsumerName: consumerName,
 		Quota:        next,
@@ -224,11 +224,11 @@ func (s *Service) DeltaAIQuota(ctx context.Context, routeName, consumerName stri
 	if routeName == "" || consumerName == "" {
 		return nil, errors.New("routeName and consumerName are required")
 	}
-	next, err := newPortalStore(db).deltaPortalBillingBalance(ctx, consumerName, delta, routeName)
+	next, err := newPortalStore(db, s.client.Driver()).deltaPortalBillingBalance(ctx, consumerName, delta, routeName)
 	if err != nil {
 		return nil, err
 	}
-	if err := newPortalStore(db).saveAIQuotaBalance(ctx, do.PortalAIQuotaBalance{
+	if err := newPortalStore(db, s.client.Driver()).saveAIQuotaBalance(ctx, do.PortalAIQuotaBalance{
 		RouteName:    routeName,
 		ConsumerName: consumerName,
 		Quota:        next,
@@ -250,7 +250,7 @@ func (s *Service) GetAIQuotaUserPolicy(ctx context.Context, routeName, consumerN
 	}
 
 	policy := defaultAIQuotaPolicy(consumerName)
-	item, err := newPortalStore(db).getAIQuotaUserPolicy(ctx, consumerName)
+	item, err := newPortalStore(db, s.client.Driver()).getAIQuotaUserPolicy(ctx, consumerName)
 	if err != nil {
 		return nil, err
 	}
@@ -292,7 +292,7 @@ func (s *Service) SaveAIQuotaUserPolicy(
 	if request.CostResetAt != nil {
 		costResetAt = wrapGTime(*request.CostResetAt)
 	}
-	if err := newPortalStore(db).saveAIQuotaUserPolicy(ctx, do.QuotaPolicyUser{
+	if err := newPortalStore(db, s.client.Driver()).saveAIQuotaUserPolicy(ctx, do.QuotaPolicyUser{
 		ConsumerName:          consumerName,
 		LimitTotalMicroYuan:   request.LimitTotal,
 		Limit5hMicroYuan:      request.Limit5h,
@@ -318,7 +318,7 @@ func (s *Service) ListAIQuotaScheduleRules(ctx context.Context, routeName, consu
 		return nil, errors.New("routeName cannot be blank")
 	}
 
-	rows, err := newPortalStore(db).listAIQuotaScheduleRules(ctx, routeName, strings.TrimSpace(consumerName))
+	rows, err := newPortalStore(db, s.client.Driver()).listAIQuotaScheduleRules(ctx, routeName, strings.TrimSpace(consumerName))
 	if err != nil {
 		return nil, err
 	}
@@ -359,19 +359,15 @@ func (s *Service) SaveAIQuotaScheduleRule(
 	if request.Enabled != nil {
 		enabled = *request.Enabled
 	}
-	enabledValue := 0
-	if enabled {
-		enabledValue = 1
-	}
 
-	if err := newPortalStore(db).saveAIQuotaScheduleRule(ctx, do.PortalAIQuotaScheduleRule{
+	if err := newPortalStore(db, s.client.Driver()).saveAIQuotaScheduleRule(ctx, do.PortalAIQuotaScheduleRule{
 		Id:           ruleID,
 		RouteName:    routeName,
 		ConsumerName: consumerName,
 		Action:       action,
 		Cron:         cron,
 		Value:        request.Value,
-		Enabled:      enabledValue,
+		Enabled:      enabled,
 	}); err != nil {
 		return nil, err
 	}
@@ -388,7 +384,7 @@ func (s *Service) DeleteAIQuotaScheduleRule(ctx context.Context, routeName, rule
 	if routeName == "" || ruleID == "" {
 		return errors.New("routeName and ruleId are required")
 	}
-	deleted, err := newPortalStore(db).deleteAIQuotaScheduleRule(ctx, routeName, ruleID)
+	deleted, err := newPortalStore(db, s.client.Driver()).deleteAIQuotaScheduleRule(ctx, routeName, ruleID)
 	if err != nil {
 		return err
 	}
@@ -403,10 +399,10 @@ func (s *Service) getAIQuotaBalance(ctx context.Context, routeName, consumerName
 	if err != nil {
 		return 0, err
 	}
-	if balance, walletErr := newPortalStore(db).getPortalBillingBalance(ctx, strings.TrimSpace(consumerName)); walletErr == nil {
+	if balance, walletErr := newPortalStore(db, s.client.Driver()).getPortalBillingBalance(ctx, strings.TrimSpace(consumerName)); walletErr == nil {
 		return balance, nil
 	}
-	return newPortalStore(db).getAIQuotaBalance(ctx, strings.TrimSpace(routeName), strings.TrimSpace(consumerName))
+	return newPortalStore(db, s.client.Driver()).getAIQuotaBalance(ctx, strings.TrimSpace(routeName), strings.TrimSpace(consumerName))
 }
 
 func (s *Service) getAIQuotaScheduleRule(ctx context.Context, routeName, ruleID string) (*AIQuotaScheduleRule, error) {

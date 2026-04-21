@@ -32,7 +32,7 @@
 - `service/`
   - 编排层，既有纯业务服务，也有带副作用的同步/调和任务。
 - `service/portal/`
-  - 直接 JDBC 访问 Portal MySQL。
+  - 直接访问 Portal 共享 PostgreSQL。
   - 这里是 Consumer、组织、邀请码、模型资产、账单、统计、AI 脱敏等 DB 真相源。
 - `aop/`
   - `ApiStandardizationAspect` 负责统一异常包装、鉴权入口、traceId 与 DELETE 204 处理。
@@ -64,8 +64,8 @@
 ```text
 Controller
   -> Console Service / Portal JDBC Service
-     -> Java SDK Service / JDBC / Grafana Client
-        -> Kubernetes API / Portal MySQL / Grafana
+     -> Java SDK Service / SQL / Grafana Client
+        -> Kubernetes API / Portal PostgreSQL / Grafana
 ```
 
 ### 4.2 配置与注入链
@@ -113,7 +113,7 @@ ApiStandardizationAspect
 - 业务规则和资源转换主要在 SDK 中。
 - 真正高风险点在 K8s 资源转换、注解读写、ConfigMap/CRD 结构。
 
-### 5.3 Portal MySQL 真相源
+### 5.3 Portal PostgreSQL 真相源
 
 关键类：
 

@@ -78,17 +78,21 @@ type QuotaPolicyUser struct {
 }
 
 type PortalModelAsset struct {
-	Id               int64       `json:"id" orm:"id"`
-	AssetId          string      `json:"assetId" orm:"asset_id"`
-	CanonicalName    string      `json:"canonicalName" orm:"canonical_name"`
-	DisplayName      string      `json:"displayName" orm:"display_name"`
-	Intro            string      `json:"intro" orm:"intro"`
-	TagsJson         string      `json:"tagsJson" orm:"tags_json"`
-	ModalitiesJson   string      `json:"modalitiesJson" orm:"modalities_json"`
-	FeaturesJson     string      `json:"featuresJson" orm:"features_json"`
-	RequestKindsJson string      `json:"requestKindsJson" orm:"request_kinds_json"`
-	CreatedAt        *gtime.Time `json:"createdAt" orm:"created_at"`
-	UpdatedAt        *gtime.Time `json:"updatedAt" orm:"updated_at"`
+	Id                   int64       `json:"id" orm:"id"`
+	AssetId              string      `json:"assetId" orm:"asset_id"`
+	CanonicalName        string      `json:"canonicalName" orm:"canonical_name"`
+	DisplayName          string      `json:"displayName" orm:"display_name"`
+	Intro                string      `json:"intro" orm:"intro"`
+	ModelType            string      `json:"modelType" orm:"model_type"`
+	TagsJson             string      `json:"tagsJson" orm:"tags_json"`
+	InputModalitiesJson  string      `json:"inputModalitiesJson" orm:"input_modalities_json"`
+	OutputModalitiesJson string      `json:"outputModalitiesJson" orm:"output_modalities_json"`
+	FeatureFlagsJson     string      `json:"featureFlagsJson" orm:"feature_flags_json"`
+	ModalitiesJson       string      `json:"modalitiesJson" orm:"modalities_json"`
+	FeaturesJson         string      `json:"featuresJson" orm:"features_json"`
+	RequestKindsJson     string      `json:"requestKindsJson" orm:"request_kinds_json"`
+	CreatedAt            *gtime.Time `json:"createdAt" orm:"created_at"`
+	UpdatedAt            *gtime.Time `json:"updatedAt" orm:"updated_at"`
 }
 
 type PortalModelBinding struct {
@@ -101,6 +105,7 @@ type PortalModelBinding struct {
 	Protocol      string      `json:"protocol" orm:"protocol"`
 	Endpoint      string      `json:"endpoint" orm:"endpoint"`
 	PricingJson   string      `json:"pricingJson" orm:"pricing_json"`
+	LimitsJson    string      `json:"limitsJson" orm:"limits_json"`
 	Rpm           int64       `json:"rpm" orm:"rpm"`
 	Tpm           int64       `json:"tpm" orm:"tpm"`
 	ContextWindow int64       `json:"contextWindow" orm:"context_window"`

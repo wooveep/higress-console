@@ -16,10 +16,21 @@
         "tags": [
           "premium"
         ],
+        "modelType": "multimodal",
         "capabilities": {
+          "inputModalities": [
+            "image",
+            "text"
+          ],
+          "outputModalities": [
+            "text"
+          ],
+          "featureFlags": [
+            "vision"
+          ],
           "modalities": [
-            "text",
-            "image"
+            "image",
+            "text"
           ],
           "features": [
             "vision"
@@ -43,12 +54,13 @@
             "updatedAt": "2026-04-14T10:00:00Z",
             "pricing": {
               "currency": "USD",
-              "inputCostPerToken": 0.00001
+              "inputCostPerMillionTokens": 10
             },
             "limits": {
               "rpm": 6000,
               "tpm": 120000,
-              "contextWindow": 128000
+              "contextWindow": 128000,
+              "contextWindowTokens": 128000
             }
           }
         ]

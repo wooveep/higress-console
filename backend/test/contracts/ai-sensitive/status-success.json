@@ -10,6 +10,7 @@
       "detectRuleCount": 2,
       "replaceRuleCount": 1,
       "auditRecordCount": 5,
+      "enabledRouteCount": 0,
       "systemDenyEnabled": true,
       "systemDictionaryWordCount": 2,
       "systemDictionaryUpdatedAt": "2026-04-14T10:00:00Z",

@@ -95,6 +95,7 @@ export interface Route {
 export interface AuthConfig {
   enabled: boolean;
   allowedConsumers?: string[];
+  allowedDepartments?: string[];
   allowedConsumerLevels?: Array<'normal' | 'plus' | 'pro' | 'ultra' | string>;
 }
 

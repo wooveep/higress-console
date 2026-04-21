@@ -14,6 +14,14 @@ export const MODEL_ASSET_PRESET_TAGS = [
 ] as const;
 
 export type ModelAssetPresetTag = (typeof MODEL_ASSET_PRESET_TAGS)[number];
+export type ModelType =
+  | 'text'
+  | 'multimodal'
+  | 'image_generation'
+  | 'video_generation'
+  | 'speech_recognition'
+  | 'speech_synthesis'
+  | 'embedding';
 
 export interface ProviderModelOption {
   modelId: string;
@@ -26,16 +34,37 @@ export interface ProviderModelCatalog {
   models: ProviderModelOption[];
 }
 
+export interface PublishedBindingOption {
+  assetId: string;
+  bindingId: string;
+  modelId: string;
+  targetModel: string;
+  displayLabel: string;
+}
+
+export interface PublishedBindingCatalog {
+  providerName: string;
+  bindings: PublishedBindingOption[];
+}
+
 export interface ModelAssetOptions {
   capabilities: {
+    modelTypes: string[];
+    inputModalities: string[];
+    outputModalities: string[];
+    featureFlags: string[];
     modalities: string[];
     features: string[];
     requestKinds: string[];
   };
   providerModels: ProviderModelCatalog[];
+  publishedBindings: PublishedBindingCatalog[];
 }
 
 export interface ModelAssetCapabilities {
+  inputModalities?: string[];
+  outputModalities?: string[];
+  featureFlags?: string[];
   modalities?: string[];
   features?: string[];
   requestKinds?: string[];
@@ -43,24 +72,35 @@ export interface ModelAssetCapabilities {
 
 export interface ModelBindingPricing {
   currency?: 'CNY' | string;
-  inputCostPerToken?: number;
-  outputCostPerToken?: number;
+  inputCostPerMillionTokens?: number;
+  outputCostPerMillionTokens?: number;
+  pricePerImage?: number;
+  pricePerSecond?: number;
+  pricePerSecond720p?: number;
+  pricePerSecond1080p?: number;
+  pricePer10kChars?: number;
   inputCostPerRequest?: number;
-  cacheCreationInputTokenCost?: number;
-  cacheCreationInputTokenCostAbove1hr?: number;
-  cacheReadInputTokenCost?: number;
-  inputCostPerTokenAbove200kTokens?: number;
-  outputCostPerTokenAbove200kTokens?: number;
-  cacheCreationInputTokenCostAbove200kTokens?: number;
-  cacheReadInputTokenCostAbove200kTokens?: number;
+  cacheCreationInputTokenCostPerMillionTokens?: number;
+  cacheCreationInputTokenCostAbove1hrPerMillionTokens?: number;
+  cacheReadInputTokenCostPerMillionTokens?: number;
+  inputCostPerMillionTokensAbove200kTokens?: number;
+  outputCostPerMillionTokensAbove200kTokens?: number;
+  cacheCreationInputTokenCostPerMillionTokensAbove200kTokens?: number;
+  cacheReadInputTokenCostPerMillionTokensAbove200kTokens?: number;
   outputCostPerImage?: number;
-  outputCostPerImageToken?: number;
+  outputImageTokenCostPerMillionTokens?: number;
   inputCostPerImage?: number;
-  inputCostPerImageToken?: number;
+  inputImageTokenCostPerMillionTokens?: number;
   supportsPromptCaching?: boolean;
 }
 
 export interface ModelBindingLimits {
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  contextWindowTokens?: number;
+  maxReasoningTokens?: number;
+  maxInputTokensInReasoningMode?: number;
+  maxOutputTokensInReasoningMode?: number;
   rpm?: number;
   tpm?: number;
   contextWindow?: number;
@@ -101,6 +141,7 @@ export interface ModelAsset {
   canonicalName?: string;
   displayName?: string;
   intro?: string;
+  modelType?: ModelType | string;
   createdAt?: string;
   updatedAt?: string;
   tags?: string[];

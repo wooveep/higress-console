@@ -4,24 +4,36 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/wooveep/aigateway-console/backend/internal/consts"
+	portalsvc "github.com/wooveep/aigateway-console/backend/internal/service/portal"
 	k8sclient "github.com/wooveep/aigateway-console/backend/utility/clients/k8s"
 )
 
 type Service struct {
 	k8sClient k8sclient.Client
+	portal    portalReader
 }
 
 type builtinPluginRuleLoader interface {
 	LoadBuiltinPluginRules(ctx context.Context, pluginName string) (map[string]map[string]any, error)
 }
 
-func New(k8sClient k8sclient.Client) *Service {
-	svc := &Service{k8sClient: k8sClient}
+type portalReader interface {
+	ListAccounts(ctx context.Context) ([]portalsvc.OrgAccountRecord, error)
+	ListDepartmentTree(ctx context.Context) ([]*portalsvc.OrgDepartmentNode, error)
+}
+
+func New(k8sClient k8sclient.Client, portals ...portalReader) *Service {
+	var portal portalReader
+	if len(portals) > 0 {
+		portal = portals[0]
+	}
+	svc := &Service{k8sClient: k8sClient, portal: portal}
 	svc.bootstrapDefaults(context.Background())
 	return svc
 }
@@ -111,10 +123,13 @@ func (s *Service) GetPluginInstance(ctx context.Context, scope, target, pluginNa
 	if err == nil {
 		return item, nil
 	}
-	if scope != "route" {
-		return nil, err
+	if scope == "route" {
+		return s.getBuiltinRuntimePluginInstance(ctx, pluginName, append([]string{target}, aliases...))
 	}
-	return s.getBuiltinRuntimePluginInstance(ctx, pluginName, append([]string{target}, aliases...))
+	if scope == "global" {
+		return s.getBuiltinGlobalPluginInstance(ctx, pluginName)
+	}
+	return nil, err
 }
 
 func (s *Service) SavePluginInstance(ctx context.Context, scope, target, pluginName string, payload map[string]any) (map[string]any, error) {
@@ -309,6 +324,47 @@ func (s *Service) getBuiltinRuntimePluginInstance(
 		return nil, k8sclient.ErrNotFound
 	}
 	return builtinRuntimePluginInstance(pluginName, matchedTarget, rule), nil
+}
+
+func (s *Service) getBuiltinGlobalPluginInstance(ctx context.Context, pluginName string) (map[string]any, error) {
+	loader, ok := s.k8sClient.(builtinPluginRuleLoader)
+	if !ok {
+		return nil, k8sclient.ErrNotFound
+	}
+	rules, err := loader.LoadBuiltinPluginRules(ctx, pluginName)
+	if err != nil {
+		return nil, err
+	}
+	targets := make([]string, 0, len(rules))
+	config := map[string]any{}
+	for target, rule := range rules {
+		if boolValue(rule["configDisable"]) {
+			continue
+		}
+		targets = append(targets, target)
+		if len(config) == 0 {
+			config = mapValue(rule["config"])
+		}
+	}
+	if len(targets) == 0 {
+		return nil, k8sclient.ErrNotFound
+	}
+	sort.Strings(targets)
+	item := map[string]any{
+		"name":           pluginName,
+		"pluginName":     pluginName,
+		"enabled":        true,
+		"runtimeEnabled": true,
+		"runtimeSource":  "builtin-rule-global",
+		"runtimeTargets": targets,
+		"config":         config,
+	}
+	if len(config) > 0 {
+		if payload, err := yaml.Marshal(config); err == nil {
+			item["rawConfigurations"] = string(payload)
+		}
+	}
+	return item, nil
 }
 
 func findBuiltinPluginRuleForTargets(

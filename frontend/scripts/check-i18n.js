@@ -10,6 +10,8 @@ const CONFIG = {
   srcDir: path.join(__dirname, '../src'),
   // 国际化文件目录
   localesDir: path.join(__dirname, '../src/locales'),
+  // 未使用 key 基线文件
+  unusedKeysBaselineFile: path.join(__dirname, 'i18n-unused-keys-baseline.json'),
   // 需要检查的文件类型
   fileExtensions: ['vue', 'tsx', 'ts', 'jsx', 'js'],
   // 忽略的目录
@@ -161,11 +163,37 @@ function loadLocaleFile(locale) {
   }
 }
 
+function loadUnusedKeysBaseline() {
+  if (!fs.existsSync(CONFIG.unusedKeysBaselineFile)) {
+    return new Set();
+  }
+
+  try {
+    const content = fs.readFileSync(CONFIG.unusedKeysBaselineFile, 'utf8');
+    const parsed = JSON.parse(content);
+    const keys = Array.isArray(parsed?.keys) ? parsed.keys : [];
+    return new Set(keys.filter((key) => typeof key === 'string' && key.trim()));
+  } catch (error) {
+    console.error(`❌ 解析未使用 key 基线失败: ${CONFIG.unusedKeysBaselineFile}`, error.message);
+    process.exit(1);
+  }
+}
+
+function saveUnusedKeysBaseline(keys) {
+  const payload = {
+    timestamp: new Date().toISOString(),
+    count: keys.length,
+    keys,
+  };
+  fs.writeFileSync(CONFIG.unusedKeysBaselineFile, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+}
+
 /**
  * 检查国际化文案
  */
 function checkI18n() {
   console.log('🔍 开始检查国际化文案...\n');
+  const updateBaseline = process.argv.includes('--update-baseline');
 
   // 获取所有源码文件
   const sourceFiles = getSourceFiles();
@@ -190,6 +218,7 @@ function checkI18n() {
   let hasIssues = false;
   const allUnusedKeys = new Set();
   const allMissingKeys = new Set();
+  const baselineUnusedKeys = loadUnusedKeysBaseline();
 
   // 检查每个语言文件
   locales.forEach((locale) => {
@@ -208,7 +237,6 @@ function checkI18n() {
       if (unusedKeys.length > 10) {
         console.log(`    ... 还有 ${unusedKeys.length - 10} 个未使用的键`);
       }
-      hasIssues = true;
       unusedKeys.forEach((key) => allUnusedKeys.add(key));
     } else {
       console.log(`  ✅ 没有未使用的键`);
@@ -239,13 +267,18 @@ function checkI18n() {
     fs.mkdirSync(outputDir, { recursive: true });
   }
 
+  const sortedUnusedKeys = [...allUnusedKeys].sort();
+  const sortedMissingKeys = [...allMissingKeys].sort();
+  const newUnusedKeys = sortedUnusedKeys.filter((key) => !baselineUnusedKeys.has(key));
+  const resolvedUnusedKeys = [...baselineUnusedKeys].sort().filter((key) => !allUnusedKeys.has(key));
+
   // 导出未使用的键
   if (allUnusedKeys.size > 0) {
     const unusedKeysFile = path.join(outputDir, 'unused-keys.json');
     const unusedKeysData = {
       timestamp: new Date().toISOString(),
       count: allUnusedKeys.size,
-      keys: [...allUnusedKeys].sort(),
+      keys: sortedUnusedKeys,
     };
     fs.writeFileSync(unusedKeysFile, JSON.stringify(unusedKeysData, null, 2), 'utf8');
     console.log(`📄 未使用的键已导出到: ${unusedKeysFile}`);
@@ -257,10 +290,35 @@ function checkI18n() {
     const missingKeysData = {
       timestamp: new Date().toISOString(),
       count: allMissingKeys.size,
-      keys: [...allMissingKeys].sort(),
+      keys: sortedMissingKeys,
     };
     fs.writeFileSync(missingKeysFile, JSON.stringify(missingKeysData, null, 2), 'utf8');
     console.log(`📄 缺失的键已导出到: ${missingKeysFile}`);
+  }
+
+  if (updateBaseline) {
+    saveUnusedKeysBaseline(sortedUnusedKeys);
+    console.log(`📌 未使用 key 基线已更新: ${CONFIG.unusedKeysBaselineFile}`);
+  } else {
+    console.log(`📌 未使用 key 基线文件: ${CONFIG.unusedKeysBaselineFile}`);
+    console.log(`  - 基线中的未使用键: ${baselineUnusedKeys.size}`);
+    console.log(`  - 新增未使用键: ${newUnusedKeys.length}`);
+    console.log(`  - 已清理的基线键: ${resolvedUnusedKeys.length}`);
+
+    if (newUnusedKeys.length > 0) {
+      console.log(`\n  ❌ 发现 ${newUnusedKeys.length} 个新增未使用的键:`);
+      newUnusedKeys.slice(0, 10).forEach((key) => {
+        console.log(`    - ${key}`);
+      });
+      if (newUnusedKeys.length > 10) {
+        console.log(`    ... 还有 ${newUnusedKeys.length - 10} 个新增未使用的键`);
+      }
+      hasIssues = true;
+    }
+
+    if (resolvedUnusedKeys.length > 0) {
+      console.log(`\n  ✅ 发现 ${resolvedUnusedKeys.length} 个已清理的基线键，可按需运行 check-i18n:update-baseline 收敛基线`);
+    }
   }
 
   // 输出统计信息
@@ -270,6 +328,7 @@ function checkI18n() {
   console.log(`  - 语言文件: ${locales.length}`);
   console.log(`  - 未使用的键: ${allUnusedKeys.size}`);
   console.log(`  - 缺失的键: ${allMissingKeys.size}`);
+  console.log(`  - 新增未使用的键: ${newUnusedKeys.length}`);
 
   // 输出详细的使用情况
   if (process.argv.includes('--verbose')) {
@@ -285,12 +344,12 @@ function checkI18n() {
     });
   }
 
-  if (hasIssues) {
+  if (!updateBaseline && hasIssues) {
     console.log('\n❌ 发现国际化文案问题，请检查上述警告和错误');
     console.log(`📁 详细结果已导出到: ${outputDir}`);
     process.exit(1);
   } else {
-    console.log('\n✅ 国际化文案检查通过！');
+    console.log(updateBaseline ? '\n✅ 国际化未使用 key 基线更新完成！' : '\n✅ 国际化文案检查通过！');
   }
 }
 

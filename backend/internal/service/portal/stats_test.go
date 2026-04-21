@@ -28,7 +28,7 @@ func TestListUsageStats(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(rows)
 
-	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
 	items, err := svc.ListUsageStats(context.Background(), UsageStatsQuery{})
 	require.NoError(t, err)
 	require.Len(t, items, 1)
@@ -70,7 +70,7 @@ func TestListUsageEventsIncludesAlignedFields(t *testing.T) {
 			0, 0, 0, startedAt, finishedAt, finishedAt,
 		))
 
-	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
 	items, err := svc.ListUsageEvents(context.Background(), UsageEventsQuery{})
 	require.NoError(t, err)
 	require.Len(t, items, 2)
@@ -102,7 +102,7 @@ func TestListDepartmentBillsWithDepartmentScope(t *testing.T) {
 			"department_id", "department_name", "department_path", "request_count", "total_tokens", "total_cost", "active_consumers",
 		}).AddRow("dept-a", "Dept A", "root/dept-a", 10, 1000, 12.5, 3))
 
-	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
 	includeChildren := true
 	items, err := svc.ListDepartmentBills(context.Background(), DepartmentBillsQuery{
 		DepartmentIDs:   []string{"dept-a"},
@@ -119,17 +119,44 @@ func TestListUsageTrend(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	expectSchema(mock)
 	now := time.Now()
 	from := now.Add(-time.Hour).UnixMilli()
 	to := now.UnixMilli()
-	mock.ExpectQuery("FROM_UNIXTIME\\(FLOOR\\(UNIX_TIMESTAMP\\(occurred_at\\) / 300\\) \\* 300\\)").
+	mock.ExpectQuery("TO_TIMESTAMP\\(FLOOR\\(EXTRACT\\(EPOCH FROM occurred_at\\) / 300\\) \\* 300\\)").
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"bucket_label", "request_count", "input_tokens", "output_tokens", "total_tokens", "cost_micro_yuan", "active_consumers",
 		}).AddRow("2026-04-14 10:05:00", 12, 2400, 800, 3650, 3200, 3))
 
-	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
+	svc.schemaChecked = true
+	items, err := svc.ListUsageTrend(context.Background(), UsageTrendQuery{
+		From: &from,
+		To:   &to,
+	})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, int64(3200), items[0].CostMicroYuan)
+	require.Equal(t, int64(3650), items[0].TotalTokens)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestListUsageTrendPostgres(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	now := time.Now()
+	from := now.Add(-time.Hour).UnixMilli()
+	to := now.UnixMilli()
+	mock.ExpectQuery("TO_TIMESTAMP\\(FLOOR\\(EXTRACT\\(EPOCH FROM occurred_at\\) / 300\\) \\* 300\\)").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"bucket_label", "request_count", "input_tokens", "output_tokens", "total_tokens", "cost_micro_yuan", "active_consumers",
+		}).AddRow("2026-04-14 10:05:00", 12, 2400, 800, 3650, 3200, 3))
+
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
+	svc.schemaChecked = true
 	items, err := svc.ListUsageTrend(context.Background(), UsageTrendQuery{
 		From: &from,
 		To:   &to,
@@ -169,7 +196,7 @@ func TestListUsageEventFilterOptions(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("parsed"))
 
-	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
 	item, err := svc.ListUsageEventFilterOptions(context.Background(), UsageEventsQuery{})
 	require.NoError(t, err)
 	require.Equal(t, "alice", item.Consumers[0].Value)
@@ -211,7 +238,7 @@ func TestListUsageEventFilterOptionsNarrowByDepartmentScope(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "alice", "dept-a", "dept-b").
 		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("parsed"))
 
-	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
 	includeChildren := true
 	item, err := svc.ListUsageEventFilterOptions(context.Background(), UsageEventsQuery{
 		ConsumerNames:   []string{"alice"},

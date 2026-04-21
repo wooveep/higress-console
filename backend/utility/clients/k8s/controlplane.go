@@ -16,53 +16,54 @@ import (
 )
 
 const (
-	higressAnnotationDestination         = "higress.io/destination"
-	higressAnnotationUseRegex            = "higress.io/use-regex"
-	higressAnnotationIgnorePathCase      = "higress.io/ignore-path-case"
-	higressAnnotationMatchMethod         = "higress.io/match-method"
-	higressAnnotationResourceDescription = "higress.io/resource-description"
-	higressAnnotationProxyNextUpstream   = "higress.io/proxy-next-upstream"
-	higressAnnotationProxyNextTries      = "higress.io/proxy-next-upstream-tries"
-	higressAnnotationProxyNextTimeout    = "higress.io/proxy-next-upstream-timeout"
-	higressAnnotationProxyNextEnabled    = "higress.io/enable-proxy-next-upstream"
-	higressAnnotationRewriteEnabled      = "higress.io/enable-rewrite"
-	higressAnnotationRewritePath         = "higress.io/rewrite-path"
-	higressAnnotationRewriteTarget       = "higress.io/rewrite-target"
-	higressAnnotationUpstreamVHost       = "higress.io/upstream-vhost"
-	higressAnnotationAuthConsumerLevels  = "higress.io/auth-consumer-levels"
-	higressAnnotationComment             = "higress.io/comment"
-	higressAnnotationHeaderMatch         = "-match-header-"
-	higressAnnotationQueryMatch          = "-match-query-"
-	higressAnnotationPseudoHeaderMatch   = "-match-pseudo-header-"
-	higressLabelDomainPrefix             = "higress.io/domain_"
-	higressLabelConfigMapType            = "higress.io/config-map-type"
-	higressLabelConfigMapTypeDomain      = "domain"
-	higressLabelConfigMapTypeAIRoute     = "ai-route"
-	higressLabelResourceDefiner          = "higress.io/resource-definer"
-	higressLabelResourceDefinerValue     = "higress"
-	higressLabelInternal                 = "higress.io/internal"
-	higressLabelBizType                  = "higress.io/biz-type"
-	higressLabelBizTypeMCPServer         = "mcp-server"
-	higressLabelMCPServerType            = "higress.io/mcp-server-type"
-	higressLabelWasmPluginName           = "higress.io/wasm-plugin-name"
-	higressLabelWasmPluginVersion        = "higress.io/wasm-plugin-version"
-	higressAnnotationTrueValue           = "true"
-	higressSecretTLS                     = "kubernetes.io/tls"
-	higressSecretTLSCRT                  = "tls.crt"
-	higressSecretTLSKey                  = "tls.key"
-	higressDataField                     = "data"
-	higressMcpBridgeKind                 = "McpBridge"
-	higressMcpBridgeAPIGroup             = "networking.higress.io"
-	higressMcpBridgeDefaultName          = "default"
-	higressConfigMapName                 = "higress-config"
-	higressWasmPluginResource            = "wasmplugin.extensions.higress.io"
-	higressEnvoyFilterResource           = "envoyfilters.networking.istio.io"
-	higressAIRoutePrefix                 = "ai-route-"
-	higressDomainPrefix                  = "domain-"
-	higressProviderDefaultProtocol       = "openai/v1"
-	higressProviderPluginProtocolOpenAI  = "openai"
-	higressMCPConfigKey                  = "higress"
-	higressMCPServerPathPrefix           = "/mcp-servers"
+	higressAnnotationDestination             = "higress.io/destination"
+	higressAnnotationUseRegex                = "higress.io/use-regex"
+	higressAnnotationIgnorePathCase          = "higress.io/ignore-path-case"
+	higressAnnotationMatchMethod             = "higress.io/match-method"
+	higressAnnotationResourceDescription     = "higress.io/resource-description"
+	higressAnnotationProxyNextUpstream       = "higress.io/proxy-next-upstream"
+	higressAnnotationProxyNextTries          = "higress.io/proxy-next-upstream-tries"
+	higressAnnotationProxyNextTimeout        = "higress.io/proxy-next-upstream-timeout"
+	higressAnnotationProxyNextEnabled        = "higress.io/enable-proxy-next-upstream"
+	higressAnnotationRewriteEnabled          = "higress.io/enable-rewrite"
+	higressAnnotationRewritePath             = "higress.io/rewrite-path"
+	higressAnnotationRewriteTarget           = "higress.io/rewrite-target"
+	higressAnnotationUpstreamVHost           = "higress.io/upstream-vhost"
+	higressAnnotationAuthConsumerDepartments = "higress.io/auth-consumer-departments"
+	higressAnnotationAuthConsumerLevels      = "higress.io/auth-consumer-levels"
+	higressAnnotationComment                 = "higress.io/comment"
+	higressAnnotationHeaderMatch             = "-match-header-"
+	higressAnnotationQueryMatch              = "-match-query-"
+	higressAnnotationPseudoHeaderMatch       = "-match-pseudo-header-"
+	higressLabelDomainPrefix                 = "higress.io/domain_"
+	higressLabelConfigMapType                = "higress.io/config-map-type"
+	higressLabelConfigMapTypeDomain          = "domain"
+	higressLabelConfigMapTypeAIRoute         = "ai-route"
+	higressLabelResourceDefiner              = "higress.io/resource-definer"
+	higressLabelResourceDefinerValue         = "higress"
+	higressLabelInternal                     = "higress.io/internal"
+	higressLabelBizType                      = "higress.io/biz-type"
+	higressLabelBizTypeMCPServer             = "mcp-server"
+	higressLabelMCPServerType                = "higress.io/mcp-server-type"
+	higressLabelWasmPluginName               = "higress.io/wasm-plugin-name"
+	higressLabelWasmPluginVersion            = "higress.io/wasm-plugin-version"
+	higressAnnotationTrueValue               = "true"
+	higressSecretTLS                         = "kubernetes.io/tls"
+	higressSecretTLSCRT                      = "tls.crt"
+	higressSecretTLSKey                      = "tls.key"
+	higressDataField                         = "data"
+	higressMcpBridgeKind                     = "McpBridge"
+	higressMcpBridgeAPIGroup                 = "networking.higress.io"
+	higressMcpBridgeDefaultName              = "default"
+	higressConfigMapName                     = "higress-config"
+	higressWasmPluginResource                = "wasmplugin.extensions.higress.io"
+	higressEnvoyFilterResource               = "envoyfilters.networking.istio.io"
+	higressAIRoutePrefix                     = "ai-route-"
+	higressDomainPrefix                      = "domain-"
+	higressProviderDefaultProtocol           = "openai/v1"
+	higressProviderPluginProtocolOpenAI      = "openai"
+	higressMCPConfigKey                      = "higress"
+	higressMCPServerPathPrefix               = "/mcp-servers"
 )
 
 func isControlPlaneKind(kind string) bool {
@@ -378,6 +379,9 @@ func (c *RealClient) upsertAIRouteResource(ctx context.Context, name string, dat
 	if err := c.syncAIRouteRuntime(ctx, name, payloadData); err != nil {
 		return nil, err
 	}
+	if err := c.SyncAIDataMaskingRuntime(ctx); err != nil {
+		return nil, err
+	}
 	return c.getAIRouteResource(ctx, name)
 }
 
@@ -536,7 +540,18 @@ func (c *RealClient) updateAIProxyWasmPlugin(ctx context.Context, mutate func(ma
 }
 
 func (c *RealClient) getAIProxyWasmPlugin(ctx context.Context) (map[string]any, error) {
-	return c.getObject(ctx, higressWasmPluginResource, "ai-proxy.internal")
+	name := builtinWasmPluginResourceName(higressWasmPluginNameAIProxy)
+	plugin, err := c.getObject(ctx, higressWasmPluginResource, name)
+	if err == nil {
+		return plugin, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	if err := c.ensureBuiltinWasmPlugin(ctx, higressWasmPluginNameAIProxy); err != nil {
+		return nil, err
+	}
+	return c.getObject(ctx, higressWasmPluginResource, name)
 }
 
 func (c *RealClient) listObjects(ctx context.Context, resource string, extraArgs ...string) ([]map[string]any, error) {
@@ -657,17 +672,18 @@ func wasmPluginToProviders(plugin map[string]any) []map[string]any {
 		if name == "" {
 			continue
 		}
+		providerType := canonicalProviderType(stringValue(provider["type"]))
 		item := map[string]any{
 			"name":       name,
-			"type":       stringValue(provider["type"]),
+			"type":       providerType,
 			"protocol":   providerProtocolValue(provider["protocol"]),
 			"tokens":     normalizeStringSlice(provider["apiTokens"]),
-			"rawConfigs": cloneMap(provider),
+			"rawConfigs": normalizeProviderRawConfigsForConsole(cloneMap(provider), providerType),
 		}
 		if failover := mapValue(provider["failover"]); len(failover) > 0 {
 			item["tokenFailoverConfig"] = cloneMap(failover)
 		}
-		if models := providerModelCatalog(name, stringValue(provider["type"])); len(models) > 0 {
+		if models := providerModelCatalog(name, providerType); len(models) > 0 {
 			item["models"] = models
 		}
 		result = append(result, item)
@@ -733,13 +749,14 @@ func serviceSourceToRegistry(name string, data map[string]any) map[string]any {
 }
 
 func providerPayloadFromResource(name string, data map[string]any) map[string]any {
-	payload := cloneMap(mapValue(data["rawConfigs"]))
+	providerType := canonicalProviderType(firstNonEmpty(stringValue(data["type"]), stringValue(mapValue(data["rawConfigs"])["type"])))
+	payload := normalizeProviderRawConfigsForConsole(cloneMap(mapValue(data["rawConfigs"])), providerType)
 	if payload == nil {
 		payload = map[string]any{}
 	}
 	payload["id"] = name
-	if value := stringValue(data["type"]); value != "" {
-		payload["type"] = value
+	if providerType != "" {
+		payload["type"] = providerType
 	}
 	if value := providerProtocolPluginValue(data["protocol"]); value != "" {
 		payload["protocol"] = value
@@ -810,6 +827,9 @@ func routeAnnotations(data map[string]any) map[string]string {
 		}
 	}
 	if authConfig := mapValue(data["authConfig"]); len(authConfig) > 0 {
+		if departments := normalizeStringSlice(authConfig["allowedDepartments"]); len(departments) > 0 {
+			annotations[higressAnnotationAuthConsumerDepartments] = strings.Join(departments, ",")
+		}
 		if levels := normalizeStringSlice(authConfig["allowedConsumerLevels"]); len(levels) > 0 {
 			annotations[higressAnnotationAuthConsumerLevels] = strings.Join(levels, ",")
 		}
@@ -1105,14 +1125,21 @@ func ingressRewrite(annotations map[string]string) map[string]any {
 }
 
 func ingressAuthConfig(annotations map[string]string) map[string]any {
+	departments := splitAndTrim(annotations[higressAnnotationAuthConsumerDepartments], ",")
 	levels := splitAndTrim(annotations[higressAnnotationAuthConsumerLevels], ",")
-	if len(levels) == 0 {
+	if len(departments) == 0 && len(levels) == 0 {
 		return nil
 	}
-	return map[string]any{
-		"enabled":               true,
-		"allowedConsumerLevels": levels,
+	result := map[string]any{
+		"enabled": true,
 	}
+	if len(departments) > 0 {
+		result["allowedDepartments"] = departments
+	}
+	if len(levels) > 0 {
+		result["allowedConsumerLevels"] = levels
+	}
+	return result
 }
 
 func ingressProxyNextUpstreamConfig(annotations map[string]string) map[string]any {
@@ -1322,7 +1349,7 @@ var legacyProviderModelCatalog = map[string][]string{
 	"stepfun":    {"step-1-8k", "step-1-32k", "step-1-128k"},
 	"minimax":    {"abab6.5s-chat", "abab6.5g-chat"},
 	"gemini":     {"gemini-1.5-flash", "gemini-1.5-pro"},
-	"doubao":     {"doubao-pro-32k", "doubao-lite-32k", "doubao-seed-2-0-pro-260215"},
+	"volcengine": {"doubao-pro-32k", "doubao-lite-32k", "doubao-seed-2-0-pro-260215"},
 	"openrouter": {"openrouter/auto"},
 	"grok":       {"grok-2-1212", "grok-2-vision-1212"},
 }
@@ -1331,7 +1358,30 @@ func normalizeProviderCatalogKey(value string) string {
 	value = strings.TrimSpace(strings.ToLower(value))
 	value = strings.ReplaceAll(value, "_", "-")
 	value = strings.ReplaceAll(value, " ", "-")
+	if value == "doubao" {
+		return "volcengine"
+	}
 	return value
+}
+
+func canonicalProviderType(value string) string {
+	return normalizeProviderCatalogKey(value)
+}
+
+func normalizeProviderRawConfigsForConsole(rawConfigs map[string]any, providerType string) map[string]any {
+	if rawConfigs == nil {
+		return map[string]any{}
+	}
+	rawConfigs["type"] = providerType
+	if providerType == "volcengine" {
+		if stringValue(rawConfigs["providerDomain"]) == "" {
+			if legacyDomain := stringValue(rawConfigs["doubaoDomain"]); legacyDomain != "" {
+				rawConfigs["providerDomain"] = legacyDomain
+			}
+		}
+		delete(rawConfigs, "doubaoDomain")
+	}
+	return rawConfigs
 }
 
 func sanitizeObjectForApply(item map[string]any) {

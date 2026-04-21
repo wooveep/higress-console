@@ -800,10 +800,10 @@ func resolveStatsBucket(bucket string, fromTime, toTime time.Time) (string, stri
 	}
 	switch normalized {
 	case "5m":
-		return "DATE_FORMAT(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(occurred_at) / 300) * 300), '%Y-%m-%d %H:%i:00')", "5m"
+		return "TO_CHAR(TO_TIMESTAMP(FLOOR(EXTRACT(EPOCH FROM occurred_at) / 300) * 300), 'YYYY-MM-DD HH24:MI:00')", "5m"
 	case "hour":
-		return "DATE_FORMAT(occurred_at, '%Y-%m-%d %H:00:00')", "hour"
+		return "TO_CHAR(DATE_TRUNC('hour', occurred_at), 'YYYY-MM-DD HH24:00:00')", "hour"
 	default:
-		return "DATE_FORMAT(occurred_at, '%Y-%m-%d')", "day"
+		return "TO_CHAR(DATE_TRUNC('day', occurred_at), 'YYYY-MM-DD')", "day"
 	}
 }

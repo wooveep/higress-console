@@ -12,7 +12,7 @@ info:
   x-description-i18n:
     zh-CN: 提供 AI 用量可观测能力，包括 token 统计、缓存与图像细分指标、日志和链路追踪。
   iconUrl: https://img.alicdn.com/imgextra/i1/O1CN018iKKih1iVx287RltL_!!6000000004419-2-tps-42-42.png
-  version: 2.2.1
+  version: 2.0.0
   contact:
     name: rinfx
 spec:

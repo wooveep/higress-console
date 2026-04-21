@@ -87,6 +87,7 @@ type Service struct {
 type portalReader interface {
 	ListConsumers(ctx context.Context) ([]portalsvc.ConsumerRecord, error)
 	ListAccounts(ctx context.Context) ([]portalsvc.OrgAccountRecord, error)
+	ListDepartmentTree(ctx context.Context) ([]*portalsvc.OrgDepartmentNode, error)
 }
 
 func New(
@@ -368,11 +369,16 @@ func (s *Service) executePortalConsumerLevelAuthReconcile(ctx context.Context) (
 		consumersByLevel[level] = normalizeUniqueStrings(consumersByLevel[level])
 	}
 
-	routeUpdated, err := s.reconcileResourceAuth(ctx, "routes", "authConfig", consumersByLevel)
+	departmentTree, err := s.portal.ListDepartmentTree(ctx)
 	if err != nil {
 		return "", err
 	}
-	aiRouteUpdated, err := s.reconcileResourceAuth(ctx, "ai-routes", "authConfig", consumersByLevel)
+
+	routeUpdated, err := s.reconcileResourceAuth(ctx, "routes", "authConfig", consumersByLevel, departmentTree)
+	if err != nil {
+		return "", err
+	}
+	aiRouteUpdated, err := s.reconcileResourceAuth(ctx, "ai-routes", "authConfig", consumersByLevel, departmentTree)
 	if err != nil {
 		return "", err
 	}
@@ -413,13 +419,36 @@ func (s *Service) executeAISensitiveProjection(ctx context.Context) (string, err
 	if err != nil {
 		return "", err
 	}
+	systemProjection := map[string]any{
+		"systemDenyEnabled": false,
+	}
+	if len(systemConfig) == 0 {
+		systemProjection["updatedBy"] = ""
+		systemProjection["updatedAt"] = nil
+	} else {
+		item := systemConfig[0]
+		systemProjection["systemDenyEnabled"] = toInt(item["system_deny_enabled"]) != 0
+		systemProjection["updatedBy"] = strings.TrimSpace(fmt.Sprint(item["updated_by"]))
+		systemProjection["updatedAt"] = item["updated_at"]
+	}
+
+	runtimeConfig := map[string]any{}
+	if existing, err := s.k8s.GetResource(ctx, "ai-sensitive-projections", "default"); err == nil {
+		if raw, ok := existing["runtimeConfig"].(map[string]any); ok {
+			runtimeConfig = map[string]any{}
+			for key, value := range raw {
+				runtimeConfig[key] = value
+			}
+		}
+	}
 
 	payload := map[string]any{
-		"name":         "default",
-		"detectRules":  detectRules,
-		"replaceRules": replaceRules,
-		"systemConfig": systemConfig,
-		"projectedAt":  time.Now().UTC().Format(time.RFC3339),
+		"name":          "default",
+		"detectRules":   detectRules,
+		"replaceRules":  replaceRules,
+		"systemConfig":  systemProjection,
+		"runtimeConfig": runtimeConfig,
+		"projectedAt":   time.Now().UTC().Format(time.RFC3339),
 	}
 	if _, err := s.k8s.UpsertResource(ctx, "ai-sensitive-projections", "default", payload); err != nil {
 		return "", err
@@ -470,11 +499,13 @@ func (s *Service) reconcileResourceAuth(
 	kind string,
 	authField string,
 	consumersByLevel map[string][]string,
+	departmentTree []*portalsvc.OrgDepartmentNode,
 ) (int, error) {
 	items, err := s.listGatewayKind(ctx, kind)
 	if err != nil {
 		return 0, err
 	}
+	departmentDescendants := indexDepartmentDescendants(departmentTree)
 	updated := 0
 	for _, item := range items {
 		name := strings.TrimSpace(fmt.Sprint(item["name"]))
@@ -486,10 +517,19 @@ func (s *Service) reconcileResourceAuth(
 			continue
 		}
 		levels := normalizeUniqueStrings(readStringList(authConfig["allowedConsumerLevels"]))
-		if len(levels) == 0 {
+		departments := normalizeUniqueStrings(readStringList(authConfig["allowedDepartments"]))
+		if len(levels) == 0 && len(departments) == 0 {
 			continue
 		}
-		resolvedConsumers := normalizeUniqueStrings(expandAllowedConsumers(readStringList(authConfig["allowedConsumers"]), levels, consumersByLevel))
+		resolvedConsumers := normalizeUniqueStrings(expandAllowedConsumersWithDepartments(
+			ctx,
+			readStringList(authConfig["allowedConsumers"]),
+			levels,
+			departments,
+			consumersByLevel,
+			departmentDescendants,
+			s.portal,
+		))
 		if slices.Equal(readStringList(authConfig["allowedConsumers"]), resolvedConsumers) {
 			continue
 		}
@@ -537,10 +577,69 @@ func (s *Service) reconcileMCPAuth(ctx context.Context, consumersByLevel map[str
 }
 
 func expandAllowedConsumers(existing []string, levels []string, consumersByLevel map[string][]string) []string {
+	return expandAllowedConsumersWithDepartments(context.Background(), existing, levels, nil, consumersByLevel, nil, nil)
+}
+
+func expandAllowedConsumersWithDepartments(
+	ctx context.Context,
+	existing []string,
+	levels []string,
+	departments []string,
+	consumersByLevel map[string][]string,
+	departmentDescendants map[string][]string,
+	portal portalReader,
+) []string {
 	result := append([]string{}, existing...)
 	for _, level := range levels {
 		result = append(result, consumersByLevel[strings.TrimSpace(strings.ToLower(level))]...)
 	}
+	if len(departments) == 0 || portal == nil {
+		return result
+	}
+
+	accounts, err := portal.ListAccounts(ctx)
+	if err != nil {
+		return result
+	}
+	allowedDepartments := map[string]struct{}{}
+	for _, departmentID := range departments {
+		trimmed := strings.TrimSpace(departmentID)
+		if trimmed == "" {
+			continue
+		}
+		allowedDepartments[trimmed] = struct{}{}
+		for _, childID := range departmentDescendants[trimmed] {
+			allowedDepartments[childID] = struct{}{}
+		}
+	}
+	for _, account := range accounts {
+		if strings.EqualFold(strings.TrimSpace(account.Status), "disabled") {
+			continue
+		}
+		if _, ok := allowedDepartments[strings.TrimSpace(account.DepartmentID)]; ok {
+			result = append(result, strings.TrimSpace(account.ConsumerName))
+		}
+	}
+	return result
+}
+
+func indexDepartmentDescendants(nodes []*portalsvc.OrgDepartmentNode) map[string][]string {
+	result := map[string][]string{}
+	var collect func(items []*portalsvc.OrgDepartmentNode) []string
+	collect = func(items []*portalsvc.OrgDepartmentNode) []string {
+		ids := make([]string, 0)
+		for _, item := range items {
+			if item == nil {
+				continue
+			}
+			childIDs := collect(item.Children)
+			result[item.DepartmentID] = append([]string{}, childIDs...)
+			ids = append(ids, item.DepartmentID)
+			ids = append(ids, childIDs...)
+		}
+		return ids
+	}
+	collect(nodes)
 	return result
 }
 
@@ -749,7 +848,7 @@ func (s *Service) createRunningRun(
 		return 0, time.Time{}, err
 	}
 	startedAt := time.Now().UTC()
-	result, err := db.ExecContext(ctx, `
+	id, err := portaldbclient.InsertReturningID(ctx, db, s.client.Driver(), `
 		INSERT INTO job_run_record (
 			job_name, trigger_source, trigger_id, status, idempotency_key, target_version, message, started_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -765,7 +864,6 @@ func (s *Service) createRunningRun(
 	if err != nil {
 		return 0, time.Time{}, err
 	}
-	id, _ := result.LastInsertId()
 	return id, startedAt, nil
 }
 
@@ -780,7 +878,7 @@ func (s *Service) createTerminalRun(
 	startedAt := time.Now().UTC()
 	finishedAt := startedAt
 	duration := int64(0)
-	result, err := db.ExecContext(ctx, `
+	id, err := portaldbclient.InsertReturningID(ctx, db, s.client.Driver(), `
 		INSERT INTO job_run_record (
 			job_name, trigger_source, trigger_id, status, idempotency_key, target_version, message, error_text, started_at, finished_at, duration_ms
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -799,7 +897,6 @@ func (s *Service) createTerminalRun(
 	if err != nil {
 		return nil, err
 	}
-	id, _ := result.LastInsertId()
 	return s.getRun(ctx, id)
 }
 

@@ -146,6 +146,14 @@ func Bind(group *ghttp.RouterGroup, portalService *portalsvc.Service) {
 		item, err := portalService.UpdateModelAsset(r.Context(), r.GetRouter("assetId").String(), req)
 		writeJSON(r, item, err, 200)
 	})
+	group.DELETE("/v1/ai/model-assets/:assetId", func(r *ghttp.Request) {
+		if err := portalService.DeleteModelAsset(r.Context(), r.GetRouter("assetId").String()); err != nil {
+			writeJSON(r, nil, err, 400)
+			return
+		}
+		r.Response.WriteStatus(204)
+		r.ExitAll()
+	})
 	group.POST("/v1/ai/model-assets/:assetId/bindings", func(r *ghttp.Request) {
 		var req portalsvc.ModelAssetBinding
 		if err := r.Parse(&req); err != nil {
@@ -169,6 +177,18 @@ func Bind(group *ghttp.RouterGroup, portalService *portalsvc.Service) {
 			req,
 		)
 		writeJSON(r, item, err, 200)
+	})
+	group.DELETE("/v1/ai/model-assets/:assetId/bindings/:bindingId", func(r *ghttp.Request) {
+		if err := portalService.DeleteModelBinding(
+			r.Context(),
+			r.GetRouter("assetId").String(),
+			r.GetRouter("bindingId").String(),
+		); err != nil {
+			writeJSON(r, nil, err, 400)
+			return
+		}
+		r.Response.WriteStatus(204)
+		r.ExitAll()
 	})
 	group.POST("/v1/ai/model-assets/:assetId/bindings/:bindingId/publish", func(r *ghttp.Request) {
 		item, err := portalService.PublishModelBinding(
@@ -414,6 +434,19 @@ func Bind(group *ghttp.RouterGroup, portalService *portalsvc.Service) {
 			return
 		}
 		item, err := portalService.SaveAISensitiveSystemConfig(r.Context(), req)
+		writeJSON(r, item, err, 200)
+	})
+	group.GET("/v1/ai/sensitive-words/runtime-config", func(r *ghttp.Request) {
+		item, err := portalService.GetAISensitiveRuntimeConfig(r.Context())
+		writeJSON(r, item, err, 200)
+	})
+	group.PUT("/v1/ai/sensitive-words/runtime-config", func(r *ghttp.Request) {
+		var req portalsvc.AISensitiveRuntimeConfig
+		if err := r.Parse(&req); err != nil {
+			writeJSON(r, nil, err, 400)
+			return
+		}
+		item, err := portalService.SaveAISensitiveRuntimeConfig(r.Context(), req)
 		writeJSON(r, item, err, 200)
 	})
 

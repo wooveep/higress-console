@@ -162,7 +162,7 @@ backend/
 - 分类：
   - service 单元测试
   - DAO + sqlmock
-  - MySQL 集成测试
+  - PostgreSQL 集成测试
   - K8s fake client 测试
   - contract fixtures
   - job 幂等测试

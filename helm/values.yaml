@@ -110,7 +110,12 @@ resources:
 
 nodeSelector: {}
 affinity: {}
+topologySpreadConstraints: []
 tolerations: {}
+
+pdb:
+  enabled: false
+  minAvailable: 1
 
 web:
   login:
@@ -158,12 +163,13 @@ pluginServer:
 
 portalDatabase:
   enabled: false
-  # Default host is "<release>-aigateway-core-mysql" when empty.
+  driver: postgres
+  # Default host is "<release>-aigateway-core-postgresql-pgpool" when empty.
   host: ""
-  port: 3306
+  port: 5432
   database: aigateway_portal
-  params: "parseTime=true&charset=utf8mb4&loc=Asia%2FShanghai"
-  jdbcParams: "useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai"
+  params: "sslmode=disable"
+  jdbcParams: "sslmode=disable"
   # Default secret is "<release>-aigateway-core-db" when empty.
   secretName: ""
   usernameKey: username

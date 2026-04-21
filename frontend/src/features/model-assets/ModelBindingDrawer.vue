@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import type {
+  ModelAsset,
   ModelAssetBinding,
   ModelAssetOptions,
   ModelBindingPriceVersion,
@@ -8,11 +10,23 @@ import type {
 } from '@/interfaces/model-asset';
 import type { LlmProvider } from '@/interfaces/llm-provider';
 import DrawerFooter from '@/components/common/DrawerFooter.vue';
-import { buildPricing, describePricing, getPricingFieldExtra, pricingFieldGroups, toBindingFormState } from './model-asset-form';
+import { buildProviderDisplayOptions } from '@/features/llm-provider/provider-display';
+import {
+  MODEL_TYPE_LABELS,
+  applyDefaultPricingByModelType,
+  buildPricing,
+  clearIrrelevantPricing,
+  describePricing,
+  getLimitFieldsForType,
+  getPricingFieldsForType,
+  toBindingFormState,
+} from './model-asset-form';
 
 const props = defineProps<{
   open: boolean;
   binding?: ModelAssetBinding | null;
+  assets: ModelAsset[];
+  selectedAssetId?: string;
   providers: LlmProvider[];
   assetOptions: ModelAssetOptions;
   activePriceVersion?: ModelBindingPriceVersion | null;
@@ -24,12 +38,9 @@ const emit = defineEmits<{
   'open-history': [];
 }>();
 
+const { t } = useI18n();
 const formState = reactive(toBindingFormState());
 const formRef = ref();
-
-watch(() => [props.open, props.binding], () => {
-  Object.assign(formState, toBindingFormState(props.binding || undefined));
-}, { immediate: true });
 
 const providerModelCatalog = computed(() =>
   (props.assetOptions.providerModels || []).reduce<Record<string, ProviderModelOption[]>>((accumulator, item) => {
@@ -37,9 +48,39 @@ const providerModelCatalog = computed(() =>
     return accumulator;
   }, {}),
 );
+const assetOptions = computed(() =>
+  (props.assets || []).map((item) => ({
+    label: item.displayName || item.canonicalName || item.assetId,
+    value: item.assetId,
+  })),
+);
+const providerOptions = computed(() => buildProviderDisplayOptions(props.providers || [], t, [
+  formState.providerName,
+]));
 
 const currentProviderModels = computed(() => providerModelCatalog.value[formState.providerName] || []);
 const currentProviderUsesCatalog = computed(() => currentProviderModels.value.length > 0);
+const currentAssetLabel = computed(() =>
+  props.assets.find((item) => item.assetId === formState.selectedAssetId)?.displayName
+  || props.assets.find((item) => item.assetId === formState.selectedAssetId)?.canonicalName
+  || formState.selectedAssetId,
+);
+const currentAsset = computed(() =>
+  props.assets.find((item) => item.assetId === formState.selectedAssetId)
+  || props.assets.find((item) => item.assetId === props.selectedAssetId)
+  || null,
+);
+const currentModelType = computed(() => currentAsset.value?.modelType || '');
+const pricingFields = computed(() => getPricingFieldsForType(currentModelType.value));
+const limitFields = computed(() => getLimitFieldsForType(currentModelType.value));
+
+watch(() => [props.open, props.binding, props.selectedAssetId], () => {
+  Object.assign(formState, toBindingFormState(props.binding || undefined, props.selectedAssetId || ''));
+  clearIrrelevantPricing(formState, currentModelType.value);
+  if (!props.binding) {
+    applyDefaultPricingByModelType(formState, currentModelType.value);
+  }
+}, { immediate: true });
 
 const currentModelIdOptions = computed(() => {
   const options = currentProviderModels.value.map((item) => ({
@@ -70,6 +111,11 @@ const hasLegacyCatalogValue = computed(() =>
     || (Boolean(formState.targetModel) && !currentProviderModels.value.some((item) => item.targetModel === formState.targetModel))
   ),
 );
+
+watch(() => currentModelType.value, (nextType) => {
+  clearIrrelevantPricing(formState, nextType);
+  applyDefaultPricingByModelType(formState, nextType);
+});
 
 function syncBindingModelPair(field: 'modelId' | 'targetModel', selectedValue?: string) {
   if (!currentProviderUsesCatalog.value) {
@@ -108,17 +154,24 @@ async function submit() {
   await formRef.value?.validate();
   emit('submit', {
     ...(props.binding || {}),
+    assetId: formState.selectedAssetId.trim(),
     bindingId: formState.bindingId.trim(),
     modelId: formState.modelId.trim(),
     providerName: formState.providerName.trim(),
     targetModel: formState.targetModel.trim(),
     protocol: formState.protocol.trim() || 'openai/v1',
     endpoint: formState.endpoint.trim(),
-    pricing: buildPricing(formState),
+    pricing: buildPricing(formState, currentModelType.value),
     limits: {
+      maxInputTokens: formState.maxInputTokens,
+      maxOutputTokens: formState.maxOutputTokens,
+      contextWindowTokens: formState.contextWindowTokens,
+      maxReasoningTokens: formState.maxReasoningTokens,
+      maxInputTokensInReasoningMode: formState.maxInputTokensInReasoningMode,
+      maxOutputTokensInReasoningMode: formState.maxOutputTokensInReasoningMode,
       rpm: formState.rpm,
       tpm: formState.tpm,
-      contextWindow: formState.contextWindow,
+      contextWindow: formState.contextWindowTokens,
     },
   }, Boolean(props.binding));
 }
@@ -141,13 +194,30 @@ async function submit() {
       :description="`发布时间：${binding.publishedAt || '-'}；下架时间：${binding.unpublishedAt || '-'}`"
     />
 
+    <a-alert
+      v-else
+      type="info"
+      show-icon
+      style="margin-bottom: 16px"
+      message="绑定 ID 将在保存后自动生成。"
+    />
+
     <a-card v-if="activePriceVersion" size="small" title="当前生效价格版本" style="margin-bottom: 16px">
       <div class="model-binding-drawer__active">
         <span>版本 #{{ activePriceVersion.versionId }}</span>
         <span>生效时间 {{ activePriceVersion.effectiveFrom || '-' }}</span>
-        <span>{{ describePricing(activePriceVersion.pricing) }}</span>
+        <span>{{ describePricing(activePriceVersion.pricing, currentModelType) }}</span>
       </div>
     </a-card>
+
+    <a-alert
+      v-if="currentModelType"
+      type="info"
+      show-icon
+      style="margin-bottom: 16px"
+      :message="`当前模型类型：${MODEL_TYPE_LABELS[currentModelType] || currentModelType}`"
+      description="价格项和限流字段会根据模型类型自动切换；不兼容的旧价格会在保存时清理。"
+    />
 
     <a-alert
       v-if="formState.providerName && !currentProviderUsesCatalog"
@@ -168,11 +238,25 @@ async function submit() {
     <a-form ref="formRef" layout="vertical" :model="formState">
       <div class="model-binding-drawer__grid">
         <a-form-item
+          label="模型资产"
+          name="selectedAssetId"
+          :rules="[{ required: true, message: '请选择模型资产' }]"
+        >
+          <a-select
+            v-if="!binding"
+            v-model:value="formState.selectedAssetId"
+            show-search
+            :options="assetOptions"
+          />
+          <a-input v-else :value="currentAssetLabel" disabled />
+        </a-form-item>
+        <a-form-item
+          v-if="binding"
           label="绑定 ID"
           name="bindingId"
           :rules="[{ required: true, message: '请输入绑定 ID' }]"
         >
-          <a-input v-model:value="formState.bindingId" :disabled="Boolean(binding)" />
+          <a-input v-model:value="formState.bindingId" disabled />
         </a-form-item>
         <a-form-item
           label="Provider"
@@ -182,7 +266,7 @@ async function submit() {
           <a-select
             :value="formState.providerName"
             show-search
-            :options="providers.map((item) => ({ label: item.name, value: item.name }))"
+            :options="providerOptions"
             @update:value="handleProviderChange"
           />
         </a-form-item>
@@ -224,14 +308,18 @@ async function submit() {
 
       <a-divider orientation="left">限制</a-divider>
       <div class="model-binding-drawer__grid model-binding-drawer__grid--compact">
-        <a-form-item label="RPM">
-          <a-input-number v-model:value="formState.rpm" style="width: 100%" :min="0" />
-        </a-form-item>
-        <a-form-item label="TPM">
-          <a-input-number v-model:value="formState.tpm" style="width: 100%" :min="0" />
-        </a-form-item>
-        <a-form-item label="Context Window">
-          <a-input-number v-model:value="formState.contextWindow" style="width: 100%" :min="0" />
+        <a-form-item
+          v-for="field in limitFields"
+          :key="field.name"
+          :label="field.label"
+        >
+          <a-input-number
+            :value="typeof formState[field.name] === 'number' ? formState[field.name] as number : undefined"
+            style="width: 100%"
+            :min="0"
+            :step="1"
+            @update:value="(value) => ((formState as any)[field.name] = value ?? undefined)"
+          />
         </a-form-item>
       </div>
 
@@ -240,30 +328,28 @@ async function submit() {
         <a-form-item label="币种">
           <a-input v-model:value="formState.currency" />
         </a-form-item>
-        <a-form-item label="支持 Prompt Cache">
-          <a-switch v-model:checked="formState.supportsPromptCaching" />
-        </a-form-item>
       </div>
 
-      <section v-for="group in pricingFieldGroups" :key="group.title" class="model-binding-drawer__group">
-        <h4>{{ group.title }}</h4>
-        <div class="model-binding-drawer__grid">
-          <a-form-item
-            v-for="field in group.fields"
-            :key="String(field.name)"
-            :label="field.label"
-            :extra="getPricingFieldExtra(field, formState.currency)"
-          >
-            <a-input-number
-              :value="typeof formState[field.name] === 'number' ? formState[field.name] as number : undefined"
-              style="width: 100%"
-              :min="0"
-              :step="field.step || 0.000001"
-              @update:value="(value) => ((formState as any)[field.name] = value ?? undefined)"
-            />
-          </a-form-item>
-        </div>
-      </section>
+      <div v-if="!pricingFields.length" class="model-binding-drawer__empty">
+        请先选择模型资产并设置模型类型。
+      </div>
+
+      <div v-else class="model-binding-drawer__grid">
+        <a-form-item
+          v-for="field in pricingFields"
+          :key="field.name"
+          :label="field.label"
+          :extra="field.unit"
+        >
+          <a-input-number
+            :value="typeof formState[field.name] === 'number' ? formState[field.name] as number : undefined"
+            style="width: 100%"
+            :min="0"
+            :step="0.000001"
+            @update:value="(value) => ((formState as any)[field.name] = value ?? undefined)"
+          />
+        </a-form-item>
+      </div>
     </a-form>
 
     <DrawerFooter @cancel="close" @confirm="submit">
@@ -285,21 +371,20 @@ async function submit() {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.model-binding-drawer__group {
-  margin-top: 12px;
-}
-
-.model-binding-drawer__group h4 {
-  margin: 0 0 12px;
-  font-size: 13px;
-}
-
 .model-binding-drawer__active {
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
   color: var(--portal-text-soft);
   font-size: 12px;
+}
+
+.model-binding-drawer__empty {
+  padding: 20px 16px;
+  border: 1px dashed var(--portal-border);
+  border-radius: 12px;
+  background: var(--portal-surface-soft);
+  color: var(--portal-text-soft);
 }
 
 @media (max-width: 960px) {

@@ -1,36 +1,24 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import PageSection from '@/components/common/PageSection.vue';
 import ListToolbar from '@/components/common/ListToolbar.vue';
-import DrawerFooter from '@/components/common/DrawerFooter.vue';
 import DeleteConfirmModal from '@/components/common/DeleteConfirmModal.vue';
 import StrategyLink from '@/components/common/StrategyLink.vue';
 import StatusTag from '@/components/common/StatusTag.vue';
-import { addAiRoute, deleteAiRoute, getAiRoutes, updateAiRoute } from '@/services/ai-route';
-import { safeParseJson, splitLines, stringifyPretty } from '@/lib/portal';
+import AiRouteDrawer from '@/features/routes/AiRouteDrawer.vue';
+import type { AiRoute } from '@/interfaces/ai-route';
 import { showSuccess } from '@/lib/feedback';
+import { addAiRoute, deleteAiRoute, getAiRoutes, updateAiRoute } from '@/services/ai-route';
 
 const loading = ref(false);
 const search = ref('');
-const rows = ref<any[]>([]);
+const rows = ref<AiRoute[]>([]);
 const drawerOpen = ref(false);
 const usageOpen = ref(false);
 const deleteOpen = ref(false);
-const editing = ref<any>(null);
-const deleting = ref<any>(null);
+const editing = ref<AiRoute | null>(null);
+const deleting = ref<AiRoute | null>(null);
 const usageCommand = ref('');
-
-const formState = reactive({
-  name: '',
-  domainsText: '',
-  pathMatchType: 'PRE',
-  pathMatchValue: '/v1/chat/completions',
-  modelPredicatesJson: '[]',
-  upstreamsJson: '[\n  {\n    "provider": "",\n    "weight": 100\n  }\n]',
-  allowedConsumerLevels: ['normal'] as string[],
-  fallbackEnabled: false,
-  fallbackJson: '{\n  "upstreams": []\n}',
-});
 
 const filtered = computed(() => rows.value.filter((item) => {
   const keyword = search.value.trim().toLowerCase();
@@ -63,23 +51,12 @@ async function load() {
   }
 }
 
-function openDrawer(record?: any) {
+function openDrawer(record?: AiRoute) {
   editing.value = record || null;
-  Object.assign(formState, {
-    name: record?.name || '',
-    domainsText: (record?.domains || []).join('\n'),
-    pathMatchType: record?.pathPredicate?.matchType || 'PRE',
-    pathMatchValue: record?.pathPredicate?.matchValue || '/v1/chat/completions',
-    modelPredicatesJson: stringifyPretty(record?.modelPredicates || []),
-    upstreamsJson: stringifyPretty(record?.upstreams || []),
-    allowedConsumerLevels: record?.authConfig?.allowedConsumerLevels || ['normal'],
-    fallbackEnabled: Boolean(record?.fallbackConfig?.enabled),
-    fallbackJson: stringifyPretty(record?.fallbackConfig || { upstreams: [] }),
-  });
   drawerOpen.value = true;
 }
 
-function openUsage(record: any) {
+function openUsage(record: AiRoute) {
   usageCommand.value = `curl -sv http://<aigateway-gateway-ip>/v1/chat/completions \\
 -X POST \\
 -H 'Content-Type: application/json'${record.domains?.[0] ? ` \\\n+-H 'Host: ${record.domains[0]}'` : ''} \\
@@ -87,31 +64,11 @@ function openUsage(record: any) {
   usageOpen.value = true;
 }
 
-async function submit() {
-  const fallbackConfig = safeParseJson(formState.fallbackJson, { upstreams: [] });
-  const payload = {
-    ...editing.value,
-    name: formState.name,
-    domains: splitLines(formState.domainsText),
-    pathPredicate: {
-      matchType: formState.pathMatchType,
-      matchValue: formState.pathMatchValue,
-    },
-    modelPredicates: safeParseJson(formState.modelPredicatesJson, []),
-    upstreams: safeParseJson(formState.upstreamsJson, []),
-    authConfig: {
-      enabled: formState.allowedConsumerLevels.length > 0,
-      allowedConsumerLevels: formState.allowedConsumerLevels,
-    },
-    fallbackConfig: {
-      ...fallbackConfig,
-      enabled: formState.fallbackEnabled,
-    },
-  };
-  if (editing.value) {
-    await updateAiRoute(payload as any);
+async function submit(payload: AiRoute, isEdit: boolean) {
+  if (isEdit) {
+    await updateAiRoute(payload);
   } else {
-    await addAiRoute(payload as any);
+    await addAiRoute(payload);
   }
   drawerOpen.value = false;
   await load();
@@ -134,7 +91,7 @@ onMounted(load);
 <template>
   <PageSection title="AI 路由管理">
     <ListToolbar v-model:search="search" search-placeholder="搜索 AI 路由名或域名" create-text="创建 AI 路由" @refresh="load" @create="openDrawer()" />
-    <a-table :data-source="filtered" :loading="loading" row-key="name" :scroll="{ x: 1120 }">
+    <a-table :data-source="filtered" :loading="loading" row-key="name" :scroll="{ x: 1180 }">
       <a-table-column key="name" data-index="name" title="名称" />
       <a-table-column key="domains" title="域名">
         <template #default="{ record }">{{ formatRouteDomainDisplay(record) }}</template>
@@ -148,7 +105,7 @@ onMounted(load);
       <a-table-column key="auth" title="认证">
         <template #default="{ record }"><StatusTag :value="record.authConfig?.enabled ? 'enabled' : 'disabled'" /></template>
       </a-table-column>
-      <a-table-column key="actions" title="操作" width="300">
+      <a-table-column key="actions" title="操作" width="320">
         <template #default="{ record }">
           <a-button type="link" size="small" @click="openUsage(record)">使用说明</a-button>
           <StrategyLink :path="`/ai/route/config?type=aiRoute&name=${encodeURIComponent(record.name)}`" />
@@ -158,27 +115,11 @@ onMounted(load);
       </a-table-column>
     </a-table>
 
-    <a-drawer v-model:open="drawerOpen" width="760" :title="editing ? '编辑 AI 路由' : '创建 AI 路由'">
-      <a-form layout="vertical">
-        <a-form-item label="名称"><a-input v-model:value="formState.name" :disabled="Boolean(editing)" /></a-form-item>
-        <a-form-item label="域名（一行一个）"><a-textarea v-model:value="formState.domainsText" :rows="4" /></a-form-item>
-        <a-form-item label="路径匹配方式"><a-input v-model:value="formState.pathMatchType" /></a-form-item>
-        <a-form-item label="路径匹配值"><a-input v-model:value="formState.pathMatchValue" /></a-form-item>
-        <a-form-item label="模型匹配(JSON)"><a-textarea v-model:value="formState.modelPredicatesJson" :rows="6" /></a-form-item>
-        <a-form-item label="上游服务(JSON)"><a-textarea v-model:value="formState.upstreamsJson" :rows="10" /></a-form-item>
-        <a-form-item label="允许用户等级">
-          <a-select v-model:value="formState.allowedConsumerLevels" mode="multiple">
-            <a-select-option value="normal">normal</a-select-option>
-            <a-select-option value="plus">plus</a-select-option>
-            <a-select-option value="pro">pro</a-select-option>
-            <a-select-option value="ultra">ultra</a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item label="启用 fallback"><a-switch v-model:checked="formState.fallbackEnabled" /></a-form-item>
-        <a-form-item label="Fallback 配置(JSON)"><a-textarea v-model:value="formState.fallbackJson" :rows="8" /></a-form-item>
-      </a-form>
-      <DrawerFooter @cancel="drawerOpen = false" @confirm="submit" />
-    </a-drawer>
+    <AiRouteDrawer
+      v-model:open="drawerOpen"
+      :route="editing"
+      @submit="submit"
+    />
 
     <a-drawer v-model:open="usageOpen" width="720" title="AI 路由使用方法">
       <pre class="portal-pre">{{ usageCommand }}</pre>

@@ -2,12 +2,27 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	portalsvc "github.com/wooveep/aigateway-console/backend/internal/service/portal"
 	k8sclient "github.com/wooveep/aigateway-console/backend/utility/clients/k8s"
 )
+
+type stubPortal struct {
+	accounts    []portalsvc.OrgAccountRecord
+	departments []*portalsvc.OrgDepartmentNode
+}
+
+func (s stubPortal) ListAccounts(ctx context.Context) ([]portalsvc.OrgAccountRecord, error) {
+	return append([]portalsvc.OrgAccountRecord{}, s.accounts...), nil
+}
+
+func (s stubPortal) ListDepartmentTree(ctx context.Context) ([]*portalsvc.OrgDepartmentNode, error) {
+	return append([]*portalsvc.OrgDepartmentNode{}, s.departments...), nil
+}
 
 func TestProtectedResourceDeleteIsRejected(t *testing.T) {
 	svc := New(k8sclient.NewMemoryClient())
@@ -41,7 +56,11 @@ func TestPluginInstanceRoundTrip(t *testing.T) {
 		}},
 	})
 	require.NoError(t, err)
-	svc := New(client)
+	svc := New(client, stubPortal{
+		accounts: []portalsvc.OrgAccountRecord{
+			{ConsumerName: "normal-user", UserLevel: "normal", Status: "active"},
+		},
+	})
 
 	_, err = svc.SavePluginInstance(context.Background(), "route", "demo-route", "demo-plugin", map[string]any{
 		"config": map[string]any{"consumers": []string{"demo"}},
@@ -65,7 +84,11 @@ func TestPluginInstanceDeleteAndServiceScope(t *testing.T) {
 		"port":      8080,
 	})
 	require.NoError(t, err)
-	svc := New(client)
+	svc := New(client, stubPortal{
+		accounts: []portalsvc.OrgAccountRecord{
+			{ConsumerName: "normal-user", UserLevel: "normal", Status: "active"},
+		},
+	})
 
 	_, err = svc.SavePluginInstance(context.Background(), "service", "svc-a", "ai-statistics", map[string]any{
 		"config": map[string]any{"enabled": true},
@@ -80,6 +103,59 @@ func TestPluginInstanceDeleteAndServiceScope(t *testing.T) {
 	list, err = svc.ListPluginInstances(context.Background(), "service", "svc-a")
 	require.NoError(t, err)
 	require.Len(t, list, 0)
+}
+
+func TestAIRoutePluginInstanceRoundTrip(t *testing.T) {
+	client := k8sclient.NewMemoryClient()
+	_, err := client.UpsertResource(context.Background(), "ai-routes", "doubao", map[string]any{
+		"name": "doubao",
+		"pathPredicate": map[string]any{
+			"matchType":  "PRE",
+			"matchValue": "/",
+		},
+		"upstreams": []map[string]any{{
+			"provider": "doubao",
+			"model":    "doubao-pro",
+			"weight":   100,
+		}},
+	})
+	require.NoError(t, err)
+
+	svc := New(client, stubPortal{
+		accounts: []portalsvc.OrgAccountRecord{
+			{ConsumerName: "normal-user", UserLevel: "normal", Status: "active"},
+		},
+	})
+
+	_, err = svc.SavePluginInstance(context.Background(), "route", "ai-route-doubao.internal", "ai-data-masking", map[string]any{
+		"enabled":           true,
+		"rawConfigurations": "",
+	})
+	require.NoError(t, err)
+
+	item, err := client.GetResource(context.Background(), "route-plugin-instances:ai-route-doubao.internal", "ai-data-masking")
+	require.NoError(t, err)
+	require.Equal(t, "ai-data-masking", item["name"])
+	require.Equal(t, true, item["enabled"])
+
+	list, err := svc.ListPluginInstances(context.Background(), "route", "ai-route-doubao.internal")
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	require.Equal(t, "ai-data-masking", list[0]["name"])
+	require.Equal(t, true, list[0]["enabled"])
+
+	plugin, err := client.GetResource(context.Background(), "wasmplugin.extensions.higress.io", "ai-data-masking.internal")
+	require.NoError(t, err)
+	spec, _ := plugin["spec"].(map[string]any)
+	rules := toMapSlice(spec["matchRules"])
+	require.Len(t, rules, 2)
+
+	require.NoError(t, svc.DeletePluginInstance(context.Background(), "route", "ai-route-doubao.internal", "ai-data-masking"))
+	plugin, err = client.GetResource(context.Background(), "wasmplugin.extensions.higress.io", "ai-data-masking.internal")
+	require.NoError(t, err)
+	spec, _ = plugin["spec"].(map[string]any)
+	rules = toMapSlice(spec["matchRules"])
+	require.Empty(t, rules)
 }
 
 func TestRoutePluginInstancesIncludeBuiltinRuntimeBindings(t *testing.T) {
@@ -103,7 +179,11 @@ func TestRoutePluginInstancesIncludeBuiltinRuntimeBindings(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	svc := New(client)
+	svc := New(client, stubPortal{
+		accounts: []portalsvc.OrgAccountRecord{
+			{ConsumerName: "normal-user", UserLevel: "normal", Status: "active"},
+		},
+	})
 	list, err := svc.ListPluginInstances(context.Background(), "route", "ai-route-demo.internal", "ai-route-demo.internal-internal")
 	require.NoError(t, err)
 	require.Len(t, list, 1)
@@ -116,6 +196,40 @@ func TestRoutePluginInstancesIncludeBuiltinRuntimeBindings(t *testing.T) {
 	require.Equal(t, "builtin-rule", item["runtimeSource"])
 }
 
+func TestGlobalPluginInstanceFallsBackToBuiltinRuntimeBindings(t *testing.T) {
+	client := k8sclient.NewMemoryClient()
+	_, err := client.UpsertResource(context.Background(), "wasmplugin.extensions.higress.io", "ai-statistics-1.0.0", map[string]any{
+		"metadata": map[string]any{
+			"name": "ai-statistics-1.0.0",
+			"labels": map[string]any{
+				"higress.io/wasm-plugin-name": "ai-statistics",
+			},
+		},
+		"spec": map[string]any{
+			"matchRules": []map[string]any{
+				{
+					"config":        map[string]any{"use_default_response_attributes": true},
+					"configDisable": false,
+					"ingress":       []string{"ai-route-demo.internal"},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	svc := New(client, stubPortal{
+		accounts: []portalsvc.OrgAccountRecord{
+			{ConsumerName: "normal-user", UserLevel: "normal", Status: "active"},
+		},
+	})
+
+	item, err := svc.GetPluginInstance(context.Background(), "global", "", "ai-statistics")
+	require.NoError(t, err)
+	require.Equal(t, true, item["enabled"])
+	require.Equal(t, "builtin-rule-global", item["runtimeSource"])
+	require.Equal(t, []string{"ai-route-demo.internal"}, item["runtimeTargets"])
+}
+
 func TestWasmPluginReadmeFallsBackToDescription(t *testing.T) {
 	client := k8sclient.NewMemoryClient()
 	_, err := client.UpsertResource(context.Background(), "wasm-plugins", "demo-plugin", map[string]any{
@@ -124,7 +238,11 @@ func TestWasmPluginReadmeFallsBackToDescription(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	svc := New(client)
+	svc := New(client, stubPortal{
+		accounts: []portalsvc.OrgAccountRecord{
+			{ConsumerName: "normal-user", UserLevel: "normal", Status: "active"},
+		},
+	})
 	readme, err := svc.GetWasmPluginReadme(context.Background(), "demo-plugin")
 	require.NoError(t, err)
 	require.Contains(t, readme, "A demo plugin.")
@@ -154,13 +272,13 @@ func TestRouteValidationAndIngressClassNormalization(t *testing.T) {
 func TestBuiltinWasmPluginFallbackExposesConfig(t *testing.T) {
 	svc := New(k8sclient.NewMemoryClient())
 
-	config, err := svc.GetWasmPluginConfig(context.Background(), "cors")
+	config, err := svc.GetWasmPluginConfig(context.Background(), "ai-security-guard")
 	require.NoError(t, err)
 	require.NotNil(t, config["schema"])
 
-	readme, err := svc.GetWasmPluginReadme(context.Background(), "cors")
+	readme, err := svc.GetWasmPluginReadme(context.Background(), "ai-security-guard")
 	require.NoError(t, err)
-	require.Contains(t, readme, "CORS")
+	require.Contains(t, readme, "AI Content Security")
 }
 
 func TestBuiltinWasmPluginSnapshotOverridesLegacyMetadata(t *testing.T) {
@@ -178,6 +296,26 @@ func TestBuiltinWasmPluginSnapshotOverridesLegacyMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, readme, "32000")
 	require.Contains(t, readme, "Detailed Usage Normalization")
+}
+
+func TestBuiltinWasmPluginFallbackIncludesAIQuota(t *testing.T) {
+	svc := New(k8sclient.NewMemoryClient())
+
+	items, err := svc.List(context.Background(), "wasm-plugins")
+	require.NoError(t, err)
+
+	var aiQuota map[string]any
+	for _, item := range items {
+		if fmt.Sprint(item["name"]) == "ai-quota" {
+			aiQuota = item
+			break
+		}
+	}
+
+	require.NotNil(t, aiQuota)
+	require.Equal(t, true, aiQuota["builtIn"])
+	require.Equal(t, "ai", aiQuota["category"])
+	require.Equal(t, "AI Quota", aiQuota["title"])
 }
 
 func TestMCPServerRouteMetadataIsExplicit(t *testing.T) {
@@ -346,6 +484,46 @@ func TestAIProviderValidationNormalizesQwenDefaults(t *testing.T) {
 	require.ElementsMatch(t, []string{"file-a", "file-b"}, rawConfigs["qwenFileIds"])
 }
 
+func TestAIProviderValidationNormalizesVolcengineConfigs(t *testing.T) {
+	svc := New(k8sclient.NewMemoryClient())
+
+	item, err := svc.Save(context.Background(), "ai-providers", map[string]any{
+		"name":   "volcengine-demo",
+		"type":   "doubao",
+		"tokens": []any{"api-key"},
+		"rawConfigs": map[string]any{
+			"volcengineBaseUrl":          "https://ark.cn-beijing.volces.com/api/v3",
+			"volcengineClientRequestId":  " request-1 ",
+			"volcengineEnableEncryption": "true",
+			"volcengineEnableTrace":      true,
+			"retryOnFailure": map[string]any{
+				"enabled":      "true",
+				"maxRetries":   "2",
+				"retryTimeout": "30000",
+				"retryOnStatus": []any{
+					"4.*",
+					"5.*",
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "volcengine", item["type"])
+	rawConfigs := mapValueTest(item["rawConfigs"])
+	require.Equal(t, "volcengine", rawConfigs["type"])
+	require.Equal(t, "ark.cn-beijing.volces.com", rawConfigs["providerDomain"])
+	require.Equal(t, "/api/v3", rawConfigs["providerBasePath"])
+	require.Equal(t, "request-1", rawConfigs["volcengineClientRequestId"])
+	require.Equal(t, true, rawConfigs["volcengineEnableEncryption"])
+	require.Equal(t, true, rawConfigs["volcengineEnableTrace"])
+	retryOnFailure := mapValueTest(rawConfigs["retryOnFailure"])
+	require.Equal(t, true, retryOnFailure["enabled"])
+	require.EqualValues(t, 2, retryOnFailure["maxRetries"])
+	require.EqualValues(t, 30000, retryOnFailure["retryTimeout"])
+	require.ElementsMatch(t, []string{"4.*", "5.*"}, normalizeStringSlice(retryOnFailure["retryOnStatus"]))
+	require.Empty(t, rawConfigs["volcengineBaseUrl"])
+}
+
 func TestAIRouteValidationRejectsUnknownProvider(t *testing.T) {
 	svc := New(k8sclient.NewMemoryClient())
 
@@ -376,7 +554,11 @@ func TestAIRouteValidationNormalizesFrontendPayload(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	svc := New(client)
+	svc := New(client, stubPortal{
+		accounts: []portalsvc.OrgAccountRecord{
+			{ConsumerName: "normal-user", UserLevel: "normal", Status: "active"},
+		},
+	})
 	item, err := svc.Save(context.Background(), "ai-routes", map[string]any{
 		"name": "chat-demo",
 		"pathPredicate": map[string]any{
@@ -395,6 +577,10 @@ func TestAIRouteValidationNormalizesFrontendPayload(t *testing.T) {
 		"upstreams": []any{
 			map[string]any{"provider": "openai-demo"},
 		},
+		"authConfig": map[string]any{
+			"enabled":               true,
+			"allowedConsumerLevels": []any{"normal"},
+		},
 		"fallbackConfig": map[string]any{
 			"enabled":       true,
 			"responseCodes": []any{"5XX", "4xx", "5xx"},
@@ -410,8 +596,48 @@ func TestAIRouteValidationNormalizesFrontendPayload(t *testing.T) {
 	require.Equal(t, "PRE", toMapSlice(item["modelPredicates"])[0]["matchType"])
 
 	fallbackConfig, _ := item["fallbackConfig"].(map[string]any)
-	require.Equal(t, "RANDOM", fallbackConfig["fallbackStrategy"])
+	require.Equal(t, "RAND", fallbackConfig["fallbackStrategy"])
 	require.Equal(t, []string{"4xx", "5xx"}, normalizeStringSlice(fallbackConfig["responseCodes"]))
+}
+
+func TestAIRouteValidationAcceptsLegacyFallbackStrategyAlias(t *testing.T) {
+	client := k8sclient.NewMemoryClient()
+	_, err := client.UpsertResource(context.Background(), "ai-providers", "openai-demo", map[string]any{
+		"name": "openai-demo",
+		"type": "openai",
+	})
+	require.NoError(t, err)
+
+	svc := New(client, stubPortal{
+		accounts: []portalsvc.OrgAccountRecord{
+			{ConsumerName: "normal-user", UserLevel: "normal", Status: "active"},
+		},
+	})
+	item, err := svc.Save(context.Background(), "ai-routes", map[string]any{
+		"name": "chat-demo",
+		"pathPredicate": map[string]any{
+			"matchType":  "PRE",
+			"matchValue": "/v1/chat/completions",
+		},
+		"upstreams": []any{
+			map[string]any{"provider": "openai-demo", "weight": 100},
+		},
+		"authConfig": map[string]any{
+			"enabled":               true,
+			"allowedConsumerLevels": []any{"normal"},
+		},
+		"fallbackConfig": map[string]any{
+			"enabled":       true,
+			"strategy":      "SEQ",
+			"responseCodes": []any{"5xx"},
+			"upstreams": []any{
+				map[string]any{"provider": "openai-demo", "weight": 100},
+			},
+		},
+	})
+	require.NoError(t, err)
+	fallbackConfig, _ := item["fallbackConfig"].(map[string]any)
+	require.Equal(t, "SEQ", fallbackConfig["fallbackStrategy"])
 }
 
 func TestAIRouteValidationRejectsEnabledFallbackWithoutResponseCodes(t *testing.T) {
@@ -422,7 +648,11 @@ func TestAIRouteValidationRejectsEnabledFallbackWithoutResponseCodes(t *testing.
 	})
 	require.NoError(t, err)
 
-	svc := New(client)
+	svc := New(client, stubPortal{
+		accounts: []portalsvc.OrgAccountRecord{
+			{ConsumerName: "normal-user", UserLevel: "normal", Status: "active"},
+		},
+	})
 	_, err = svc.Save(context.Background(), "ai-routes", map[string]any{
 		"name": "chat-demo",
 		"pathPredicate": map[string]any{
@@ -431,6 +661,10 @@ func TestAIRouteValidationRejectsEnabledFallbackWithoutResponseCodes(t *testing.
 		},
 		"upstreams": []any{
 			map[string]any{"provider": "openai-demo", "weight": 100},
+		},
+		"authConfig": map[string]any{
+			"enabled":               true,
+			"allowedConsumerLevels": []any{"normal"},
 		},
 		"fallbackConfig": map[string]any{
 			"enabled": true,
@@ -449,4 +683,70 @@ func mapValueTest(value any) map[string]any {
 		return map[string]any{}
 	}
 	return typed
+}
+
+func TestRouteSaveExpandsAllowedDepartmentsAndLevels(t *testing.T) {
+	client := k8sclient.NewMemoryClient()
+	svc := New(client, stubPortal{
+		accounts: []portalsvc.OrgAccountRecord{
+			{ConsumerName: "dept-admin", DepartmentID: "dept-parent", Status: "active", UserLevel: "normal"},
+			{ConsumerName: "dept-child-user", DepartmentID: "dept-child", Status: "active", UserLevel: "plus"},
+			{ConsumerName: "pro-user", DepartmentID: "dept-other", Status: "active", UserLevel: "pro"},
+			{ConsumerName: "disabled-user", DepartmentID: "dept-child", Status: "disabled", UserLevel: "pro"},
+		},
+		departments: []*portalsvc.OrgDepartmentNode{
+			{
+				DepartmentID: "dept-parent",
+				Name:         "Parent",
+				Children: []*portalsvc.OrgDepartmentNode{
+					{DepartmentID: "dept-child", Name: "Child"},
+				},
+			},
+		},
+	})
+
+	item, err := svc.Save(context.Background(), "routes", map[string]any{
+		"name": "team-route",
+		"path": map[string]any{"matchType": "PRE", "matchValue": "/team"},
+		"services": []any{
+			map[string]any{"name": "svc-a", "weight": 100},
+		},
+		"authConfig": map[string]any{
+			"enabled":               true,
+			"allowedDepartments":    []any{"dept-parent"},
+			"allowedConsumerLevels": []any{"pro"},
+		},
+	})
+	require.NoError(t, err)
+
+	authConfig := mapValueTest(item["authConfig"])
+	require.Equal(t, []string{"dept-parent"}, normalizeStringSlice(authConfig["allowedDepartments"]))
+	require.Equal(t, []string{"pro"}, normalizeStringSlice(authConfig["allowedConsumerLevels"]))
+	require.ElementsMatch(t, []string{"dept-admin", "dept-child-user", "pro-user"}, normalizeStringSlice(authConfig["allowedConsumers"]))
+}
+
+func TestAIRouteRequiresEnabledAuthConfig(t *testing.T) {
+	client := k8sclient.NewMemoryClient()
+	_, err := client.UpsertResource(context.Background(), "ai-providers", "openai-demo", map[string]any{
+		"name": "openai-demo",
+		"type": "openai",
+	})
+	require.NoError(t, err)
+
+	svc := New(client)
+	_, err = svc.Save(context.Background(), "ai-routes", map[string]any{
+		"name": "chat-demo",
+		"pathPredicate": map[string]any{
+			"matchType":  "PRE",
+			"matchValue": "/v1/chat/completions",
+		},
+		"upstreams": []any{
+			map[string]any{"provider": "openai-demo", "weight": 100},
+		},
+		"authConfig": map[string]any{
+			"enabled": false,
+		},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "authConfig.enabled must be true")
 }

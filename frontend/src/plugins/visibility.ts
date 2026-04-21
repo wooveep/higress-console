@@ -2,6 +2,11 @@ import { WasmPluginData } from '@/interfaces/wasm-plugin';
 
 type PluginIdentity = Partial<Pick<WasmPluginData, 'name' | 'key' | 'category'>>;
 
+const DEDICATED_PLUGIN_PATHS: Record<string, string> = {
+  'ai-quota': '/ai/quota',
+  'ai-data-masking': '/ai/sensitive',
+};
+
 export const QueryType = {
   ROUTE: 'route',
   DOMAIN: 'domain',
@@ -50,7 +55,7 @@ const PLUGIN_VISIBILITY_CATEGORIES: PluginVisibilityCategoryKey[] = [
 
 const VISIBLE_PLUGIN_NAMES_BY_SCOPE: PluginVisibilityConfig = {
   [PluginVisibilityScope.GLOBAL]: {
-    [PluginVisibilityCategory.AI]: ['ai-data-masking', 'ai-quota', 'ai-statistics'],
+    [PluginVisibilityCategory.AI]: ['ai-statistics'],
     [PluginVisibilityCategory.AUTH]: [],
     [PluginVisibilityCategory.SECURITY]: [],
     [PluginVisibilityCategory.TRAFFIC]: [],
@@ -60,7 +65,7 @@ const VISIBLE_PLUGIN_NAMES_BY_SCOPE: PluginVisibilityConfig = {
   },
   [PluginVisibilityScope.ROUTE]: {
     [PluginVisibilityCategory.ROUTE]: [],
-    [PluginVisibilityCategory.AI]: ['ai-data-masking', 'ai-quota', 'ai-statistics'],
+    [PluginVisibilityCategory.AI]: ['ai-statistics'],
     [PluginVisibilityCategory.AUTH]: [],
     [PluginVisibilityCategory.SECURITY]: [],
     [PluginVisibilityCategory.TRAFFIC]: [],
@@ -69,7 +74,7 @@ const VISIBLE_PLUGIN_NAMES_BY_SCOPE: PluginVisibilityConfig = {
     [PluginVisibilityCategory.CUSTOM]: [],
   },
   [PluginVisibilityScope.DOMAIN]: {
-    [PluginVisibilityCategory.AI]: ['ai-data-masking', 'ai-quota', 'ai-statistics'],
+    [PluginVisibilityCategory.AI]: ['ai-statistics'],
     [PluginVisibilityCategory.AUTH]: [],
     [PluginVisibilityCategory.SECURITY]: [],
     [PluginVisibilityCategory.TRAFFIC]: [],
@@ -78,7 +83,7 @@ const VISIBLE_PLUGIN_NAMES_BY_SCOPE: PluginVisibilityConfig = {
     [PluginVisibilityCategory.CUSTOM]: [],
   },
   [PluginVisibilityScope.SERVICE]: {
-    [PluginVisibilityCategory.AI]: ['ai-data-masking', 'ai-quota', 'ai-statistics'],
+    [PluginVisibilityCategory.AI]: ['ai-statistics'],
     [PluginVisibilityCategory.AUTH]: [],
     [PluginVisibilityCategory.SECURITY]: [],
     [PluginVisibilityCategory.TRAFFIC]: [],
@@ -88,7 +93,7 @@ const VISIBLE_PLUGIN_NAMES_BY_SCOPE: PluginVisibilityConfig = {
   },
   [PluginVisibilityScope.AI_ROUTE]: {
     [PluginVisibilityCategory.ROUTE]: [],
-    [PluginVisibilityCategory.AI]: ['ai-data-masking', 'ai-quota', 'ai-statistics'],
+    [PluginVisibilityCategory.AI]: ['ai-statistics', 'ai-data-masking'],
     [PluginVisibilityCategory.AUTH]: [],
     [PluginVisibilityCategory.SECURITY]: [],
     [PluginVisibilityCategory.TRAFFIC]: [],
@@ -97,6 +102,11 @@ const VISIBLE_PLUGIN_NAMES_BY_SCOPE: PluginVisibilityConfig = {
     [PluginVisibilityCategory.CUSTOM]: [],
   },
 };
+
+export function resolveDedicatedPluginPath(pluginName?: string | null): string {
+  const key = String(pluginName || '').trim();
+  return key ? (DEDICATED_PLUGIN_PATHS[key] || '') : '';
+}
 
 export function buildPluginTargetPath(type?: string | null, name?: string | null) {
   if (!type || !name) {

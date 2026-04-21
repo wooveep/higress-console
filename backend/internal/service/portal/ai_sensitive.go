@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +20,8 @@ type AISensitiveMenuState struct {
 	Enabled           bool `json:"enabled"`
 	EnabledRouteCount int  `json:"enabledRouteCount"`
 }
+
+const aiSensitivePluginName = "ai-data-masking"
 
 type AISensitiveDetectRule struct {
 	ID          int64      `json:"id,omitempty"`
@@ -75,6 +79,25 @@ type AISensitiveSystemConfig struct {
 	UpdatedAt         *time.Time `json:"updatedAt,omitempty"`
 }
 
+type AISensitiveRuntimeAuditSink struct {
+	ServiceName string `json:"serviceName,omitempty"`
+	Namespace   string `json:"namespace,omitempty"`
+	Port        int    `json:"port,omitempty"`
+	Path        string `json:"path,omitempty"`
+	TimeoutMs   int    `json:"timeoutMs,omitempty"`
+}
+
+type AISensitiveRuntimeConfig struct {
+	DenyOpenai      bool                        `json:"denyOpenai"`
+	DenyJsonpath    []string                    `json:"denyJsonpath,omitempty"`
+	DenyRaw         bool                        `json:"denyRaw"`
+	DenyCode        int                         `json:"denyCode"`
+	DenyMessage     string                      `json:"denyMessage"`
+	DenyRawMessage  string                      `json:"denyRawMessage"`
+	DenyContentType string                      `json:"denyContentType"`
+	AuditSink       AISensitiveRuntimeAuditSink `json:"auditSink,omitempty"`
+}
+
 type AISensitiveStatus struct {
 	DBEnabled                 bool       `json:"dbEnabled"`
 	DetectRuleCount           int        `json:"detectRuleCount"`
@@ -84,6 +107,8 @@ type AISensitiveStatus struct {
 	SystemDictionaryWordCount int        `json:"systemDictionaryWordCount"`
 	SystemDictionaryUpdatedAt *time.Time `json:"systemDictionaryUpdatedAt,omitempty"`
 	ProjectedInstanceCount    int        `json:"projectedInstanceCount"`
+	EnabledRouteCount         int        `json:"enabledRouteCount"`
+	EnabledRoutes             []string   `json:"enabledRoutes,omitempty"`
 	LastReconciledAt          *time.Time `json:"lastReconciledAt,omitempty"`
 	LastMigratedAt            *time.Time `json:"lastMigratedAt,omitempty"`
 	LastError                 string     `json:"lastError,omitempty"`
@@ -105,8 +130,8 @@ func (s *Service) GetAISensitiveMenuState(ctx context.Context) (*AISensitiveMenu
 		return nil, err
 	}
 	return &AISensitiveMenuState{
-		Enabled:           status.DetectRuleCount > 0 || status.ReplaceRuleCount > 0 || status.ProjectedInstanceCount > 0 || status.SystemDenyEnabled,
-		EnabledRouteCount: status.ProjectedInstanceCount,
+		Enabled:           status.DetectRuleCount > 0 || status.ReplaceRuleCount > 0 || status.EnabledRouteCount > 0 || status.SystemDenyEnabled,
+		EnabledRouteCount: status.EnabledRouteCount,
 	}, nil
 }
 
@@ -115,7 +140,7 @@ func (s *Service) ListAISensitiveDetectRules(ctx context.Context) ([]AISensitive
 	if err != nil {
 		return nil, err
 	}
-	items, err := newPortalStore(db).listAISensitiveDetectRules(ctx)
+	items, err := newPortalStore(db, s.client.Driver()).listAISensitiveDetectRules(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -142,19 +167,18 @@ func (s *Service) SaveAISensitiveDetectRule(ctx context.Context, rule AISensitiv
 	if rule.ID == 0 && !rule.Enabled {
 		rule.Enabled = true
 	}
-	enabled := 0
-	if rule.Enabled {
-		enabled = 1
-	}
 
-	rule.ID, err = newPortalStore(db).saveAISensitiveDetectRule(ctx, do.PortalAISensitiveDetectRule{
+	rule.ID, err = newPortalStore(db, s.client.Driver()).saveAISensitiveDetectRule(ctx, do.PortalAISensitiveDetectRule{
 		Pattern:     rule.Pattern,
 		MatchType:   rule.MatchType,
 		Description: trimOrNil(rule.Description),
 		Priority:    rule.Priority,
-		Enabled:     enabled,
+		Enabled:     rule.Enabled,
 	}, rule.ID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.refreshAISensitiveProjection(ctx); err != nil {
 		return nil, err
 	}
 	return s.getAISensitiveDetectRule(ctx, rule.ID)
@@ -165,14 +189,14 @@ func (s *Service) DeleteAISensitiveDetectRule(ctx context.Context, id int64) err
 	if err != nil {
 		return err
 	}
-	deleted, err := newPortalStore(db).deleteAISensitiveDetectRule(ctx, id)
+	deleted, err := newPortalStore(db, s.client.Driver()).deleteAISensitiveDetectRule(ctx, id)
 	if err != nil {
 		return err
 	}
 	if !deleted {
 		return fmt.Errorf("detect rule not found: %d", id)
 	}
-	return nil
+	return s.refreshAISensitiveProjection(ctx)
 }
 
 func (s *Service) ListAISensitiveReplaceRules(ctx context.Context) ([]AISensitiveReplaceRule, error) {
@@ -180,7 +204,7 @@ func (s *Service) ListAISensitiveReplaceRules(ctx context.Context) ([]AISensitiv
 	if err != nil {
 		return nil, err
 	}
-	items, err := newPortalStore(db).listAISensitiveReplaceRules(ctx)
+	items, err := newPortalStore(db, s.client.Driver()).listAISensitiveReplaceRules(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -207,25 +231,20 @@ func (s *Service) SaveAISensitiveReplaceRule(ctx context.Context, rule AISensiti
 	if rule.ID == 0 && !rule.Enabled {
 		rule.Enabled = true
 	}
-	enabled := 0
-	if rule.Enabled {
-		enabled = 1
-	}
-	restore := 0
-	if rule.Restore {
-		restore = 1
-	}
 
-	rule.ID, err = newPortalStore(db).saveAISensitiveReplaceRule(ctx, do.PortalAISensitiveReplaceRule{
+	rule.ID, err = newPortalStore(db, s.client.Driver()).saveAISensitiveReplaceRule(ctx, do.PortalAISensitiveReplaceRule{
 		Pattern:      rule.Pattern,
 		ReplaceType:  rule.ReplaceType,
 		ReplaceValue: trimOrNil(rule.ReplaceValue),
-		Restore:      restore,
+		Restore:      rule.Restore,
 		Description:  trimOrNil(rule.Description),
 		Priority:     rule.Priority,
-		Enabled:      enabled,
+		Enabled:      rule.Enabled,
 	}, rule.ID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.refreshAISensitiveProjection(ctx); err != nil {
 		return nil, err
 	}
 	return s.getAISensitiveReplaceRule(ctx, rule.ID)
@@ -236,14 +255,14 @@ func (s *Service) DeleteAISensitiveReplaceRule(ctx context.Context, id int64) er
 	if err != nil {
 		return err
 	}
-	deleted, err := newPortalStore(db).deleteAISensitiveReplaceRule(ctx, id)
+	deleted, err := newPortalStore(db, s.client.Driver()).deleteAISensitiveReplaceRule(ctx, id)
 	if err != nil {
 		return err
 	}
 	if !deleted {
 		return fmt.Errorf("replace rule not found: %d", id)
 	}
-	return nil
+	return s.refreshAISensitiveProjection(ctx)
 }
 
 func (s *Service) ListAISensitiveAudits(ctx context.Context, query AISensitiveAuditQuery) ([]AISensitiveBlockAudit, error) {
@@ -251,7 +270,7 @@ func (s *Service) ListAISensitiveAudits(ctx context.Context, query AISensitiveAu
 	if err != nil {
 		return nil, err
 	}
-	items, err := newPortalStore(db).listAISensitiveAudits(ctx, query)
+	items, err := newPortalStore(db, s.client.Driver()).listAISensitiveAudits(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -267,14 +286,21 @@ func (s *Service) GetAISensitiveSystemConfig(ctx context.Context) (*AISensitiveS
 	if err != nil {
 		return nil, err
 	}
-	item, err := newPortalStore(db).getAISensitiveSystemConfig(ctx)
+	item, err := newPortalStore(db, s.client.Driver()).getAISensitiveSystemConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defaultDictionary := DefaultAISensitiveDictionaryText()
 	if item == nil {
-		return &AISensitiveSystemConfig{}, nil
+		return &AISensitiveSystemConfig{
+			DictionaryText: defaultDictionary,
+		}, nil
 	}
-	return aiSensitiveSystemConfigFromEntity(*item), nil
+	record := aiSensitiveSystemConfigFromEntity(*item)
+	if strings.TrimSpace(record.DictionaryText) == "" {
+		record.DictionaryText = defaultDictionary
+	}
+	return record, nil
 }
 
 func (s *Service) SaveAISensitiveSystemConfig(ctx context.Context, config AISensitiveSystemConfig) (*AISensitiveSystemConfig, error) {
@@ -282,18 +308,59 @@ func (s *Service) SaveAISensitiveSystemConfig(ctx context.Context, config AISens
 	if err != nil {
 		return nil, err
 	}
-	enabledInt := 0
-	if config.SystemDenyEnabled {
-		enabledInt = 1
-	}
-	if err := newPortalStore(db).saveAISensitiveSystemConfig(ctx, do.PortalAISensitiveSystemConfig{
-		SystemDenyEnabled: enabledInt,
+	if err := newPortalStore(db, s.client.Driver()).saveAISensitiveSystemConfig(ctx, do.PortalAISensitiveSystemConfig{
+		SystemDenyEnabled: config.SystemDenyEnabled,
 		DictionaryText:    config.DictionaryText,
 		UpdatedBy:         nullIfEmpty(config.UpdatedBy),
 	}); err != nil {
 		return nil, err
 	}
+	if err := s.refreshAISensitiveProjection(ctx); err != nil {
+		return nil, err
+	}
 	return s.GetAISensitiveSystemConfig(ctx)
+}
+
+func (s *Service) GetAISensitiveRuntimeConfig(ctx context.Context) (*AISensitiveRuntimeConfig, error) {
+	config := defaultAISensitiveRuntimeConfig()
+	if s.k8sClient == nil {
+		return &config, nil
+	}
+	item, err := s.k8sClient.GetResource(ctx, "ai-sensitive-projections", "default")
+	if err != nil {
+		return &config, nil
+	}
+	payload := mapStringAny(item["runtimeConfig"])
+	if len(payload) == 0 {
+		return &config, nil
+	}
+	return normalizeAISensitiveRuntimeConfig(payload), nil
+}
+
+func (s *Service) SaveAISensitiveRuntimeConfig(ctx context.Context, config AISensitiveRuntimeConfig) (*AISensitiveRuntimeConfig, error) {
+	if s.k8sClient == nil {
+		return nil, errors.New("ai sensitive runtime config requires k8s client")
+	}
+	normalized := normalizeAISensitiveRuntimeConfig(map[string]any{
+		"denyOpenai":      config.DenyOpenai,
+		"denyJsonpath":    config.DenyJsonpath,
+		"denyRaw":         config.DenyRaw,
+		"denyCode":        config.DenyCode,
+		"denyMessage":     config.DenyMessage,
+		"denyRawMessage":  config.DenyRawMessage,
+		"denyContentType": config.DenyContentType,
+		"auditSink": map[string]any{
+			"serviceName": config.AuditSink.ServiceName,
+			"namespace":   config.AuditSink.Namespace,
+			"port":        config.AuditSink.Port,
+			"path":        config.AuditSink.Path,
+			"timeoutMs":   config.AuditSink.TimeoutMs,
+		},
+	})
+	if err := s.upsertAISensitiveProjection(ctx, *normalized); err != nil {
+		return nil, err
+	}
+	return s.GetAISensitiveRuntimeConfig(ctx)
 }
 
 func (s *Service) GetAISensitiveStatus(ctx context.Context) (*AISensitiveStatus, error) {
@@ -307,9 +374,9 @@ func (s *Service) GetAISensitiveStatus(ctx context.Context) (*AISensitiveStatus,
 	}
 	status := &AISensitiveStatus{
 		DBEnabled:                 true,
-		DetectRuleCount:           newPortalStore(db).countTable(ctx, dao.PortalAISensitiveDetectRule.Name),
-		ReplaceRuleCount:          newPortalStore(db).countTable(ctx, dao.PortalAISensitiveReplaceRule.Name),
-		AuditRecordCount:          newPortalStore(db).countTable(ctx, dao.PortalAISensitiveBlockAudit.Name),
+		DetectRuleCount:           newPortalStore(db, s.client.Driver()).countTable(ctx, dao.PortalAISensitiveDetectRule.Name),
+		ReplaceRuleCount:          newPortalStore(db, s.client.Driver()).countTable(ctx, dao.PortalAISensitiveReplaceRule.Name),
+		AuditRecordCount:          newPortalStore(db, s.client.Driver()).countTable(ctx, dao.PortalAISensitiveBlockAudit.Name),
 		SystemDenyEnabled:         config.SystemDenyEnabled,
 		SystemDictionaryWordCount: countDictionaryLines(config.DictionaryText),
 		SystemDictionaryUpdatedAt: config.UpdatedAt,
@@ -326,6 +393,11 @@ func (s *Service) GetAISensitiveStatus(ctx context.Context) (*AISensitiveStatus,
 			status.LastReconciledAt = parseRFC3339Pointer(fmt.Sprint(item["projectedAt"]))
 			status.LastError = strings.TrimSpace(fmt.Sprint(item["lastError"]))
 		}
+		boundRoutes, err := s.listAISensitiveBoundRoutes(ctx)
+		if err == nil {
+			status.EnabledRoutes = boundRoutes
+			status.EnabledRouteCount = len(boundRoutes)
+		}
 	}
 	return status, nil
 }
@@ -337,6 +409,17 @@ func (s *Service) ReconcileAISensitive(ctx context.Context) (*AISensitiveStatus,
 	if s.k8sClient == nil {
 		return nil, errors.New("ai sensitive projection requires k8s client")
 	}
+	runtimeConfig, err := s.GetAISensitiveRuntimeConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.upsertAISensitiveProjection(ctx, *runtimeConfig); err != nil {
+		return nil, err
+	}
+	return s.GetAISensitiveStatus(ctx)
+}
+
+func (s *Service) buildAISensitiveProjectionPayload(ctx context.Context, runtimeConfig AISensitiveRuntimeConfig) (map[string]any, error) {
 	detectRules, err := s.ListAISensitiveDetectRules(ctx)
 	if err != nil {
 		return nil, err
@@ -349,17 +432,88 @@ func (s *Service) ReconcileAISensitive(ctx context.Context) (*AISensitiveStatus,
 	if err != nil {
 		return nil, err
 	}
-	payload := map[string]any{
+	return map[string]any{
 		"name":         "default",
 		"detectRules":  detectRules,
 		"replaceRules": replaceRules,
-		"systemConfig": config,
-		"projectedAt":  time.Now().UTC().Format(time.RFC3339),
+		"systemConfig": map[string]any{
+			"systemDenyEnabled": config.SystemDenyEnabled,
+			"updatedBy":         config.UpdatedBy,
+			"updatedAt":         config.UpdatedAt,
+		},
+		"runtimeConfig": runtimeConfig,
+		"projectedAt":   time.Now().UTC().Format(time.RFC3339),
+	}, nil
+}
+
+func (s *Service) refreshAISensitiveProjection(ctx context.Context) error {
+	if s.k8sClient == nil {
+		return nil
 	}
-	if _, err := s.k8sClient.UpsertResource(ctx, "ai-sensitive-projections", "default", payload); err != nil {
+	runtimeConfig, err := s.GetAISensitiveRuntimeConfig(ctx)
+	if err != nil {
+		return err
+	}
+	return s.upsertAISensitiveProjection(ctx, *runtimeConfig)
+}
+
+func (s *Service) upsertAISensitiveProjection(ctx context.Context, runtimeConfig AISensitiveRuntimeConfig) error {
+	payload, err := s.buildAISensitiveProjectionPayload(ctx, runtimeConfig)
+	if err != nil {
+		return err
+	}
+	_, err = s.k8sClient.UpsertResource(ctx, "ai-sensitive-projections", "default", payload)
+	return err
+}
+
+func (s *Service) listAISensitiveBoundRoutes(ctx context.Context) ([]string, error) {
+	if s.k8sClient == nil {
+		return []string{}, nil
+	}
+	rawRoutes, err := s.k8sClient.ListResources(ctx, "ai-routes")
+	if err != nil {
 		return nil, err
 	}
-	return s.GetAISensitiveStatus(ctx)
+	items := make([]string, 0, len(rawRoutes))
+	for _, route := range rawRoutes {
+		routeName := strings.TrimSpace(fmt.Sprint(route["name"]))
+		if routeName == "" {
+			continue
+		}
+		if s.isAISensitiveRouteBound(ctx, routeName) {
+			items = append(items, routeName)
+		}
+	}
+	sort.Strings(items)
+	return items, nil
+}
+
+func (s *Service) isAISensitiveRouteBound(ctx context.Context, routeName string) bool {
+	targets := []string{
+		fmt.Sprintf("ai-route-%s.internal", routeName),
+		fmt.Sprintf("ai-route-%s.internal-internal", routeName),
+		fmt.Sprintf("ai-route-%s.fallback.internal", routeName),
+		fmt.Sprintf("ai-route-%s.fallback.internal-internal", routeName),
+	}
+	for _, target := range targets {
+		pluginInstances, err := s.k8sClient.ListResources(ctx, fmt.Sprintf("route-plugin-instances:%s", target))
+		if err != nil {
+			continue
+		}
+		for _, item := range pluginInstances {
+			pluginName := strings.TrimSpace(fmt.Sprint(item["pluginName"]))
+			if pluginName == "" {
+				pluginName = strings.TrimSpace(fmt.Sprint(item["name"]))
+			}
+			if pluginName != aiSensitivePluginName {
+				continue
+			}
+			if readBool(item["enabled"], true) || readBool(item["runtimeEnabled"], false) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *Service) getAISensitiveDetectRule(ctx context.Context, id int64) (*AISensitiveDetectRule, error) {
@@ -397,7 +551,7 @@ func (s *Service) getAISensitiveReplaceRule(ctx context.Context, id int64) (*AIS
 func scanAISensitiveDetectRule(scanner interface{ Scan(...any) error }) (AISensitiveDetectRule, error) {
 	var (
 		item      AISensitiveDetectRule
-		enabled   int
+		enabled   bool
 		desc      sql.NullString
 		createdAt sql.NullTime
 		updatedAt sql.NullTime
@@ -414,7 +568,7 @@ func scanAISensitiveDetectRule(scanner interface{ Scan(...any) error }) (AISensi
 	); err != nil {
 		return AISensitiveDetectRule{}, err
 	}
-	item.Enabled = enabled > 0
+	item.Enabled = enabled
 	item.Description = desc.String
 	if createdAt.Valid {
 		item.CreatedAt = &createdAt.Time
@@ -530,6 +684,170 @@ func parseAISensitiveBlockedReason(raw string) (aiSensitiveBlockedReasonPayload,
 	return payload, true
 }
 
+func defaultAISensitiveRuntimeConfig() AISensitiveRuntimeConfig {
+	return AISensitiveRuntimeConfig{
+		DenyOpenai:      true,
+		DenyJsonpath:    []string{"$.messages[*].content"},
+		DenyRaw:         false,
+		DenyCode:        200,
+		DenyMessage:     "提问或回答中包含敏感词，已被屏蔽",
+		DenyRawMessage:  "{\"errmsg\":\"提问或回答中包含敏感词，已被屏蔽\"}",
+		DenyContentType: "application/json",
+		AuditSink: AISensitiveRuntimeAuditSink{
+			TimeoutMs: 2000,
+		},
+	}
+}
+
+func normalizeAISensitiveRuntimeConfig(payload map[string]any) *AISensitiveRuntimeConfig {
+	config := defaultAISensitiveRuntimeConfig()
+	if len(payload) == 0 {
+		return &config
+	}
+	config.DenyOpenai = readBool(firstNonNil(payload["denyOpenai"], payload["deny_openai"]), config.DenyOpenai)
+	config.DenyJsonpath = uniqueTrimmedStrings(firstNonNil(payload["denyJsonpath"], payload["deny_jsonpath"]))
+	if len(config.DenyJsonpath) == 0 {
+		config.DenyJsonpath = defaultAISensitiveRuntimeConfig().DenyJsonpath
+	}
+	config.DenyRaw = readBool(firstNonNil(payload["denyRaw"], payload["deny_raw"]), config.DenyRaw)
+	config.DenyCode = readInt(firstNonNil(payload["denyCode"], payload["deny_code"]), config.DenyCode)
+	config.DenyMessage = firstNonEmptyString(firstNonNil(payload["denyMessage"], payload["deny_message"]), config.DenyMessage)
+	config.DenyRawMessage = firstNonEmptyString(firstNonNil(payload["denyRawMessage"], payload["deny_raw_message"]), config.DenyRawMessage)
+	config.DenyContentType = firstNonEmptyString(firstNonNil(payload["denyContentType"], payload["deny_content_type"]), config.DenyContentType)
+	auditSink := mapStringAny(firstNonNil(payload["auditSink"], payload["audit_sink"]))
+	config.AuditSink = AISensitiveRuntimeAuditSink{
+		ServiceName: nullableString(firstNonNil(auditSink["serviceName"], auditSink["service_name"])),
+		Namespace:   nullableString(auditSink["namespace"]),
+		Port:        readInt(auditSink["port"], 0),
+		Path:        nullableString(auditSink["path"]),
+		TimeoutMs:   readInt(firstNonNil(auditSink["timeoutMs"], auditSink["timeout_ms"]), 2000),
+	}
+	if config.AuditSink.TimeoutMs <= 0 {
+		config.AuditSink.TimeoutMs = 2000
+	}
+	return &config
+}
+
+func mapStringAny(value any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed
+	default:
+		return map[string]any{}
+	}
+}
+
+func uniqueTrimmedStrings(value any) []string {
+	items := make([]string, 0)
+	seen := map[string]struct{}{}
+	switch typed := value.(type) {
+	case []string:
+		for _, item := range typed {
+			trimmed := strings.TrimSpace(item)
+			if trimmed == "" {
+				continue
+			}
+			if _, ok := seen[trimmed]; ok {
+				continue
+			}
+			seen[trimmed] = struct{}{}
+			items = append(items, trimmed)
+		}
+	case []any:
+		for _, item := range typed {
+			trimmed := strings.TrimSpace(fmt.Sprint(item))
+			if trimmed == "" {
+				continue
+			}
+			if _, ok := seen[trimmed]; ok {
+				continue
+			}
+			seen[trimmed] = struct{}{}
+			items = append(items, trimmed)
+		}
+	case string:
+		for _, item := range strings.Split(typed, "\n") {
+			trimmed := strings.TrimSpace(item)
+			if trimmed == "" {
+				continue
+			}
+			if _, ok := seen[trimmed]; ok {
+				continue
+			}
+			seen[trimmed] = struct{}{}
+			items = append(items, trimmed)
+		}
+	}
+	return items
+}
+
+func readBool(value any, fallback bool) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		trimmed := strings.TrimSpace(strings.ToLower(typed))
+		if trimmed == "true" || trimmed == "1" {
+			return true
+		}
+		if trimmed == "false" || trimmed == "0" {
+			return false
+		}
+	case int:
+		return typed != 0
+	case int64:
+		return typed != 0
+	case float64:
+		return typed != 0
+	}
+	return fallback
+}
+
+func readInt(value any, fallback int) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(typed))
+		if err == nil {
+			return parsed
+		}
+	}
+	return fallback
+}
+
+func firstNonNil(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func firstNonEmptyString(value any, fallback string) string {
+	trimmed := strings.TrimSpace(fmt.Sprint(value))
+	if trimmed == "" || trimmed == "<nil>" {
+		return fallback
+	}
+	return trimmed
+}
+
+func nullableString(value any) string {
+	trimmed := strings.TrimSpace(fmt.Sprint(value))
+	if trimmed == "" || trimmed == "<nil>" {
+		return ""
+	}
+	return trimmed
+}
+
 func aiSensitiveSystemConfigFromEntity(item entity.PortalAISensitiveSystemConfig) *AISensitiveSystemConfig {
 	record := &AISensitiveSystemConfig{
 		SystemDenyEnabled: item.SystemDenyEnabled > 0,
@@ -546,8 +864,8 @@ func aiSensitiveSystemConfigFromEntity(item entity.PortalAISensitiveSystemConfig
 func scanAISensitiveReplaceRule(scanner interface{ Scan(...any) error }) (AISensitiveReplaceRule, error) {
 	var (
 		item         AISensitiveReplaceRule
-		restoreInt   int
-		enabledInt   int
+		restore      bool
+		enabled      bool
 		replaceValue sql.NullString
 		desc         sql.NullString
 		createdAt    sql.NullTime
@@ -558,18 +876,18 @@ func scanAISensitiveReplaceRule(scanner interface{ Scan(...any) error }) (AISens
 		&item.Pattern,
 		&item.ReplaceType,
 		&replaceValue,
-		&restoreInt,
+		&restore,
 		&desc,
 		&item.Priority,
-		&enabledInt,
+		&enabled,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
 		return AISensitiveReplaceRule{}, err
 	}
 	item.ReplaceValue = replaceValue.String
-	item.Restore = restoreInt > 0
-	item.Enabled = enabledInt > 0
+	item.Restore = restore
+	item.Enabled = enabled
 	item.Description = desc.String
 	if createdAt.Valid {
 		item.CreatedAt = &createdAt.Time

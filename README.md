@@ -31,7 +31,7 @@ python3 ./scripts/aigateway-dev.py build --components console
 python3 ./scripts/aigateway-dev.py minikube-dev --core-only
 ```
 
-这会保留 `mysql / redis / controller / plugin-server / gateway / pilot`，同时在 Helm 层禁用集群内的
+这会保留 `postgresql / redis / controller / plugin-server / gateway / pilot`，同时在 Helm 层禁用集群内的
 `aigateway-console` 与 `aigateway-portal`，避免和本地源码进程抢端口、抢镜像验证入口。
 
 `console` 本地前后端一键启动：
@@ -41,23 +41,23 @@ cd aigateway-console
 ./start.sh
 ```
 
-默认会使用：
+项目标准依赖端口建议对齐为：
 
 ```text
 backend  -> http://127.0.0.1:18081
 frontend -> http://127.0.0.1:3001
-mysql    -> 127.0.0.1:3306
+postgres -> 127.0.0.1:5432
 grafana  -> http://127.0.0.1:3000
 ```
 
-这些默认值与仓库级 `minikube-dev --core-only` + port-forward 约定对齐，避免和集群内 `8080 / 8081`
+这些端口与仓库级 `minikube-dev --core-only` + port-forward 约定对齐，避免和集群内 `8080 / 8081`
 入口冲突。常用覆盖参数：
 
 ```text
 CONSOLE_BACKEND_PORT
 CONSOLE_FRONTEND_PORT
 CONSOLE_LISTEN_ADDR
-PORTAL_MYSQL_HOST / PORTAL_MYSQL_PORT / PORTAL_MYSQL_USER / PORTAL_MYSQL_PASSWORD / PORTAL_MYSQL_DATABASE
+PORTAL_DB_DRIVER / PORTAL_DB_HOST / PORTAL_DB_PORT / PORTAL_DB_USER / PORTAL_DB_PASSWORD / PORTAL_DB_NAME / PORTAL_DB_PARAMS
 AIGATEWAY_CONSOLE_GRAFANA_SERVICE / AIGATEWAY_CONSOLE_GRAFANA_PORT / AIGATEWAY_CONSOLE_GRAFANA_PATH
 ```
 
@@ -75,13 +75,14 @@ frontend npm run build
 
 ```text
 clients.portaldb.enabled=true
-AIGATEWAY_CONSOLE_PORTALDB_DSN=<your dsn>
+AIGATEWAY_CONSOLE_PORTALDB_DRIVER=postgres
+AIGATEWAY_CONSOLE_PORTALDB_DSN=host=127.0.0.1 port=5432 user=postgres password=postgres dbname=aigateway_portal sslmode=disable
 ```
 
 如果是 K8S / Helm 部署，Console 现在会优先从 Helm 注入的结构化依赖配置自动发现并连接：
 
 ```text
-PORTAL_MYSQL_HOST / PORTAL_MYSQL_PORT / PORTAL_MYSQL_USER / PORTAL_MYSQL_PASSWORD / PORTAL_MYSQL_DATABASE
+PORTAL_DB_DRIVER / PORTAL_DB_HOST / PORTAL_DB_PORT / PORTAL_DB_USER / PORTAL_DB_PASSWORD / PORTAL_DB_NAME / PORTAL_DB_PARAMS
 AIGATEWAY_CONSOLE_GRAFANA_SERVICE / AIGATEWAY_CONSOLE_GRAFANA_PORT / AIGATEWAY_CONSOLE_GRAFANA_PATH
 AIGATEWAY_CONSOLE_NAMESPACE / AIGATEWAY_CONSOLE_CLUSTER_DOMAIN
 ```
@@ -100,7 +101,7 @@ AIGATEWAY_CONSOLE_NAMESPACE / AIGATEWAY_CONSOLE_CLUSTER_DOMAIN
 127.0.0.1:3000   aigateway-console-grafana
 127.0.0.1:9090   aigateway-console-prometheus
 127.0.0.1:3100   aigateway-console-loki
-127.0.0.1:3306   mysql-server
+127.0.0.1:5432   aigateway-core-postgresql-pgpool
 127.0.0.1:6379   redis-stack-server
 127.0.0.1:8888   aigateway-controller
 127.0.0.1:18080  aigateway-plugin-server

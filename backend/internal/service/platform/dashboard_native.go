@@ -537,12 +537,8 @@ func (s *Service) queryNativeDashboardUsageTrend(ctx context.Context, from, to i
 	var (
 		fromTime   = nativeDashboardDBTimeFromMillis(from)
 		toTime     = nativeDashboardDBTimeFromMillis(to)
-		rangeHours = toTime.Sub(fromTime).Hours()
-		bucketExpr = "DATE_FORMAT(occurred_at, '%Y-%m-%d %H:00')"
+		bucketExpr = resolveNativeDashboardUsageBucketExpr(s.portalClient.Driver(), from, to)
 	)
-	if rangeHours > 72 {
-		bucketExpr = "DATE_FORMAT(occurred_at, '%Y-%m-%d')"
-	}
 
 	statement := fmt.Sprintf(`
 		SELECT %s AS bucket_label,
@@ -680,7 +676,7 @@ func (s *Service) queryNativeDashboardDownstreamRequestTrend(ctx context.Context
 		limit = 5
 	}
 
-	bucketExpr := resolveNativeDashboardUsageBucketExpr(from, to)
+	bucketExpr := resolveNativeDashboardUsageBucketExpr(s.portalClient.Driver(), from, to)
 	statement := fmt.Sprintf(`
 		SELECT %s AS bucket_label,
 			COALESCE(NULLIF(TRIM(request_path), ''), NULLIF(TRIM(route_name), ''), '-') AS dimension_value,
@@ -719,13 +715,16 @@ func (s *Service) queryNativeDashboardExceptionRecords(ctx context.Context, from
 		limit = 10
 	}
 
+	driver := s.portalClient.Driver()
+	durationMsExpr := nativeDashboardServiceDurationMillisExpr(driver)
+
 	var (
 		filterClause string
 		orderClause  string
 	)
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "slow":
-		filterClause = `started_at IS NOT NULL AND finished_at IS NOT NULL AND TIMESTAMPDIFF(MICROSECOND, started_at, finished_at) > 5000000`
+		filterClause = nativeDashboardSlowRequestFilterClause(driver)
 		orderClause = `service_duration_ms DESC, occurred_at DESC, id DESC`
 	default:
 		filterClause = `(http_status < 200 OR http_status >= 300 OR request_status <> 'success')`
@@ -747,13 +746,13 @@ func (s *Service) queryNativeDashboardExceptionRecords(ctx context.Context, from
 			COALESCE(cost_micro_yuan, 0) AS cost_micro_yuan,
 			CASE
 				WHEN started_at IS NOT NULL AND finished_at IS NOT NULL THEN
-					GREATEST(TIMESTAMPDIFF(MICROSECOND, started_at, finished_at), 0) DIV 1000
+					%s
 				ELSE 0
 			END AS service_duration_ms
 		FROM billing_usage_event
 		WHERE occurred_at >= ? AND occurred_at < ? AND %s
 		ORDER BY %s
-		LIMIT ?`, filterClause, orderClause)
+		LIMIT ?`, durationMsExpr, filterClause, orderClause)
 
 	rows, err := db.QueryContext(ctx, query, nativeDashboardDBTimeFromMillis(from), nativeDashboardDBTimeFromMillis(to), limit)
 	if err != nil {
@@ -860,6 +859,8 @@ func (s *Service) queryNativeDashboardExceptionRouteTopTable(ctx context.Context
 		limit = 10
 	}
 
+	driver := s.portalClient.Driver()
+
 	var (
 		filterClause string
 		valueExpr    string
@@ -869,8 +870,8 @@ func (s *Service) queryNativeDashboardExceptionRouteTopTable(ctx context.Context
 	)
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "slow":
-		filterClause = `started_at IS NOT NULL AND finished_at IS NOT NULL AND TIMESTAMPDIFF(MICROSECOND, started_at, finished_at) > 5000000`
-		valueExpr = `MAX(GREATEST(TIMESTAMPDIFF(MICROSECOND, started_at, finished_at), 0) DIV 1000)`
+		filterClause = nativeDashboardSlowRequestFilterClause(driver)
+		valueExpr = fmt.Sprintf(`MAX(%s)`, nativeDashboardServiceDurationMillisExpr(driver))
 		valueKey = "latencyMs"
 		valueTitle = "Latency"
 		orderClause = "latency_ms DESC, route ASC"
@@ -1015,7 +1016,7 @@ func (s *Service) queryNativeDashboardUsageDetailTrend(ctx context.Context, from
 		return []nativeDashboardUsageDetailTrendRow{}, nil
 	}
 
-	bucketExpr := resolveNativeDashboardUsageBucketExpr(from, to)
+	bucketExpr := resolveNativeDashboardUsageBucketExpr(s.portalClient.Driver(), from, to)
 	statement := fmt.Sprintf(`
 		SELECT %s AS bucket_label,
 			COALESCE(SUM(request_count), 0) AS request_count,
@@ -1080,7 +1081,7 @@ func (s *Service) queryNativeDashboardUsageModelTrend(ctx context.Context, from,
 		limit = 5
 	}
 
-	bucketExpr := resolveNativeDashboardUsageBucketExpr(from, to)
+	bucketExpr := resolveNativeDashboardUsageBucketExpr(s.portalClient.Driver(), from, to)
 	statement := fmt.Sprintf(`
 		SELECT %s AS bucket_label,
 			model_id,
@@ -1699,16 +1700,29 @@ func formatNativeDashboardPromRange(from, to int64) string {
 	return fmt.Sprintf("%ds", int(math.Ceil(window.Seconds())))
 }
 
-func resolveNativeDashboardUsageBucketExpr(from, to int64) string {
+func resolveNativeDashboardUsageBucketExpr(driver string, from, to int64) string {
+	_ = driver
 	window := time.UnixMilli(to).Sub(time.UnixMilli(from))
 	switch {
 	case window <= 6*time.Hour:
-		return "DATE_FORMAT(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(occurred_at) / 300) * 300), '%%Y-%%m-%%d %%H:%%i:00')"
+		return "TO_CHAR(TO_TIMESTAMP(FLOOR(EXTRACT(EPOCH FROM occurred_at) / 300) * 300), 'YYYY-MM-DD HH24:MI:00')"
 	case window <= 48*time.Hour:
-		return "DATE_FORMAT(occurred_at, '%%Y-%%m-%%d %%H:00:00')"
+		return "TO_CHAR(DATE_TRUNC('hour', occurred_at), 'YYYY-MM-DD HH24:00:00')"
 	default:
-		return "DATE_FORMAT(occurred_at, '%%Y-%%m-%%d')"
+		return "TO_CHAR(DATE_TRUNC('day', occurred_at), 'YYYY-MM-DD')"
 	}
+}
+
+func nativeDashboardSlowRequestFilterClause(driver string) string {
+	return fmt.Sprintf(
+		`started_at IS NOT NULL AND finished_at IS NOT NULL AND %s > 5000`,
+		nativeDashboardServiceDurationMillisExpr(driver),
+	)
+}
+
+func nativeDashboardServiceDurationMillisExpr(driver string) string {
+	_ = driver
+	return `CAST(FLOOR(GREATEST(EXTRACT(EPOCH FROM (finished_at - started_at)) * 1000, 0)) AS BIGINT)`
 }
 
 func resolveNativeDashboardUsageBucketSize(from, to int64) time.Duration {

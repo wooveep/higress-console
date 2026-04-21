@@ -152,7 +152,7 @@
 
 - `utility/clients/k8s` 新增 `kubectl` 驱动的 real client，实现 `ConfigMap / Secret / generic resource ConfigMap` 持久化，保留 fake client 供测试和契约样本复用。
 - 为 `gateway` service 补保护资源、internal 资源、plugin instance 的行为测试，收紧 P3 的基础约束。
-- `utility/clients/portaldb` 从占位健康检查升级为真实 SQL client，支持 MySQL driver、schema bootstrap、测试态 `NewFromDB` 注入。
+- `utility/clients/portaldb` 从占位健康检查升级为真实 SQL client，支持 PostgreSQL driver、schema bootstrap、测试态 `NewFromDB` 注入。
 - 新增 `portal` 域 service 与 controller，打通 `Consumer / Org Accounts / Org Departments / Invite Codes` 首批接口。
 - `cmd` 装配补齐 `portal` 路由绑定，并扩展 `hack/config.yaml` 的 `k8s / portaldb / grafana` 配置样例。
 
@@ -372,7 +372,7 @@
 
 - `cd aigateway-console/backend && go test ./...` 通过。
 - `cd aigateway-portal/backend && go test ./...` 通过。
-- 新增 MySQL testcontainers 集成验证通过：
+- 新增 PostgreSQL testcontainers 集成验证通过：
   - 共享 schema 初始化
   - Console 自有表初始化
   - legacy 表到真表迁移

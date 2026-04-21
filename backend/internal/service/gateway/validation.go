@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	portalsvc "github.com/wooveep/aigateway-console/backend/internal/service/portal"
 )
 
 var (
@@ -82,7 +84,7 @@ func (s *Service) normalizeForSave(ctx context.Context, kind string, payload map
 
 	switch kind {
 	case "routes":
-		return s.normalizeRouteLike(kind, normalized)
+		return s.normalizeRouteLike(ctx, kind, normalized)
 	case "ai-routes":
 		return s.normalizeAIRoute(ctx, normalized)
 	case "services":
@@ -98,7 +100,7 @@ func (s *Service) normalizeForSave(ctx context.Context, kind string, payload map
 	}
 }
 
-func (s *Service) normalizeRouteLike(kind string, payload map[string]any) (map[string]any, error) {
+func (s *Service) normalizeRouteLike(ctx context.Context, kind string, payload map[string]any) (map[string]any, error) {
 	payload["ingressClass"] = firstNonEmpty(stringValue(payload["ingressClass"]), s.k8sClient.IngressClass())
 	path, err := normalizeRoutePredicate(payload["path"], false)
 	if err != nil {
@@ -137,10 +139,14 @@ func (s *Service) normalizeRouteLike(kind string, payload map[string]any) (map[s
 		delete(payload, "urlParams")
 	}
 
-	if authConfig, err := normalizeAuthConfig(payload["authConfig"]); err != nil {
+	if authConfig, err := normalizeAuthConfig(payload["authConfig"], false); err != nil {
 		return nil, err
 	} else if len(authConfig) > 0 {
-		payload["authConfig"] = authConfig
+		resolvedAuthConfig, err := s.resolveAuthConfig(ctx, authConfig)
+		if err != nil {
+			return nil, err
+		}
+		payload["authConfig"] = resolvedAuthConfig
 	} else {
 		delete(payload, "authConfig")
 	}
@@ -222,10 +228,14 @@ func (s *Service) normalizeAIRoute(ctx context.Context, payload map[string]any) 
 		delete(payload, "modelPredicates")
 	}
 
-	if authConfig, err := normalizeAuthConfig(payload["authConfig"]); err != nil {
+	if authConfig, err := normalizeAuthConfig(payload["authConfig"], true); err != nil {
 		return nil, err
 	} else if len(authConfig) > 0 {
-		payload["authConfig"] = authConfig
+		resolvedAuthConfig, err := s.resolveAuthConfig(ctx, authConfig)
+		if err != nil {
+			return nil, err
+		}
+		payload["authConfig"] = resolvedAuthConfig
 	} else {
 		delete(payload, "authConfig")
 	}
@@ -258,7 +268,7 @@ func (s *Service) normalizeAIRouteFallbackConfig(ctx context.Context, value any)
 		if responseCodes := normalizeFallbackResponseCodes(item["responseCodes"]); len(responseCodes) > 0 {
 			result["responseCodes"] = responseCodes
 		}
-		if strategy := strings.ToUpper(firstNonEmpty(stringValue(item["fallbackStrategy"]), stringValue(item["strategy"]))); strategy != "" {
+		if strategy := normalizeAIRouteFallbackStrategy(firstNonEmpty(stringValue(item["fallbackStrategy"]), stringValue(item["strategy"]))); strategy != "" {
 			result["fallbackStrategy"] = strategy
 		}
 		delete(result, "strategy")
@@ -274,11 +284,11 @@ func (s *Service) normalizeAIRouteFallbackConfig(ctx context.Context, value any)
 	}
 	result["upstreams"] = upstreams
 
-	strategy := strings.ToUpper(firstNonEmpty(stringValue(item["fallbackStrategy"]), stringValue(item["strategy"])))
+	strategy := normalizeAIRouteFallbackStrategy(firstNonEmpty(stringValue(item["fallbackStrategy"]), stringValue(item["strategy"])))
 	if strategy == "" {
-		strategy = "RANDOM"
+		strategy = "RAND"
 	}
-	if strategy != "RANDOM" && strategy != "SEQUENCE" {
+	if strategy != "RAND" && strategy != "SEQ" {
 		return nil, fmt.Errorf("unknown fallback strategy: %s", strategy)
 	}
 	result["fallbackStrategy"] = strategy
@@ -295,6 +305,19 @@ func (s *Service) normalizeAIRouteFallbackConfig(ctx context.Context, value any)
 	}
 	result["responseCodes"] = responseCodes
 	return result, nil
+}
+
+func normalizeAIRouteFallbackStrategy(value string) string {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "":
+		return ""
+	case "RAND", "RANDOM":
+		return "RAND"
+	case "SEQ", "SEQUENCE":
+		return "SEQ"
+	default:
+		return strings.ToUpper(strings.TrimSpace(value))
+	}
 }
 
 func (s *Service) normalizeAIUpstreams(ctx context.Context, value any, validateProvider bool) ([]map[string]any, error) {
@@ -449,6 +472,10 @@ func normalizeAIProvider(payload map[string]any) (map[string]any, error) {
 		if err := normalizeOpenAIProviderConfigs(rawConfigs); err != nil {
 			return nil, err
 		}
+	case "volcengine":
+		if err := normalizeVolcengineProviderConfigs(rawConfigs); err != nil {
+			return nil, err
+		}
 	case "azure":
 		if err := normalizeAzureProviderConfigs(rawConfigs); err != nil {
 			return nil, err
@@ -600,6 +627,118 @@ func normalizeProviderType(value string) string {
 	normalized := strings.TrimSpace(strings.ToLower(value))
 	normalized = strings.ReplaceAll(normalized, "_", "-")
 	normalized = strings.ReplaceAll(normalized, " ", "-")
+	if normalized == "doubao" {
+		return "volcengine"
+	}
+	return normalized
+}
+
+func normalizeVolcengineProviderConfigs(rawConfigs map[string]any) error {
+	if domain := strings.TrimSpace(stringValue(rawConfigs["doubaoDomain"])); domain != "" && strings.TrimSpace(stringValue(rawConfigs["providerDomain"])) == "" {
+		rawConfigs["providerDomain"] = domain
+	}
+	delete(rawConfigs, "doubaoDomain")
+
+	if raw := strings.TrimSpace(firstNonEmpty(
+		stringValue(rawConfigs["volcengineBaseUrl"]),
+		stringValue(rawConfigs["baseUrl"]),
+		stringValue(rawConfigs["endpoint"]),
+	)); raw != "" {
+		parsed, err := validateProviderURL(raw, true)
+		if err != nil {
+			return fmt.Errorf("volcengineBaseUrl %w", err)
+		}
+		if parsed.RawQuery != "" {
+			return errors.New("volcengineBaseUrl must not contain query parameters")
+		}
+		if parsed.Port() != "" {
+			return errors.New("volcengineBaseUrl must not contain a custom port")
+		}
+		rawConfigs["providerDomain"] = parsed.Hostname()
+		if basePath := normalizeURLPath(parsed.Path); basePath != "" {
+			rawConfigs["providerBasePath"] = basePath
+		} else {
+			delete(rawConfigs, "providerBasePath")
+		}
+		delete(rawConfigs, "volcengineBaseUrl")
+		delete(rawConfigs, "baseUrl")
+		delete(rawConfigs, "endpoint")
+	}
+
+	if requestID := strings.TrimSpace(stringValue(rawConfigs["volcengineClientRequestId"])); requestID != "" {
+		rawConfigs["volcengineClientRequestId"] = requestID
+	} else {
+		delete(rawConfigs, "volcengineClientRequestId")
+	}
+
+	if rawConfigs["volcengineEnableEncryption"] != nil {
+		rawConfigs["volcengineEnableEncryption"] = boolFromAny(rawConfigs["volcengineEnableEncryption"], false)
+	}
+	if rawConfigs["volcengineEnableTrace"] != nil {
+		rawConfigs["volcengineEnableTrace"] = boolFromAny(rawConfigs["volcengineEnableTrace"], false)
+	}
+	if rawConfigs["retryOnFailure"] != nil {
+		retryOnFailure, err := normalizeRetryOnFailureConfig(rawConfigs["retryOnFailure"])
+		if err != nil {
+			return err
+		}
+		if len(retryOnFailure) == 0 {
+			delete(rawConfigs, "retryOnFailure")
+		} else {
+			rawConfigs["retryOnFailure"] = retryOnFailure
+		}
+	}
+	return nil
+}
+
+func normalizeRetryOnFailureConfig(value any) (map[string]any, error) {
+	retryOnFailure, ok := value.(map[string]any)
+	if !ok {
+		return nil, errors.New("retryOnFailure must be an object")
+	}
+	result := clonePayload(retryOnFailure)
+	if result == nil {
+		return nil, nil
+	}
+	if enabled := result["enabled"]; enabled != nil {
+		result["enabled"] = boolFromAny(enabled, false)
+	}
+	if maxRetries := result["maxRetries"]; maxRetries != nil {
+		normalized := toInt(maxRetries)
+		if normalized < 0 {
+			return nil, errors.New("retryOnFailure.maxRetries must be a non-negative number")
+		}
+		result["maxRetries"] = normalized
+	}
+	if retryTimeout := result["retryTimeout"]; retryTimeout != nil {
+		normalized := toInt(retryTimeout)
+		if normalized < 1 {
+			return nil, errors.New("retryOnFailure.retryTimeout must be a positive number")
+		}
+		result["retryTimeout"] = normalized
+	}
+	if retryOnStatus := result["retryOnStatus"]; retryOnStatus != nil {
+		statuses, err := normalizeStringArray(retryOnStatus, "retryOnFailure.retryOnStatus")
+		if err != nil {
+			return nil, err
+		}
+		result["retryOnStatus"] = statuses
+	}
+	return result, nil
+}
+
+func normalizeURLPath(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || trimmed == "/" {
+		return ""
+	}
+	normalized := strings.TrimRight(trimmed, "/")
+	if normalized == "" {
+		return ""
+	}
+	if !strings.HasPrefix(normalized, "/") {
+		return "/" + normalized
+	}
 	return normalized
 }
 
@@ -993,6 +1132,45 @@ func (s *Service) normalizeWasmPlugin(payload map[string]any) (map[string]any, e
 	return payload, nil
 }
 
+func resolvePluginInstanceTargetResource(scope, target string) (string, string) {
+	normalizedScope := strings.TrimSpace(scope)
+	normalizedTarget := strings.TrimSpace(target)
+	if normalizedScope == "service" {
+		return "services", normalizedTarget
+	}
+	if normalizedScope != "route" {
+		return normalizedScope + "s", normalizedTarget
+	}
+
+	if routeName, ok := extractAIRouteNameFromPluginTarget(normalizedTarget); ok {
+		return "ai-routes", routeName
+	}
+	return "routes", normalizedTarget
+}
+
+func extractAIRouteNameFromPluginTarget(target string) (string, bool) {
+	trimmed := strings.TrimSpace(target)
+	if !strings.HasPrefix(trimmed, "ai-route-") {
+		return "", false
+	}
+
+	for _, suffix := range []string{
+		".internal-internal",
+		".fallback.internal-internal",
+		".fallback.internal",
+		".internal",
+	} {
+		if strings.HasSuffix(trimmed, suffix) {
+			name := strings.TrimSuffix(strings.TrimPrefix(trimmed, "ai-route-"), suffix)
+			if name != "" {
+				return name, true
+			}
+			return "", false
+		}
+	}
+	return "", false
+}
+
 func (s *Service) validatePluginInstance(ctx context.Context, scope, target, pluginName string, payload map[string]any) error {
 	normalizedScope := strings.TrimSpace(scope)
 	if normalizedScope == "" {
@@ -1002,11 +1180,8 @@ func (s *Service) validatePluginInstance(ctx context.Context, scope, target, plu
 		return errors.New("plugin target is required")
 	}
 	if normalizedScope != "global" {
-		targetKind := normalizedScope + "s"
-		if normalizedScope == "service" {
-			targetKind = "services"
-		}
-		if _, err := s.k8sClient.GetResource(ctx, targetKind, target); err != nil {
+		targetKind, targetName := resolvePluginInstanceTargetResource(normalizedScope, target)
+		if _, err := s.k8sClient.GetResource(ctx, targetKind, targetName); err != nil {
 			return fmt.Errorf("%s %s not found", normalizedScope, target)
 		}
 	}
@@ -1152,17 +1327,28 @@ func normalizeUpstreamServicesItems(rawItems []any) ([]map[string]any, error) {
 	return result, nil
 }
 
-func normalizeAuthConfig(value any) (map[string]any, error) {
+func normalizeAuthConfig(value any, requireEnabled bool) (map[string]any, error) {
 	item, _ := value.(map[string]any)
 	if len(item) == 0 {
+		if requireEnabled {
+			return nil, errors.New("authConfig is required")
+		}
 		return nil, nil
 	}
+	enabled := fmt.Sprint(item["enabled"]) == "true"
+	if requireEnabled && !enabled {
+		return nil, errors.New("authConfig.enabled must be true")
+	}
 	result := map[string]any{
-		"enabled": fmt.Sprint(item["enabled"]) == "true",
+		"enabled": enabled,
 	}
 	allowedConsumers := normalizeStringSlice(item["allowedConsumers"])
 	if len(allowedConsumers) > 0 {
 		result["allowedConsumers"] = allowedConsumers
+	}
+	departments := normalizeStringSlice(item["allowedDepartments"])
+	if len(departments) > 0 {
+		result["allowedDepartments"] = departments
 	}
 	levels := normalizeStringSlice(item["allowedConsumerLevels"])
 	for _, level := range levels {
@@ -1173,7 +1359,113 @@ func normalizeAuthConfig(value any) (map[string]any, error) {
 	if len(levels) > 0 {
 		result["allowedConsumerLevels"] = levels
 	}
+	if enabled && len(allowedConsumers) == 0 && len(departments) == 0 && len(levels) == 0 {
+		return nil, errors.New("authConfig requires allowedDepartments or allowedConsumerLevels")
+	}
 	return result, nil
+}
+
+func (s *Service) resolveAuthConfig(ctx context.Context, authConfig map[string]any) (map[string]any, error) {
+	if len(authConfig) == 0 {
+		return nil, nil
+	}
+
+	result := clonePayload(authConfig)
+	if result == nil {
+		result = map[string]any{}
+	}
+	allowedConsumers, err := s.resolveAllowedConsumers(ctx, authConfig)
+	if err != nil {
+		return nil, err
+	}
+	if len(allowedConsumers) > 0 {
+		result["allowedConsumers"] = allowedConsumers
+	} else {
+		delete(result, "allowedConsumers")
+	}
+	return result, nil
+}
+
+func (s *Service) resolveAllowedConsumers(ctx context.Context, authConfig map[string]any) ([]string, error) {
+	var (
+		existing    = normalizeStringSlice(authConfig["allowedConsumers"])
+		departments = normalizeStringSlice(authConfig["allowedDepartments"])
+		levels      = normalizeStringSlice(authConfig["allowedConsumerLevels"])
+	)
+	if len(departments) == 0 && len(levels) == 0 {
+		return uniqueStrings(existing), nil
+	}
+	if s.portal == nil {
+		return nil, errors.New("portal reader is unavailable for route auth resolution")
+	}
+
+	departmentIDs, err := s.expandDepartmentIDs(ctx, departments)
+	if err != nil {
+		return nil, err
+	}
+	departmentSet := make(map[string]struct{}, len(departmentIDs))
+	for _, departmentID := range departmentIDs {
+		departmentSet[departmentID] = struct{}{}
+	}
+	levelSet := make(map[string]struct{}, len(levels))
+	for _, level := range levels {
+		levelSet[strings.ToLower(strings.TrimSpace(level))] = struct{}{}
+	}
+
+	result := append([]string{}, existing...)
+	accounts, err := s.portal.ListAccounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, account := range accounts {
+		name := strings.TrimSpace(account.ConsumerName)
+		if name == "" || strings.EqualFold(strings.TrimSpace(account.Status), "disabled") {
+			continue
+		}
+		_, departmentAllowed := departmentSet[strings.TrimSpace(account.DepartmentID)]
+		_, levelAllowed := levelSet[strings.ToLower(strings.TrimSpace(account.UserLevel))]
+		if departmentAllowed || levelAllowed {
+			result = append(result, name)
+		}
+	}
+	return uniqueStrings(result), nil
+}
+
+func (s *Service) expandDepartmentIDs(ctx context.Context, selected []string) ([]string, error) {
+	if len(selected) == 0 {
+		return nil, nil
+	}
+	if s.portal == nil {
+		return nil, errors.New("portal reader is unavailable for department expansion")
+	}
+
+	nodes, err := s.portal.ListDepartmentTree(ctx)
+	if err != nil {
+		return nil, err
+	}
+	selectedSet := make(map[string]struct{}, len(selected))
+	for _, departmentID := range selected {
+		selectedSet[strings.TrimSpace(departmentID)] = struct{}{}
+	}
+
+	result := make([]string, 0, len(selected))
+	var walk func(items []*portalsvc.OrgDepartmentNode, inherited bool)
+	walk = func(items []*portalsvc.OrgDepartmentNode, inherited bool) {
+		for _, item := range items {
+			if item == nil {
+				continue
+			}
+			id := strings.TrimSpace(item.DepartmentID)
+			_, selectedHere := selectedSet[id]
+			include := inherited || selectedHere
+			walk(item.Children, include)
+			if include {
+				result = append(result, id)
+			}
+		}
+	}
+	walk(nodes, false)
+	return uniqueStrings(result), nil
 }
 
 func normalizeMCPRouteMetadata(serverName string, value any, ingressClass string) map[string]any {

@@ -20,7 +20,7 @@ type retryingClient struct {
 func (c *retryingClient) Healthy(ctx context.Context) error { return nil }
 func (c *retryingClient) Enabled() bool                     { return true }
 func (c *retryingClient) DB() *sql.DB                       { return c.db }
-func (c *retryingClient) Driver() string                    { return "mysql" }
+func (c *retryingClient) Driver() string                    { return "postgres" }
 func (c *retryingClient) MigrateLegacyData(ctx context.Context) error {
 	return nil
 }
@@ -40,11 +40,11 @@ var _ portaldbclient.Client = (*retryingClient)(nil)
 func TestDBRetriesSchemaCheckAfterFailure(t *testing.T) {
 	svc := New(&retryingClient{
 		db:         &sql.DB{},
-		ensureErrs: []error{errors.New("dial tcp mysql-server:3306: connect: connection refused"), nil},
+		ensureErrs: []error{errors.New("dial tcp postgres-server:5432: connect: connection refused"), nil},
 	})
 
 	_, err := svc.db(context.Background())
-	require.EqualError(t, err, "dial tcp mysql-server:3306: connect: connection refused")
+	require.EqualError(t, err, "dial tcp postgres-server:5432: connect: connection refused")
 
 	db, err := svc.db(context.Background())
 	require.NoError(t, err)

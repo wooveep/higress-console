@@ -47,25 +47,67 @@ func TestRefreshAIQuota(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`
 		INSERT INTO billing_wallet (consumer_name, currency, available_micro_yuan, version)
 		VALUES (?, 'CNY', ?, 1)
-		ON DUPLICATE KEY UPDATE available_micro_yuan = VALUES(available_micro_yuan), version = version + 1`)).
+		ON CONFLICT (consumer_name) DO UPDATE SET available_micro_yuan = EXCLUDED.available_micro_yuan, version = billing_wallet.version + EXCLUDED.version`)).
 		WithArgs("demo", int64(1200000)).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`
 		INSERT INTO billing_transaction (
 			tx_id, consumer_name, tx_type, amount_micro_yuan, currency, source_type, source_id, occurred_at, created_at
 		)
-		VALUES (?, ?, 'adjust', ?, 'CNY', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`)).
+		VALUES (?, ?, 'adjust', ?, 'CNY', ?, ?, TIMEZONE('UTC', CURRENT_TIMESTAMP), TIMEZONE('UTC', CURRENT_TIMESTAMP))`)).
 		WithArgs(sqlmock.AnyArg(), "demo", int64(1200000), "console_ai_quota_refresh", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	mock.ExpectExec(regexp.QuoteMeta(`
 		INSERT INTO portal_ai_quota_balance (route_name, consumer_name, quota)
 		VALUES (?, ?, ?)
-		ON DUPLICATE KEY UPDATE quota = VALUES(quota), updated_at = CURRENT_TIMESTAMP`)).
+		ON CONFLICT (route_name, consumer_name) DO UPDATE SET quota = EXCLUDED.quota, updated_at = CURRENT_TIMESTAMP`)).
 		WithArgs("route-a", "demo", int64(1200000)).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
+	item, err := svc.RefreshAIQuota(context.Background(), "route-a", "demo", 1200000)
+	require.NoError(t, err)
+	require.Equal(t, int64(1200000), item.Quota)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRefreshAIQuotaPostgresUsesPortableTimestampExpr(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT available_micro_yuan
+		FROM billing_wallet
+		WHERE consumer_name = ?
+		LIMIT 1`)).
+		WithArgs("demo").
+		WillReturnRows(sqlmock.NewRows([]string{"available_micro_yuan"}))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO billing_wallet (consumer_name, currency, available_micro_yuan, version)
+		VALUES (?, 'CNY', ?, 1)
+		ON CONFLICT (consumer_name) DO UPDATE SET available_micro_yuan = EXCLUDED.available_micro_yuan, version = billing_wallet.version + EXCLUDED.version`)).
+		WithArgs("demo", int64(1200000)).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO billing_transaction (
+			tx_id, consumer_name, tx_type, amount_micro_yuan, currency, source_type, source_id, occurred_at, created_at
+		)
+		VALUES (?, ?, 'adjust', ?, 'CNY', ?, ?, TIMEZONE('UTC', CURRENT_TIMESTAMP), TIMEZONE('UTC', CURRENT_TIMESTAMP))`)).
+		WithArgs(sqlmock.AnyArg(), "demo", int64(1200000), "console_ai_quota_refresh", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO portal_ai_quota_balance (route_name, consumer_name, quota)
+		VALUES (?, ?, ?)
+		ON CONFLICT (route_name, consumer_name) DO UPDATE SET quota = EXCLUDED.quota, updated_at = CURRENT_TIMESTAMP`)).
+		WithArgs("route-a", "demo", int64(1200000)).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
+	svc.schemaChecked = true
 	item, err := svc.RefreshAIQuota(context.Background(), "route-a", "demo", 1200000)
 	require.NoError(t, err)
 	require.Equal(t, int64(1200000), item.Quota)
@@ -81,7 +123,7 @@ func TestListAIQuotaConsumersPrefersPortalBillingWallet(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT consumer_name
 		FROM portal_user
-		WHERE COALESCE(is_deleted, 0) = 0
+		WHERE COALESCE(is_deleted, FALSE) = FALSE
 		ORDER BY consumer_name ASC`)).
 		WillReturnRows(sqlmock.NewRows([]string{"consumer_name"}).
 			AddRow("demo"))
@@ -100,7 +142,7 @@ func TestListAIQuotaConsumersPrefersPortalBillingWallet(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"consumer_name", "available_micro_yuan"}).
 			AddRow("demo", int64(900000)))
 
-	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
 	items, err := svc.ListAIQuotaConsumers(context.Background(), "route-a")
 	require.NoError(t, err)
 	require.Len(t, items, 2)
@@ -117,21 +159,21 @@ func TestSaveAISensitiveSystemConfigAndStatus(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`
 		INSERT INTO portal_ai_sensitive_system_config (config_key, system_deny_enabled, dictionary_text, updated_by)
 		VALUES ('default', ?, ?, ?)
-		ON DUPLICATE KEY UPDATE
-			system_deny_enabled = VALUES(system_deny_enabled),
-			dictionary_text = VALUES(dictionary_text),
-			updated_by = VALUES(updated_by),
+		ON CONFLICT (config_key) DO UPDATE SET
+			system_deny_enabled = EXCLUDED.system_deny_enabled,
+			dictionary_text = EXCLUDED.dictionary_text,
+			updated_by = EXCLUDED.updated_by,
 			updated_at = CURRENT_TIMESTAMP`)).
-		WithArgs(1, "alpha\nbeta", "tester").
+		WithArgs(true, "alpha\nbeta", "tester").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT system_deny_enabled, dictionary_text, updated_by, updated_at
 		FROM portal_ai_sensitive_system_config
 		WHERE config_key = 'default'`)).
 		WillReturnRows(sqlmock.NewRows([]string{"system_deny_enabled", "dictionary_text", "updated_by", "updated_at"}).
-			AddRow(1, "alpha\nbeta", "tester", time.Now()))
+			AddRow(true, "alpha\nbeta", "tester", time.Now()))
 
-	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
 	item, err := svc.SaveAISensitiveSystemConfig(context.Background(), AISensitiveSystemConfig{
 		SystemDenyEnabled: true,
 		DictionaryText:    "alpha\nbeta",

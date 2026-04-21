@@ -9,9 +9,10 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AAlert: typeof import('ant-design-vue/es')['Alert']
+    AAutoComplete: typeof import('ant-design-vue/es')['AutoComplete']
     AButton: typeof import('ant-design-vue/es')['Button']
     ACard: typeof import('ant-design-vue/es')['Card']
-    ACheckboxGroup: typeof import('ant-design-vue/es')['CheckboxGroup']
+    ACheckbox: typeof import('ant-design-vue/es')['Checkbox']
     ACollapse: typeof import('ant-design-vue/es')['Collapse']
     ACollapsePanel: typeof import('ant-design-vue/es')['CollapsePanel']
     ADescriptions: typeof import('ant-design-vue/es')['Descriptions']
@@ -30,6 +31,7 @@ declare module 'vue' {
     AListItem: typeof import('ant-design-vue/es')['ListItem']
     AMenu: typeof import('ant-design-vue/es')['Menu']
     AModal: typeof import('ant-design-vue/es')['Modal']
+    APopconfirm: typeof import('ant-design-vue/es')['Popconfirm']
     APopover: typeof import('ant-design-vue/es')['Popover']
     AppShell: typeof import('./components/app/AppShell.vue')['default']
     AppSidebar: typeof import('./components/app/AppSidebar.vue')['default']
@@ -50,6 +52,7 @@ declare module 'vue' {
     ATag: typeof import('ant-design-vue/es')['Tag']
     ATextarea: typeof import('ant-design-vue/es')['Textarea']
     ATree: typeof import('ant-design-vue/es')['Tree']
+    ATypographyText: typeof import('ant-design-vue/es')['TypographyText']
     ChangePasswordForm: typeof import('./components/app/ChangePasswordForm.vue')['default']
     DeleteConfirmModal: typeof import('./components/common/DeleteConfirmModal.vue')['default']
     DrawerFooter: typeof import('./components/common/DrawerFooter.vue')['default']

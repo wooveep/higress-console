@@ -37,3 +37,14 @@
 - 组织架构页：用户树、启用/禁用、密码重置、邀请码管理、只读 key 摘要。
 - Route/AI Route/MCP 表单：消费者下拉读取 `/v1/consumers`，并集保留历史值。
 - MCP 创建：前端按 RFC1123 小写规则校验名称。
+
+## 7. 当前待修问题（2026-04-18）
+- 本地开发环境链路仍有隐式运行时修复：
+  - console 本地镜像构建默认依赖的 `backend/resource/public/plugin/plugins.properties` 缺失；
+  - `higress-config` 下发的 `mcpServer.redis` 配置未自动包含密码；
+  - 内置 `ai-proxy.internal` WasmPlugin 资源没有稳定的模块 URL / 版本映射，`gateway` 冷启动可能卡在 Wasm 初始化。
+- 模型资产“发布绑定”接口存在 PostgreSQL 兼容问题：
+  - `POST /v1/ai/model-assets/:assetId/bindings/:bindingId/publish`
+  - 当前报错：`operator does not exist: boolean = integer (SQLSTATE 42883)`。
+  - 同类问题也存在于 AI 脱敏、AI 配额的布尔字段读写链路，需要一起收口。
+- Console 前端缺少黑盒自动化点击验证，当前页面级回归主要依赖人工打开页面确认。

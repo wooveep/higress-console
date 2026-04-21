@@ -29,6 +29,7 @@ RUN apk add --no-cache ca-certificates tzdata kubectl && \
 COPY --from=builder /out/aigateway-console /app/aigateway-console
 COPY resource /app/resource
 COPY manifest/config /app/manifest/config
+RUN chmod -R a+r /app/resource /app/manifest/config
 
 EXPOSE 8080
 USER app

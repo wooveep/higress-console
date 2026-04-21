@@ -56,6 +56,7 @@ type Client interface {
 	GetResource(ctx context.Context, kind, name string) (map[string]any, error)
 	UpsertResource(ctx context.Context, kind, name string, data map[string]any) (map[string]any, error)
 	DeleteResource(ctx context.Context, kind, name string) error
+	SyncAIDataMaskingRuntime(ctx context.Context) error
 }
 
 type RealClient struct {
@@ -214,7 +215,6 @@ func (c *MemoryClient) GetResource(ctx context.Context, kind, name string) (map[
 
 func (c *MemoryClient) UpsertResource(ctx context.Context, kind, name string, data map[string]any) (map[string]any, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	if _, ok := c.resources[kind]; !ok {
 		c.resources[kind] = map[string]map[string]any{}
@@ -225,17 +225,29 @@ func (c *MemoryClient) UpsertResource(ctx context.Context, kind, name string, da
 		merged["version"] = nextVersion(c.resources[kind])
 	}
 	c.resources[kind][name] = merged
+	c.mu.Unlock()
+
+	if shouldSyncAIDataMaskingRuntime(kind, name) {
+		if err := c.SyncAIDataMaskingRuntime(ctx); err != nil {
+			return nil, err
+		}
+	}
 	return cloneMap(merged), nil
 }
 
 func (c *MemoryClient) DeleteResource(ctx context.Context, kind, name string) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	if _, ok := c.resources[kind][name]; !ok {
+		c.mu.Unlock()
 		return ErrNotFound
 	}
 	delete(c.resources[kind], name)
+	c.mu.Unlock()
+
+	if shouldSyncAIDataMaskingRuntime(kind, name) {
+		return c.SyncAIDataMaskingRuntime(ctx)
+	}
 	return nil
 }
 
@@ -258,6 +270,34 @@ func (c *MemoryClient) LoadBuiltinPluginRules(ctx context.Context, pluginName st
 		}
 	}
 	return result, nil
+}
+
+func (c *MemoryClient) SyncAIDataMaskingRuntime(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	projection := cloneMap(c.resources["ai-sensitive-projections"]["default"])
+	desiredRules := c.buildDesiredAIDataMaskingRulesLocked(projection)
+	pluginName := builtinWasmPluginResourceName(higressWasmPluginNameAIDataMasking)
+	existing := cloneMap(c.resources[higressWasmPluginResource][pluginName])
+	if existing == nil && len(desiredRules) == 0 {
+		return nil
+	}
+	if existing == nil {
+		manifest, ok := builtinWasmPluginManifest(higressWasmPluginNameAIDataMasking, c.namespace)
+		if !ok {
+			return ErrNotFound
+		}
+		existing = manifest
+	}
+	spec := ensureMap(existing, "spec")
+	spec["matchRules"] = syncAIDataMaskingMatchRules(toMapSlice(spec["matchRules"]), desiredRules)
+
+	if _, ok := c.resources[higressWasmPluginResource]; !ok {
+		c.resources[higressWasmPluginResource] = map[string]map[string]any{}
+	}
+	c.resources[higressWasmPluginResource][pluginName] = existing
+	return nil
 }
 
 func (c *RealClient) Healthy(ctx context.Context) error {
@@ -441,6 +481,11 @@ func (c *RealClient) UpsertResource(ctx context.Context, kind, name string, data
 	if _, err := c.run(ctx, manifest, "apply", "-f", "-"); err != nil {
 		return nil, err
 	}
+	if shouldSyncAIDataMaskingRuntime(kind, name) {
+		if err := c.SyncAIDataMaskingRuntime(ctx); err != nil {
+			return nil, err
+		}
+	}
 	return cloneMap(item), nil
 }
 
@@ -449,7 +494,25 @@ func (c *RealClient) DeleteResource(ctx context.Context, kind, name string) erro
 		return c.deleteControlPlaneResource(ctx, kind, name)
 	}
 	_, err := c.run(ctx, nil, "delete", "configmap", c.resourceConfigMapName(kind, name), "--ignore-not-found=false")
-	return err
+	if err != nil {
+		return err
+	}
+	if shouldSyncAIDataMaskingRuntime(kind, name) {
+		return c.SyncAIDataMaskingRuntime(ctx)
+	}
+	return nil
+}
+
+func shouldSyncAIDataMaskingRuntime(kind, name string) bool {
+	trimmedKind := strings.TrimSpace(kind)
+	trimmedName := strings.TrimSpace(name)
+	if trimmedKind == "ai-sensitive-projections" && trimmedName == "default" {
+		return true
+	}
+	if strings.HasPrefix(trimmedKind, "route-plugin-instances:") && trimmedName == higressWasmPluginNameAIDataMasking {
+		return true
+	}
+	return false
 }
 
 func ParseConfigMapYAML(raw string) (map[string]string, error) {

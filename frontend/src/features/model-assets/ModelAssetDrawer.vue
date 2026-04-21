@@ -3,7 +3,13 @@ import { computed, reactive, ref, watch } from 'vue';
 import type { ModelAsset, ModelAssetOptions } from '@/interfaces/model-asset';
 import { MODEL_ASSET_PRESET_TAGS } from '@/interfaces/model-asset';
 import DrawerFooter from '@/components/common/DrawerFooter.vue';
-import { hasLegacyAssetValues, toAssetFormState } from './model-asset-form';
+import {
+  FEATURE_FLAG_LABELS,
+  MODALITY_LABELS,
+  MODEL_TYPE_LABELS,
+  hasLegacyAssetValues,
+  toAssetFormState,
+} from './model-asset-form';
 
 const props = defineProps<{
   open: boolean;
@@ -37,11 +43,12 @@ async function submit() {
     canonicalName: formState.canonicalName.trim(),
     displayName: formState.displayName.trim(),
     intro: formState.intro.trim(),
+    modelType: formState.modelType,
     tags: [...formState.tags],
     capabilities: {
-      modalities: [...formState.modalities],
-      features: [...formState.features],
-      requestKinds: [...formState.requestKinds],
+      inputModalities: [...formState.inputModalities],
+      outputModalities: [...formState.outputModalities],
+      featureFlags: [...formState.featureFlags],
     },
   }, Boolean(props.asset));
 }
@@ -66,9 +73,13 @@ async function submit() {
       <a-form-item
         label="资产 ID"
         name="assetId"
-        :rules="[{ required: true, message: '请输入资产 ID' }]"
+        :rules="asset ? [{ required: true, message: '请输入资产 ID' }] : []"
       >
-        <a-input v-model:value="formState.assetId" :disabled="Boolean(asset)" />
+        <a-input
+          v-model:value="formState.assetId"
+          :disabled="Boolean(asset)"
+          :placeholder="asset ? '' : '留空则自动生成 UUID'"
+        />
       </a-form-item>
       <a-form-item
         label="规范名"
@@ -87,6 +98,16 @@ async function submit() {
       <a-form-item label="简介">
         <a-textarea v-model:value="formState.intro" :rows="4" />
       </a-form-item>
+      <a-form-item
+        label="模型类型"
+        name="modelType"
+        :rules="[{ required: true, message: '请选择模型类型' }]"
+      >
+        <a-select
+          v-model:value="formState.modelType"
+          :options="(assetOptions.capabilities?.modelTypes || []).map((item) => ({ label: MODEL_TYPE_LABELS[item] || item, value: item }))"
+        />
+      </a-form-item>
       <a-form-item label="标签">
         <a-select
           v-model:value="formState.tags"
@@ -94,25 +115,25 @@ async function submit() {
           :options="MODEL_ASSET_PRESET_TAGS.map((tag) => ({ label: tag, value: tag }))"
         />
       </a-form-item>
-      <a-form-item label="模态">
+      <a-form-item label="输入模态">
         <a-select
-          v-model:value="formState.modalities"
+          v-model:value="formState.inputModalities"
           mode="multiple"
-          :options="(assetOptions.capabilities?.modalities || []).map((item) => ({ label: item, value: item }))"
+          :options="(assetOptions.capabilities?.inputModalities || []).map((item) => ({ label: MODALITY_LABELS[item] || item, value: item }))"
         />
       </a-form-item>
-      <a-form-item label="能力特性">
+      <a-form-item label="输出模态">
         <a-select
-          v-model:value="formState.features"
+          v-model:value="formState.outputModalities"
           mode="multiple"
-          :options="(assetOptions.capabilities?.features || []).map((item) => ({ label: item, value: item }))"
+          :options="(assetOptions.capabilities?.outputModalities || []).map((item) => ({ label: MODALITY_LABELS[item] || item, value: item }))"
         />
       </a-form-item>
-      <a-form-item label="请求类型">
+      <a-form-item label="固定能力标签">
         <a-select
-          v-model:value="formState.requestKinds"
+          v-model:value="formState.featureFlags"
           mode="multiple"
-          :options="(assetOptions.capabilities?.requestKinds || []).map((item) => ({ label: item, value: item }))"
+          :options="(assetOptions.capabilities?.featureFlags || []).map((item) => ({ label: FEATURE_FLAG_LABELS[item] || item, value: item }))"
         />
       </a-form-item>
     </a-form>

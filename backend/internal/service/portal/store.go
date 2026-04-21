@@ -13,14 +13,20 @@ import (
 	"github.com/wooveep/aigateway-console/backend/internal/dao"
 	"github.com/wooveep/aigateway-console/backend/internal/model/do"
 	"github.com/wooveep/aigateway-console/backend/internal/model/entity"
+	portaldbclient "github.com/wooveep/aigateway-console/backend/utility/clients/portaldb"
 )
 
 type portalStore struct {
-	db *sql.DB
+	db     *sql.DB
+	driver string
 }
 
-func newPortalStore(db *sql.DB) *portalStore {
-	return &portalStore{db: db}
+func newPortalStore(db *sql.DB, drivers ...string) *portalStore {
+	driver := "postgres"
+	if len(drivers) > 0 && strings.TrimSpace(drivers[0]) != "" {
+		driver = drivers[0]
+	}
+	return &portalStore{db: db, driver: driver}
 }
 
 func (s *portalStore) insertInviteCode(ctx context.Context, invite do.PortalInviteCode) error {
@@ -221,7 +227,7 @@ func (s *portalStore) listActivePortalUsers(ctx context.Context) ([]entity.Porta
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT consumer_name
 		FROM `+dao.PortalUser.Name+`
-		WHERE COALESCE(is_deleted, 0) = 0
+		WHERE COALESCE(is_deleted, FALSE) = FALSE
 		ORDER BY consumer_name ASC`)
 	if err != nil {
 		return nil, err
@@ -243,7 +249,9 @@ func (s *portalStore) saveAIQuotaBalance(ctx context.Context, balance do.PortalA
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO `+dao.PortalAIQuotaBalance.Name+` (route_name, consumer_name, quota)
 		VALUES (?, ?, ?)
-		ON DUPLICATE KEY UPDATE quota = VALUES(quota), updated_at = CURRENT_TIMESTAMP`,
+		`+portaldbclient.UpsertClause(s.driver, []string{"route_name", "consumer_name"},
+		portaldbclient.AssignValue(s.driver, "quota"),
+		`updated_at = CURRENT_TIMESTAMP`)+``,
 		balance.RouteName,
 		balance.ConsumerName,
 		balance.Quota,
@@ -263,14 +271,14 @@ func (s *portalStore) refreshPortalBillingBalance(
 	}
 	defer tx.Rollback()
 
-	current, err := queryCurrentPortalBillingBalance(ctx, tx, consumerName)
+	current, err := queryCurrentPortalBillingBalance(ctx, tx, s.driver, consumerName)
 	if err != nil {
 		return 0, err
 	}
-	if err := upsertPortalBillingWallet(ctx, tx, consumerName, balanceMicroYuan); err != nil {
+	if err := upsertPortalBillingWallet(ctx, tx, s.driver, consumerName, balanceMicroYuan); err != nil {
 		return 0, err
 	}
-	if err := insertPortalBillingAdjustTransaction(ctx, tx, consumerName, balanceMicroYuan-current, "console_ai_quota_refresh", sourceHint); err != nil {
+	if err := insertPortalBillingAdjustTransaction(ctx, tx, s.driver, consumerName, balanceMicroYuan-current, "console_ai_quota_refresh", sourceHint); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -291,15 +299,15 @@ func (s *portalStore) deltaPortalBillingBalance(
 	}
 	defer tx.Rollback()
 
-	current, err := queryCurrentPortalBillingBalance(ctx, tx, consumerName)
+	current, err := queryCurrentPortalBillingBalance(ctx, tx, s.driver, consumerName)
 	if err != nil {
 		return 0, err
 	}
 	next := current + deltaMicroYuan
-	if err := upsertPortalBillingWallet(ctx, tx, consumerName, next); err != nil {
+	if err := upsertPortalBillingWallet(ctx, tx, s.driver, consumerName, next); err != nil {
 		return 0, err
 	}
-	if err := insertPortalBillingAdjustTransaction(ctx, tx, consumerName, deltaMicroYuan, "console_ai_quota_delta", sourceHint); err != nil {
+	if err := insertPortalBillingAdjustTransaction(ctx, tx, s.driver, consumerName, deltaMicroYuan, "console_ai_quota_delta", sourceHint); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -380,16 +388,16 @@ func (s *portalStore) saveAIQuotaUserPolicy(ctx context.Context, policy do.Quota
 			consumer_name, limit_total_micro_yuan, limit_5h_micro_yuan, limit_daily_micro_yuan,
 			daily_reset_mode, daily_reset_time, limit_weekly_micro_yuan, limit_monthly_micro_yuan, cost_reset_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE
-			limit_total_micro_yuan = VALUES(limit_total_micro_yuan),
-			limit_5h_micro_yuan = VALUES(limit_5h_micro_yuan),
-			limit_daily_micro_yuan = VALUES(limit_daily_micro_yuan),
-			daily_reset_mode = VALUES(daily_reset_mode),
-			daily_reset_time = VALUES(daily_reset_time),
-			limit_weekly_micro_yuan = VALUES(limit_weekly_micro_yuan),
-			limit_monthly_micro_yuan = VALUES(limit_monthly_micro_yuan),
-			cost_reset_at = VALUES(cost_reset_at),
-			updated_at = CURRENT_TIMESTAMP`,
+		`+portaldbclient.UpsertClause(s.driver, []string{"consumer_name"},
+		portaldbclient.AssignValue(s.driver, "limit_total_micro_yuan"),
+		portaldbclient.AssignValue(s.driver, "limit_5h_micro_yuan"),
+		portaldbclient.AssignValue(s.driver, "limit_daily_micro_yuan"),
+		portaldbclient.AssignValue(s.driver, "daily_reset_mode"),
+		portaldbclient.AssignValue(s.driver, "daily_reset_time"),
+		portaldbclient.AssignValue(s.driver, "limit_weekly_micro_yuan"),
+		portaldbclient.AssignValue(s.driver, "limit_monthly_micro_yuan"),
+		portaldbclient.AssignValue(s.driver, "cost_reset_at"),
+		`updated_at = CURRENT_TIMESTAMP`)+``,
 		policy.ConsumerName,
 		policy.LimitTotalMicroYuan,
 		policy.Limit5hMicroYuan,
@@ -425,7 +433,7 @@ func (s *portalStore) listAIQuotaScheduleRules(ctx context.Context, routeName, c
 	for rows.Next() {
 		var (
 			item          entity.PortalAIQuotaScheduleRule
-			enabled       int
+			enabled       bool
 			createdAt     sql.NullTime
 			updatedAt     sql.NullTime
 			lastAppliedAt sql.NullTime
@@ -446,7 +454,9 @@ func (s *portalStore) listAIQuotaScheduleRules(ctx context.Context, routeName, c
 			return nil, err
 		}
 		item.RouteName = routeName
-		item.Enabled = enabled
+		if enabled {
+			item.Enabled = 1
+		}
 		item.CreatedAt = gtimePointerFromNullTime(createdAt)
 		item.UpdatedAt = gtimePointerFromNullTime(updatedAt)
 		item.LastAppliedAt = gtimePointerFromNullTime(lastAppliedAt)
@@ -461,13 +471,13 @@ func (s *portalStore) saveAIQuotaScheduleRule(ctx context.Context, rule do.Porta
 		INSERT INTO `+dao.PortalAIQuotaScheduleRule.Name+` (
 			id, route_name, consumer_name, action, cron, value, enabled
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE
-			consumer_name = VALUES(consumer_name),
-			action = VALUES(action),
-			cron = VALUES(cron),
-			value = VALUES(value),
-			enabled = VALUES(enabled),
-			updated_at = CURRENT_TIMESTAMP`,
+		`+portaldbclient.UpsertClause(s.driver, []string{"id"},
+		portaldbclient.AssignValue(s.driver, "consumer_name"),
+		portaldbclient.AssignValue(s.driver, "action"),
+		portaldbclient.AssignValue(s.driver, "cron"),
+		portaldbclient.AssignValue(s.driver, "value"),
+		portaldbclient.AssignValue(s.driver, "enabled"),
+		`updated_at = CURRENT_TIMESTAMP`)+``,
 		rule.Id, rule.RouteName, rule.ConsumerName, rule.Action, rule.Cron, rule.Value, rule.Enabled,
 	)
 	return err
@@ -529,15 +539,11 @@ func (s *portalStore) saveAISensitiveDetectRule(ctx context.Context, rule do.Por
 		)
 		return id, err
 	}
-	result, err := s.db.ExecContext(ctx, `
+	return portaldbclient.InsertReturningID(ctx, s.db, s.driver, `
 		INSERT INTO `+dao.PortalAISensitiveDetectRule.Name+` (pattern, match_type, description, priority, enabled)
 		VALUES (?, ?, ?, ?, ?)`,
 		rule.Pattern, rule.MatchType, rule.Description, rule.Priority, rule.Enabled,
 	)
-	if err != nil {
-		return 0, err
-	}
-	return result.LastInsertId()
 }
 
 func (s *portalStore) deleteAISensitiveDetectRule(ctx context.Context, id int64) (bool, error) {
@@ -592,16 +598,12 @@ func (s *portalStore) saveAISensitiveReplaceRule(ctx context.Context, rule do.Po
 		)
 		return id, err
 	}
-	result, err := s.db.ExecContext(ctx, `
+	return portaldbclient.InsertReturningID(ctx, s.db, s.driver, `
 		INSERT INTO `+dao.PortalAISensitiveReplaceRule.Name+` (
 			pattern, replace_type, replace_value, restore, description, priority, enabled
 		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		rule.Pattern, rule.ReplaceType, rule.ReplaceValue, rule.Restore, rule.Description, rule.Priority, rule.Enabled,
 	)
-	if err != nil {
-		return 0, err
-	}
-	return result.LastInsertId()
 }
 
 func (s *portalStore) deleteAISensitiveReplaceRule(ctx context.Context, id int64) (bool, error) {
@@ -670,16 +672,16 @@ func (s *portalStore) listAISensitiveAudits(ctx context.Context, query AISensiti
 
 func (s *portalStore) getAISensitiveSystemConfig(ctx context.Context) (*entity.PortalAISensitiveSystemConfig, error) {
 	var (
-		item       entity.PortalAISensitiveSystemConfig
-		enabledInt int
-		updatedBy  sql.NullString
-		updatedAt  sql.NullTime
+		item      entity.PortalAISensitiveSystemConfig
+		enabled   bool
+		updatedBy sql.NullString
+		updatedAt sql.NullTime
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT system_deny_enabled, dictionary_text, updated_by, updated_at
 		FROM `+dao.PortalAISensitiveSystemConfig.Name+`
 		WHERE config_key = 'default'`,
-	).Scan(&enabledInt, &item.DictionaryText, &updatedBy, &updatedAt)
+	).Scan(&enabled, &item.DictionaryText, &updatedBy, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -687,7 +689,9 @@ func (s *portalStore) getAISensitiveSystemConfig(ctx context.Context) (*entity.P
 		return nil, err
 	}
 	item.ConfigKey = "default"
-	item.SystemDenyEnabled = enabledInt
+	if enabled {
+		item.SystemDenyEnabled = 1
+	}
 	item.UpdatedBy = updatedBy.String
 	item.UpdatedAt = gtimePointerFromNullTime(updatedAt)
 	return &item, nil
@@ -697,11 +701,11 @@ func (s *portalStore) saveAISensitiveSystemConfig(ctx context.Context, config do
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO `+dao.PortalAISensitiveSystemConfig.Name+` (config_key, system_deny_enabled, dictionary_text, updated_by)
 		VALUES ('default', ?, ?, ?)
-		ON DUPLICATE KEY UPDATE
-			system_deny_enabled = VALUES(system_deny_enabled),
-			dictionary_text = VALUES(dictionary_text),
-			updated_by = VALUES(updated_by),
-			updated_at = CURRENT_TIMESTAMP`,
+		`+portaldbclient.UpsertClause(s.driver, []string{"config_key"},
+		portaldbclient.AssignValue(s.driver, "system_deny_enabled"),
+		portaldbclient.AssignValue(s.driver, "dictionary_text"),
+		portaldbclient.AssignValue(s.driver, "updated_by"),
+		`updated_at = CURRENT_TIMESTAMP`)+``,
 		config.SystemDenyEnabled,
 		config.DictionaryText,
 		config.UpdatedBy,
@@ -744,6 +748,7 @@ func scanInviteCodeEntity(scanner interface{ Scan(...any) error }) (entity.Porta
 func scanAISensitiveDetectRuleEntity(scanner interface{ Scan(...any) error }) (entity.PortalAISensitiveDetectRule, error) {
 	var (
 		item      entity.PortalAISensitiveDetectRule
+		enabled   bool
 		desc      sql.NullString
 		createdAt sql.NullTime
 		updatedAt sql.NullTime
@@ -754,11 +759,14 @@ func scanAISensitiveDetectRuleEntity(scanner interface{ Scan(...any) error }) (e
 		&item.MatchType,
 		&desc,
 		&item.Priority,
-		&item.Enabled,
+		&enabled,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
 		return entity.PortalAISensitiveDetectRule{}, err
+	}
+	if enabled {
+		item.Enabled = 1
 	}
 	item.Description = desc.String
 	item.CreatedAt = gtimePointerFromNullTime(createdAt)
@@ -769,6 +777,8 @@ func scanAISensitiveDetectRuleEntity(scanner interface{ Scan(...any) error }) (e
 func scanAISensitiveReplaceRuleEntity(scanner interface{ Scan(...any) error }) (entity.PortalAISensitiveReplaceRule, error) {
 	var (
 		item         entity.PortalAISensitiveReplaceRule
+		restore      bool
+		enabled      bool
 		replaceValue sql.NullString
 		desc         sql.NullString
 		createdAt    sql.NullTime
@@ -779,14 +789,20 @@ func scanAISensitiveReplaceRuleEntity(scanner interface{ Scan(...any) error }) (
 		&item.Pattern,
 		&item.ReplaceType,
 		&replaceValue,
-		&item.Restore,
+		&restore,
 		&desc,
 		&item.Priority,
-		&item.Enabled,
+		&enabled,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
 		return entity.PortalAISensitiveReplaceRule{}, err
+	}
+	if restore {
+		item.Restore = 1
+	}
+	if enabled {
+		item.Enabled = 1
 	}
 	item.ReplaceValue = replaceValue.String
 	item.Description = desc.String
@@ -855,7 +871,7 @@ func gtimePointerFromNullTime(value sql.NullTime) *gtime.Time {
 	return gtime.NewFromTime(value.Time)
 }
 
-func queryCurrentPortalBillingBalance(ctx context.Context, tx *sql.Tx, consumerName string) (int64, error) {
+func queryCurrentPortalBillingBalance(ctx context.Context, tx *sql.Tx, driver string, consumerName string) (int64, error) {
 	var balance int64
 	err := tx.QueryRowContext(ctx, `
 		SELECT available_micro_yuan
@@ -871,11 +887,13 @@ func queryCurrentPortalBillingBalance(ctx context.Context, tx *sql.Tx, consumerN
 	return balance, nil
 }
 
-func upsertPortalBillingWallet(ctx context.Context, tx *sql.Tx, consumerName string, balanceMicroYuan int64) error {
+func upsertPortalBillingWallet(ctx context.Context, tx *sql.Tx, driver string, consumerName string, balanceMicroYuan int64) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO billing_wallet (consumer_name, currency, available_micro_yuan, version)
 		VALUES (?, 'CNY', ?, 1)
-		ON DUPLICATE KEY UPDATE available_micro_yuan = VALUES(available_micro_yuan), version = version + 1`,
+		`+portaldbclient.UpsertClause(driver, []string{"consumer_name"},
+		portaldbclient.AssignValue(driver, "available_micro_yuan"),
+		portaldbclient.UpsertAdd(driver, "billing_wallet", "version"))+``,
 		strings.TrimSpace(consumerName),
 		balanceMicroYuan,
 	)
@@ -885,6 +903,7 @@ func upsertPortalBillingWallet(ctx context.Context, tx *sql.Tx, consumerName str
 func insertPortalBillingAdjustTransaction(
 	ctx context.Context,
 	tx *sql.Tx,
+	driver string,
 	consumerName string,
 	deltaMicroYuan int64,
 	sourceType string,
@@ -894,11 +913,12 @@ func insertPortalBillingAdjustTransaction(
 		return nil
 	}
 	sourceID := buildPortalBillingSourceID(sourceHint, consumerName, deltaMicroYuan)
+	currentTimeExpr := portaldbclient.UTCCurrentTimestamp(driver)
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO billing_transaction (
 			tx_id, consumer_name, tx_type, amount_micro_yuan, currency, source_type, source_id, occurred_at, created_at
 		)
-		VALUES (?, ?, 'adjust', ?, 'CNY', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+		VALUES (?, ?, 'adjust', ?, 'CNY', ?, ?, `+currentTimeExpr+`, `+currentTimeExpr+`)`,
 		buildPortalBillingTransactionID(sourceType, sourceID),
 		strings.TrimSpace(consumerName),
 		deltaMicroYuan,

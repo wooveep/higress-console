@@ -39,7 +39,7 @@ func TestPortalContracts(t *testing.T) {
 		FROM portal_user u
 		LEFT JOIN org_account_membership m ON m.consumer_name = u.consumer_name
 		LEFT JOIN org_department d ON d.department_id = m.department_id AND d.status = 'active'
-		WHERE COALESCE(u.is_deleted, 0) = 0
+		WHERE COALESCE(u.is_deleted, FALSE) = FALSE
 		ORDER BY u.consumer_name ASC`)).
 			WillReturnRows(sqlmock.NewRows([]string{
 				"consumer_name", "display_name", "email", "status", "user_level", "source", "department_id", "name", "path",
@@ -64,7 +64,7 @@ func TestPortalContracts(t *testing.T) {
 		SELECT m.department_id, COUNT(1)
 		FROM org_account_membership m
 		INNER JOIN portal_user u ON u.consumer_name = m.consumer_name
-		WHERE COALESCE(u.is_deleted, 0) = 0 AND m.department_id IS NOT NULL AND m.department_id <> '' AND m.department_id <> ?
+		WHERE COALESCE(u.is_deleted, FALSE) = FALSE AND m.department_id IS NOT NULL AND m.department_id <> '' AND m.department_id <> ?
 		GROUP BY m.department_id`)).
 			WithArgs("root").
 			WillReturnRows(sqlmock.NewRows([]string{"department_id", "count"}).AddRow("dept-a", 2).AddRow("dept-b", 1))
@@ -92,22 +92,22 @@ func TestPortalContracts(t *testing.T) {
 		db, mock := newPortalContractMock(t)
 		now := time.Date(2026, 4, 14, 10, 0, 0, 0, time.UTC)
 		mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT asset_id, canonical_name, display_name, intro, tags_json, modalities_json, features_json, request_kinds_json, created_at, updated_at
+		SELECT asset_id, canonical_name, display_name, intro, model_type, tags_json, input_modalities_json, output_modalities_json, feature_flags_json, modalities_json, features_json, request_kinds_json, created_at, updated_at
 		FROM portal_model_asset
 		ORDER BY asset_id`)).
 			WillReturnRows(sqlmock.NewRows([]string{
-				"asset_id", "canonical_name", "display_name", "intro", "tags_json", "modalities_json", "features_json", "request_kinds_json", "created_at", "updated_at",
-			}).AddRow("model-gpt-4o", "openai.gpt-4o", "GPT-4o", "flagship", `["premium"]`, `["text","image"]`, `["vision"]`, `["chat_completions"]`, now, now))
+				"asset_id", "canonical_name", "display_name", "intro", "model_type", "tags_json", "input_modalities_json", "output_modalities_json", "feature_flags_json", "modalities_json", "features_json", "request_kinds_json", "created_at", "updated_at",
+			}).AddRow("model-gpt-4o", "openai.gpt-4o", "GPT-4o", "flagship", "multimodal", `["premium"]`, `["text","image"]`, `["text"]`, `["vision"]`, `["text","image"]`, `["vision"]`, `["chat_completions"]`, now, now))
 		mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT binding_id, asset_id, model_id, provider_name, target_model, protocol, endpoint, status,
-			published_at, unpublished_at, pricing_json, rpm, tpm, context_window, created_at, updated_at
+			published_at, unpublished_at, pricing_json, limits_json, rpm, tpm, context_window, created_at, updated_at
 		FROM portal_model_binding
 		ORDER BY asset_id, binding_id`)).
 			WillReturnRows(sqlmock.NewRows([]string{
 				"binding_id", "asset_id", "model_id", "provider_name", "target_model", "protocol", "endpoint", "status",
-				"published_at", "unpublished_at", "pricing_json", "rpm", "tpm", "context_window", "created_at", "updated_at",
+				"published_at", "unpublished_at", "pricing_json", "limits_json", "rpm", "tpm", "context_window", "created_at", "updated_at",
 			}).AddRow("binding-gpt-4o", "model-gpt-4o", "gpt-4o", "openai", "gpt-4o", "openai/v1", "https://api.openai.com/v1", "published",
-				now, nil, `{"currency":"USD","inputCostPerToken":0.00001}`, 6000, 120000, 128000, now, now))
+				now, nil, `{"currency":"USD","inputCostPerMillionTokens":10}`, `{"rpm":6000,"tpm":120000,"contextWindowTokens":128000}`, 6000, 120000, 128000, now, now))
 
 		assertPortalFixture(t, db, "model-assets/list-success.json")
 		require.NoError(t, mock.ExpectationsWereMet())
@@ -136,7 +136,7 @@ func TestPortalContracts(t *testing.T) {
 		mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT consumer_name
 		FROM portal_user
-		WHERE COALESCE(is_deleted, 0) = 0
+		WHERE COALESCE(is_deleted, FALSE) = FALSE
 		ORDER BY consumer_name ASC`)).
 			WillReturnRows(sqlmock.NewRows([]string{"consumer_name"}).AddRow("alice").AddRow("bob"))
 		mock.ExpectQuery(regexp.QuoteMeta(`
@@ -196,7 +196,7 @@ func assertPortalFixture(t *testing.T, db *sql.DB, relativePath string) {
 	var fixture contractFixture
 	require.NoError(t, json.Unmarshal(raw, &fixture))
 
-	svc := portalsvc.New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "mysql", AutoMigrate: true}, db))
+	svc := portalsvc.New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
 	serverName := fmt.Sprintf("portal-contract-%d", time.Now().UnixNano())
 	server := ghttp.GetServer(serverName)
 	server.SetPort(0)
@@ -238,7 +238,7 @@ func readJSONBody(t *testing.T, resp *http.Response) any {
 }
 
 func expectSchema(mock sqlmock.Sqlmock) {
-	expectSharedSchema(mock)
+	expectSharedSchemaMigration(mock)
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS portal_model_binding_price_version").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS portal_ai_sensitive_detect_rule").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS portal_ai_sensitive_replace_rule").WillReturnResult(sqlmock.NewResult(0, 0))
@@ -247,16 +247,56 @@ func expectSchema(mock sqlmock.Sqlmock) {
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS portal_ai_quota_balance").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS portal_ai_quota_schedule_rule").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS job_run_record").WillReturnResult(sqlmock.NewResult(0, 0))
-	expectSharedSchema(mock)
+	expectSharedSchemaCheck(mock)
 	expectLegacyTablesAbsent(mock)
 }
 
-func expectSharedSchema(mock sqlmock.Sqlmock) {
+func expectSharedSchemaMigration(mock sqlmock.Sqlmock) {
+	for _, table := range []string{
+		"portal_user",
+		"portal_invite_code",
+		"org_department",
+		"org_account_membership",
+		"asset_grant",
+		"quota_policy_user",
+		"portal_model_asset",
+		"portal_model_binding",
+		"portal_agent_catalog",
+	} {
+		mock.ExpectExec("CREATE TABLE IF NOT EXISTS " + table).WillReturnResult(sqlmock.NewResult(0, 0))
+	}
+	columnQuery := regexp.QuoteMeta(`
+		SELECT COUNT(1)
+		FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA = current_schema()
+		  AND TABLE_NAME = $1
+		  AND COLUMN_NAME = $2`)
+	for _, item := range [][2]string{
+		{"portal_user", "user_level"},
+		{"portal_user", "is_deleted"},
+		{"portal_user", "deleted_at"},
+		{"portal_model_asset", "request_kinds_json"},
+		{"portal_model_asset", "model_type"},
+		{"portal_model_asset", "input_modalities_json"},
+		{"portal_model_asset", "output_modalities_json"},
+		{"portal_model_asset", "feature_flags_json"},
+		{"portal_model_binding", "limits_json"},
+		{"org_department", "admin_consumer_name"},
+	} {
+		mock.ExpectQuery(columnQuery).
+			WithArgs(item[0], item[1]).
+			WillReturnRows(sqlmock.NewRows([]string{"COUNT(1)"}).AddRow(1))
+	}
+	mock.ExpectExec("ALTER TABLE org_department ADD CONSTRAINT uk_org_department_admin_consumer").WillReturnResult(sqlmock.NewResult(0, 0))
+	expectSharedSchemaCheck(mock)
+}
+
+func expectSharedSchemaCheck(mock sqlmock.Sqlmock) {
 	query := regexp.QuoteMeta(`
 		SELECT COUNT(1)
 		FROM information_schema.TABLES
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME = ?`)
+		WHERE TABLE_SCHEMA = current_schema()
+		  AND TABLE_NAME = $1`)
 	for _, table := range []string{
 		"portal_user",
 		"portal_invite_code",
@@ -278,8 +318,8 @@ func expectLegacyTablesAbsent(mock sqlmock.Sqlmock) {
 	query := regexp.QuoteMeta(`
 		SELECT COUNT(1)
 		FROM information_schema.TABLES
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME = ?`)
+		WHERE TABLE_SCHEMA = current_schema()
+		  AND TABLE_NAME = $1`)
 	for _, table := range []string{
 		"portal_users",
 		"portal_departments",

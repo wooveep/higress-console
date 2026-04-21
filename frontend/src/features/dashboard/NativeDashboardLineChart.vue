@@ -40,10 +40,12 @@ interface ChartSeriesGroup {
 
 type ScaleMode = 'linear' | 'log';
 
-const rawSeries = computed(() => props.series.map((series, index) => ({
+const normalizedSeries = computed(() => Array.isArray(props.series) ? props.series : []);
+
+const rawSeries = computed(() => normalizedSeries.value.map((series, index) => ({
   name: series.name,
   color: SERIES_COLORS[index % SERIES_COLORS.length],
-  points: series.points
+  points: (Array.isArray(series.points) ? series.points : [])
     .map((point) => ({
       timeValue: point.time,
       value: point.value,
@@ -51,6 +53,8 @@ const rawSeries = computed(() => props.series.map((series, index) => ({
     .filter((point) => Number.isFinite(point.timeValue) && Number.isFinite(point.value))
     .sort((left, right) => left.timeValue - right.timeValue),
 })));
+
+const normalizedRawSeries = computed(() => Array.isArray(rawSeries.value) ? rawSeries.value : []);
 
 const xDomain = computed(() => {
   if (
@@ -63,7 +67,12 @@ const xDomain = computed(() => {
     return { min: props.from, max: props.to };
   }
 
-  const timestamps = rawSeries.value.flatMap((series) => series.points.map((point) => point.timeValue));
+  const timestamps = normalizedRawSeries.value.reduce<number[]>((items, series) => {
+    series.points.forEach((point) => {
+      items.push(point.timeValue);
+    });
+    return items;
+  }, []);
   if (!timestamps.length) {
     return { min: 0, max: 1 };
   }
@@ -74,15 +83,20 @@ const xDomain = computed(() => {
   };
 });
 
-const stepMs = computed(() => inferStepMs(rawSeries.value, xDomain.value.min, xDomain.value.max));
+const stepMs = computed(() => inferStepMs(normalizedRawSeries.value, xDomain.value.min, xDomain.value.max));
 
 const scaleMode = computed<ScaleMode>(() => {
   if (props.unit !== 'ms') {
     return 'linear';
   }
-  const positiveValues = rawSeries.value
-    .flatMap((series) => series.points.map((point) => point.value))
-    .filter((value) => value > 0);
+  const positiveValues = normalizedRawSeries.value.reduce<number[]>((items, series) => {
+    series.points.forEach((point) => {
+      if (point.value > 0) {
+        items.push(point.value);
+      }
+    });
+    return items;
+  }, []);
   if (positiveValues.length < 2) {
     return 'linear';
   }
@@ -91,7 +105,7 @@ const scaleMode = computed<ScaleMode>(() => {
   return max / Math.max(min, 1) >= 20 ? 'log' : 'linear';
 });
 
-const seriesGroups = computed<ChartSeriesGroup[]>(() => rawSeries.value.map((series) => {
+const seriesGroups = computed<ChartSeriesGroup[]>(() => normalizedRawSeries.value.map((series) => {
   const points = props.unit === 'reqps'
     ? fillMissingBuckets(series.points, xDomain.value.min, xDomain.value.max, stepMs.value)
     : series.points;
@@ -103,8 +117,15 @@ const seriesGroups = computed<ChartSeriesGroup[]>(() => rawSeries.value.map((ser
   };
 }));
 
+const normalizedSeriesGroups = computed(() => Array.isArray(seriesGroups.value) ? seriesGroups.value : []);
+
 const yDomain = computed(() => {
-  const values = seriesGroups.value.flatMap((series) => series.points.map((point) => point.value));
+  const values = normalizedSeriesGroups.value.reduce<number[]>((items, series) => {
+    series.points.forEach((point) => {
+      items.push(point.value);
+    });
+    return items;
+  }, []);
   if (!values.length) {
     return { min: 0, max: 1 };
   }

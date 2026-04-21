@@ -5,6 +5,7 @@ import DrawerFooter from '@/components/common/DrawerFooter.vue';
 import BuiltInPluginForm from './BuiltInPluginForm.vue';
 import PluginSchemaEditor from './PluginSchemaEditor.vue';
 import { showError, showWarning } from '@/lib/feedback';
+import { BUILTIN_ROUTE_PLUGIN_LIST } from '@/plugins/constants';
 import {
   AI_DATA_MASKING_PLUGIN_NAME,
   cloneDeep,
@@ -13,9 +14,11 @@ import {
   omitAiDataMaskingManagedKeys,
   omitManagedSchema,
   parseYamlObject,
+  resolvePluginSchema,
   sanitizeSchemaValue,
   validateSchemaValue,
 } from './plugin-config';
+import { QueryType } from '@/plugins/visibility';
 
 const props = defineProps<{
   open: boolean;
@@ -43,6 +46,7 @@ const builtInRef = ref<InstanceType<typeof BuiltInPluginForm> | null>(null);
 const schemaState = reactive<Record<string, any>>({});
 const yamlState = ref('');
 const enabledState = ref(false);
+const isRouteBuiltInPlugin = computed(() => BUILTIN_ROUTE_PLUGIN_LIST.some((item) => item.key === props.record?.name));
 
 const currentConfigData = computed(() => {
   if (props.record?.name === AI_DATA_MASKING_PLUGIN_NAME) {
@@ -51,18 +55,32 @@ const currentConfigData = computed(() => {
   return props.configData;
 });
 
-const currentSchema = computed(() => currentConfigData.value?.schema?.jsonSchema);
-const canRenderSchemaForm = computed(() => Boolean(currentSchema.value?.properties));
+const isAiDataMaskingRouteBindingOnly = computed(() => (
+  props.record?.name === AI_DATA_MASKING_PLUGIN_NAME
+  && props.record?.queryType === QueryType.AI_ROUTE
+));
+const shouldUseBuiltInEditor = computed(() => (
+  isRouteBuiltInPlugin.value && !isAiDataMaskingRouteBindingOnly.value
+));
+const currentSchema = computed(() => resolvePluginSchema(currentConfigData.value));
+const canRenderSchemaForm = computed(() => (
+  !isAiDataMaskingRouteBindingOnly.value
+  && Boolean(currentSchema.value?.properties)
+));
 
 watch(
   () => [props.open, props.record, props.instanceData, currentConfigData.value],
   () => {
-    if (!props.open || !props.record || props.record.builtIn) {
+    if (!props.open || !props.record || shouldUseBuiltInEditor.value) {
       activeTab.value = 'form';
       return;
     }
 
-    enabledState.value = Boolean(props.instanceData?.enabled);
+    enabledState.value = Boolean(
+      props.instanceData?.enabled
+      ?? props.instanceData?.runtimeEnabled
+      ?? props.record?.enabled
+    );
     const exampleRaw = getExampleRaw(currentConfigData.value, !props.record?.queryType && props.record?.category === 'auth');
     const raw = props.instanceData?.rawConfigurations || exampleRaw || '';
     yamlState.value = raw;
@@ -75,13 +93,13 @@ watch(
     }
     Object.keys(schemaState).forEach((key) => delete schemaState[key]);
     Object.assign(schemaState, cloneDeep(nextSchema));
-    activeTab.value = canRenderSchemaForm.value ? 'form' : 'yaml';
+    activeTab.value = isAiDataMaskingRouteBindingOnly.value || canRenderSchemaForm.value ? 'form' : 'yaml';
   },
   { immediate: true, deep: true },
 );
 
 watch(activeTab, (nextTab) => {
-  if (props.record?.builtIn) {
+  if (shouldUseBuiltInEditor.value) {
     return;
   }
   if (nextTab === 'yaml') {
@@ -102,7 +120,7 @@ function close() {
 }
 
 function syncYamlFromForm() {
-  if (activeTab.value !== 'form' || props.record?.builtIn) {
+  if (activeTab.value !== 'form' || shouldUseBuiltInEditor.value) {
     return;
   }
   yamlState.value = dumpYamlObject(sanitizeSchemaValue(cloneDeep(schemaState)));
@@ -115,12 +133,20 @@ function submit() {
     return;
   }
 
-  if (props.record.builtIn) {
+  if (shouldUseBuiltInEditor.value) {
     const payload = builtInRef.value?.serialize?.();
     if (!payload) {
       return;
     }
     emit('submitBuiltIn', payload);
+    return;
+  }
+
+  if (isAiDataMaskingRouteBindingOnly.value) {
+    emit('submitPlugin', {
+      enabled: enabledState.value,
+      rawConfigurations: props.instanceData?.rawConfigurations || '',
+    });
     return;
   }
 
@@ -161,7 +187,7 @@ function submit() {
     @update:open="(value) => emit('update:open', value)"
   >
     <a-skeleton :loading="Boolean(loading || instanceLoading)" active>
-      <div v-if="record?.builtIn">
+      <div v-if="shouldUseBuiltInEditor">
         <BuiltInPluginForm
           ref="builtInRef"
           :plugin-name="record.name"
@@ -175,7 +201,9 @@ function submit() {
           v-if="record?.name === AI_DATA_MASKING_PLUGIN_NAME"
           type="info"
           show-icon
-          message="托管敏感词规则不在此处编辑，这里只保留可直接下发的插件配置。"
+          :message="isAiDataMaskingRouteBindingOnly
+            ? 'AI脱敏规则在独立页面统一维护，这里只控制当前 AI 路由是否启用该插件。'
+            : '托管敏感词规则不在此处编辑，这里只保留可直接下发的插件配置。'"
         />
 
         <a-form layout="vertical">
@@ -184,7 +212,7 @@ function submit() {
           </a-form-item>
         </a-form>
 
-        <a-tabs v-model:activeKey="activeTab">
+        <a-tabs v-if="!isAiDataMaskingRouteBindingOnly" v-model:activeKey="activeTab">
           <a-tab-pane key="form" tab="表单配置">
             <a-empty v-if="!canRenderSchemaForm" description="当前插件未提供可渲染的结构化 Schema，请切换到 YAML。" />
             <PluginSchemaEditor
