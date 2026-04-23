@@ -33,5 +33,6 @@ export const getNativeDashboard = (
       type,
       ...params,
     },
+    skipErrorModal: true,
   });
 }

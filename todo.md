@@ -1,4 +1,4 @@
-# Higress Console TODO（Consumer 深化整合）
+# AIGateway Console TODO（Consumer 深化整合）
 
 ## 已完成
 - [x] Consumer 真源切到 `portal_user`（列表/详情/创建/更新/状态/删除）。

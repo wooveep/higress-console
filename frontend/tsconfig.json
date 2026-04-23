@@ -1,39 +1,54 @@
 {
   "compilerOptions": {
-    "baseUrl": "./",
+    "target": "ES2021",
+    "useDefineForClassFields": true,
     "module": "ESNext",
-    "target": "ESNext",
     "lib": [
+      "ES2021",
       "DOM",
-      "ESNext",
       "DOM.Iterable"
     ],
-    "jsx": "react-jsx",
-    "moduleResolution": "node",
-    "allowSyntheticDefaultImports": true,
-    "forceConsistentCasingInFileNames": true,
-    "noImplicitReturns": true,
-    "noImplicitThis": true,
-    "noImplicitAny": false,
-    "importHelpers": true,
-    "strictNullChecks": true,
     "skipLibCheck": true,
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": false,
     "resolveJsonModule": true,
+    "isolatedModules": true,
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": false,
+    "noEmit": true,
+    "jsx": "preserve",
     "paths": {
       "@/*": [
         "./src/*"
-      ],
-      "ice": [
-        ".ice"
       ]
-    }
+    },
+    "types": [
+      "vite/client",
+      "node"
+    ]
   },
   "include": [
-    "src",
-    ".ice"
+    "src/**/*.ts",
+    "src/**/*.d.ts",
+    "src/**/*.vue",
+    "src/**/*.json",
+    "vite.config.ts"
   ],
   "exclude": [
-    "build"
+    "build",
+    "dist",
+    "node_modules",
+    "src/**/*.tsx",
+    "src/**/*.jsx",
+    "src/app.ts",
+    "src/store.ts",
+    "src/document.tsx",
+    "src/models/**",
+    "src/pages/**",
+    "src/utils/**",
+    "src/services/index.ts",
+    "src/services/route.ts",
+    "src/interfaces/route.ts"
   ]
 }

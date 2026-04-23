@@ -1,22 +1,22 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ include "higress-console.name" . }}
+  name: {{ include "aigateway-console.name" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "higress-console.labels" . | nindent 4 }}
+    {{- include "aigateway-console.labels" . | nindent 4 }}
 rules:
 - apiGroups: [""]
   resources: ["secrets"]
-  verbs: ["create", "get", "list", "watch", "update", "delete"]
+  verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 - apiGroups: [""]
   resources: ["configmaps"]
-  verbs: ["create", "get", "list", "watch", "update", "delete"]
+  verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ include "higress-console-promtail.name" . }}
+  name: {{ include "aigateway-console-promtail.name" . }}
   namespace: {{ .Release.Namespace }}
 rules:
 - apiGroups: [""]

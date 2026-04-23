@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/consumers"
+  },
+  "response": {
+    "success": true,
+    "data": [
+      {
+        "name": "alice",
+        "department": "AI Team",
+        "departmentId": "dept-a",
+        "departmentPath": "root / AI Team",
+        "portalStatus": "active",
+        "portalDisplayName": "Alice",
+        "portalEmail": "alice@example.com",
+        "portalUserSource": "console",
+        "portalUserLevel": "pro"
+      }
+    ]
+  }
+}

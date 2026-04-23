@@ -3,8 +3,8 @@ set -eu
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 CHART_DIR="${CHART_DIR:-$SCRIPT_DIR}"
-IMAGE_NAME="${IMAGE_NAME:-aigateway-console:ai-quota-menu}"
-RELEASE_NAME="${RELEASE_NAME:-higress-console}"
+IMAGE_NAME="${IMAGE_NAME:-aigateway/console:dev}"
+RELEASE_NAME="${RELEASE_NAME:-aigateway-console}"
 NAMESPACE="${NAMESPACE:-aigateway-system}"
 IMAGE_PULL_POLICY="${IMAGE_PULL_POLICY:-IfNotPresent}"
 LOAD_IMAGE="${LOAD_IMAGE:-true}"

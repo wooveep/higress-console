@@ -1,5 +1,5 @@
 {{- if .Values.ingress.enabled -}}
-{{- $fullName := include "higress-console.name" . -}}
+{{- $fullName := include "aigateway-console.name" . -}}
 {{- $svcPort := .Values.service.port -}}
 {{- if and .Values.global.ingressClass (not (semverCompare ">=1.18-0" .Capabilities.KubeVersion.GitVersion)) }}
   {{- if not (hasKey .Values.ingress.annotations "kubernetes.io/ingress.class") }}
@@ -18,7 +18,7 @@ metadata:
   name: {{ $fullName }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "higress-console.labels" . | nindent 4 }}
+    {{- include "aigateway-console.labels" . | nindent 4 }}
   annotations:
   {{- if .Values.ingress.tlsSecretName }}
     nginx.ingress.kubernetes.io/ssl-redirect: "true"

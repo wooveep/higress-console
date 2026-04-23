@@ -1,14 +1,25 @@
 {{- $o11y := merge (dict) .Values.o11y .Values.global.o11y  }}
 {{- if $o11y.enabled }}
-{{- $appName := (include "higress-console-loki.name" .) }}
+{{- $appName := (include "aigateway-console-loki.name" .) }}
 {{- $config := $o11y.loki }}
 {{- $ports := $config.ports -}}
-{{- $storageClassName := $config.pvc.storageClassName }}
-{{- $existedPvc := (lookup "v1" "PersistentVolumeClaim" .Release.Namespace $appName) }}
-{{- if $existedPvc }}
-  {{- if $existedPvc.spec }}
-    {{- if $existedPvc.spec.storageClassName }}
-      {{- $storageClassName = $existedPvc.spec.storageClassName }}
+{{- $usePvc := not .Values.global.local }}
+{{- if and $config.pvc (hasKey $config.pvc "enabled") }}
+  {{- if $config.pvc.enabled }}
+    {{- $usePvc = true }}
+  {{- else }}
+    {{- $usePvc = false }}
+  {{- end }}
+{{- end }}
+{{- $storageClassName := "" }}
+{{- if and $usePvc $config.pvc }}
+  {{- $storageClassName = $config.pvc.storageClassName }}
+  {{- $existedPvc := (lookup "v1" "PersistentVolumeClaim" .Release.Namespace $appName) }}
+  {{- if $existedPvc }}
+    {{- if $existedPvc.spec }}
+      {{- if $existedPvc.spec.storageClassName }}
+        {{- $storageClassName = $existedPvc.spec.storageClassName }}
+      {{- end }}
     {{- end }}
   {{- end }}
 {{- end }}
@@ -79,6 +90,7 @@ metadata:
 data:
   runtime-config.yaml: |
     {}
+{{- if $usePvc }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -96,6 +108,7 @@ spec:
   resources:
     requests:
       storage: {{ $config.storage }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -167,8 +180,12 @@ spec:
       restartPolicy: Always
       volumes:
       - name: storage
+        {{- if $usePvc }}
         persistentVolumeClaim:
           claimName: {{ $appName }}
+        {{- else }}
+        emptyDir: {}
+        {{- end }}
       - name: tmp
         emptyDir: {}
       - name: config

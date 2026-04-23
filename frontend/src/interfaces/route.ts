@@ -1,8 +1,3 @@
-import { BUILTIN_ROUTE_PLUGIN_LIST } from "@/pages/plugin/components/PluginList/constant";
-import { getRoutePluginInstances } from "@/services";
-import { message } from "antd";
-import { WasmPluginData } from "@/interfaces/wasm-plugin";
-
 export interface CorsConfig {
   allowOrigins: string[];
   allowMethods: string[];
@@ -100,6 +95,7 @@ export interface Route {
 export interface AuthConfig {
   enabled: boolean;
   allowedConsumers?: string[];
+  allowedDepartments?: string[];
   allowedConsumerLevels?: Array<'normal' | 'plus' | 'pro' | 'ultra' | string>;
 }
 
@@ -109,56 +105,6 @@ export interface RouteResponse {
   pageSize: number;
   total: number;
 }
-
-export function upstreamServiceToString(service: UpstreamService): string {
-  if (!service) {
-    return '-';
-  }
-  const name = service.name || '-';
-  return service.port != null ? `${name}:${service.port}` : name;
-}
-
-export const getRouteBuiltInPlugins = (route: Route): WasmPluginData[] => {
-  const PLUGIN_KEY_TO_PROPERTY: Record<string, string> = {
-    retries: 'proxyNextUpstream',
-    headerModify: 'headerControl',
-  };
-
-  return BUILTIN_ROUTE_PLUGIN_LIST.filter(pluginConfig => {
-    const routeProperty = PLUGIN_KEY_TO_PROPERTY[pluginConfig.key] || pluginConfig.key;
-    return route[routeProperty]?.enabled;
-  }).map(pluginConfig => ({
-    name: pluginConfig.key,
-    category: pluginConfig.category,
-    title: pluginConfig.title,
-    description: pluginConfig.description,
-    internal: true,
-    builtIn: true,
-    enabled: true,
-  }));
-}
-
-export const fetchPluginsByRoute = async (record: Route): Promise<WasmPluginData[]> => {
-  const data: Record<string, WasmPluginData[]> = {};
-  try {
-    const response = await getRoutePluginInstances(record.name);
-    const plugins = response.map((plugin: { pluginName: any; description: any; enabled: any; internal: any }) => {
-      return {
-        ...plugin,
-        name: plugin.pluginName,
-        enabled: plugin.enabled,
-        internal: plugin.internal,
-      };
-    });
-    data[record.name] = plugins || [];
-  } catch (error) {
-    message.error(`Failed to fetch strategies: ${error.message || error}`);
-  }
-
-  const builtInPlugins = getRouteBuiltInPlugins(record);
-  data[record.name] = data[record.name] ? data[record.name].concat(builtInPlugins) : builtInPlugins;
-  return data[record.name] || [];
-};
 
 export enum MatchType {
   EQUAL = "EQUAL", // 精确匹配

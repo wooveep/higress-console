@@ -1,8 +1,12 @@
 import { ModelAsset, ModelAssetBinding, ModelAssetOptions, ModelBindingPriceVersion } from '@/interfaces/model-asset';
-import request from './request';
+import request, { RequestOptions } from './request';
+
+const QUIET_PORTAL_REQUEST_OPTIONS: RequestOptions = {
+  skipErrorModal: true,
+};
 
 export const getModelAssets = (): Promise<ModelAsset[]> => {
-  return request.get<any, ModelAsset[]>('/v1/ai/model-assets');
+  return request.get<any, ModelAsset[]>('/v1/ai/model-assets', QUIET_PORTAL_REQUEST_OPTIONS);
 };
 
 export const getModelAsset = (assetId: string): Promise<ModelAsset> => {
@@ -21,6 +25,10 @@ export const updateModelAsset = (assetId: string, payload: ModelAsset): Promise<
   return request.put<any, ModelAsset>(`/v1/ai/model-assets/${assetId}`, payload);
 };
 
+export const deleteModelAsset = (assetId: string): Promise<void> => {
+  return request.delete<any, void>(`/v1/ai/model-assets/${assetId}`);
+};
+
 export const createModelBinding = (assetId: string, payload: ModelAssetBinding): Promise<ModelAssetBinding> => {
   return request.post<any, ModelAssetBinding>(`/v1/ai/model-assets/${assetId}/bindings`, payload);
 };
@@ -31,6 +39,10 @@ export const updateModelBinding = (
   payload: ModelAssetBinding,
 ): Promise<ModelAssetBinding> => {
   return request.put<any, ModelAssetBinding>(`/v1/ai/model-assets/${assetId}/bindings/${bindingId}`, payload);
+};
+
+export const deleteModelBinding = (assetId: string, bindingId: string): Promise<void> => {
+  return request.delete<any, void>(`/v1/ai/model-assets/${assetId}/bindings/${bindingId}`);
 };
 
 export const publishModelBinding = (assetId: string, bindingId: string): Promise<ModelAssetBinding> => {

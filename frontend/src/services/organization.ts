@@ -7,10 +7,14 @@ import {
   OrgDepartmentMutation,
   OrgDepartmentNode,
 } from '@/interfaces/org';
-import request from './request';
+import request, { RequestOptions } from './request';
+
+const QUIET_PORTAL_REQUEST_OPTIONS: RequestOptions = {
+  skipErrorModal: true,
+};
 
 export const listOrgDepartmentsTree = (): Promise<OrgDepartmentNode[]> => {
-  return request.get<any, OrgDepartmentNode[]>('/v1/org/departments/tree');
+  return request.get<any, OrgDepartmentNode[]>('/v1/org/departments/tree', QUIET_PORTAL_REQUEST_OPTIONS);
 };
 
 export const createOrgDepartment = (payload: OrgDepartmentMutation): Promise<OrgDepartmentNode> => {
@@ -30,7 +34,7 @@ export const deleteOrgDepartment = (departmentId: string): Promise<void> => {
 };
 
 export const listOrgAccounts = (): Promise<OrgAccountRecord[]> => {
-  return request.get<any, OrgAccountRecord[]>('/v1/org/accounts');
+  return request.get<any, OrgAccountRecord[]>('/v1/org/accounts', QUIET_PORTAL_REQUEST_OPTIONS);
 };
 
 export const createOrgAccount = (payload: OrgAccountMutation): Promise<OrgAccountRecord> => {

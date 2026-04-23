@@ -1,4 +1,4 @@
-# Higress Console Memory（当前架构基线）
+# AIGateway Console Memory（当前架构基线）
 
 ## 1. 架构不是“纯 K8s”了，而是双领域双存储
 - 网关运行态领域：继续以 K8s CRD 为主（Route/Domain/Plugin/MCP 等）。

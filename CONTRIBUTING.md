@@ -1,12 +1,12 @@
-# 为 Higress Console 做贡献
+# 为 AIGateway Console 做贡献
 
-如果你有兴趣为 Higress Console 做出贡献，我们会热烈欢迎。首先，我们非常鼓励这种意愿。这是为您提供的贡献指南列表。
+如果你有兴趣为 AIGateway Console 做出贡献，我们会热烈欢迎。首先，我们非常鼓励这种意愿。这是为您提供的贡献指南列表。
 
 [[English Contributing Document](./CONTRIBUTING_EN.md)]
 
 ## 话题
 
-- [为 Higress Console 做贡献](#为-higress-console-做贡献)
+- [为 AIGateway Console 做贡献](#为-aigateway-console-做贡献)
   - [话题](#话题)
   - [报告一般问题](#报告一般问题)
   - [代码和文档贡献](#代码和文档贡献)
@@ -27,9 +27,9 @@
 
 ## 报告一般问题
 
-老实说，我们把每一个 Higress Console 用户都视为非常善良的贡献者。在体验了 Higress 之后，您可能会对项目有一些反馈。然后随时通过 [NEW ISSUE](https://github.com/higress-group/higress-console/issues/new/choose)打开一个问题。
+老实说，我们把每一个 AIGateway Console 用户都视为非常善良的贡献者。在体验了 AIGateway 之后，您可能会对项目有一些反馈。然后随时通过 [NEW ISSUE](https://github.com/wooveep/aigateway-console/issues/new/choose)打开一个问题。
 
-因为 Higress Console 是一个分布式合作的项目，所以我们非常提倡详细的、准确的问题报告。为了提升沟通效率，我们希望每个人在提出问题前先在列表中进行搜索。如果相应的问题已经存在，请在现有问题下的评论中添加您的详细信息，而不是创建一个新的问题。
+因为 AIGateway Console 是一个分布式合作的项目，所以我们非常提倡详细的、准确的问题报告。为了提升沟通效率，我们希望每个人在提出问题前先在列表中进行搜索。如果相应的问题已经存在，请在现有问题下的评论中添加您的详细信息，而不是创建一个新的问题。
 
 为了使问题细节尽可能标准，我们为问题报告者设置了一个[问题模板](./.github/ISSUE_TEMPLATE)。请务必按照说明填写模板中的字段。
 
@@ -50,7 +50,7 @@
 
 ## 代码和文档贡献
 
-我们鼓励采取一切措施来让 Higress Console 项目变得更好。在 GitHub 上，Higress Console 的每项改进都可以通过 PR（Pull Request 的缩写）实现。
+我们鼓励采取一切措施来让 AIGateway Console 项目变得更好。在 GitHub 上，AIGateway Console 的每项改进都可以通过 PR（Pull Request 的缩写）实现。
 
 * 如果您发现错别字，请尝试修复它！
 * 如果您发现错误，请尝试修复它！
@@ -67,7 +67,7 @@
 
 > 我们期待您的任何 PR。
 
-由于您已准备好通过 PR 来改进 Higress Console，我们建议您可以在此处查看 PR 规则。
+由于您已准备好通过 PR 来改进 AIGateway Console，我们建议您可以在此处查看 PR 规则。
 
 * [工作区准备](#工作区准备)
 * [分支定义](#分支定义)
@@ -79,15 +79,15 @@
 
 为了提出 PR，我们假设你已经注册了一个 GitHub ID。然后您可以通过以下步骤完成准备工作：
 
-1. **FORK** Higress 到您的代码仓库。要完成这项工作，您只需单击 [higress-group/higress-console](https://github.com/higress-group/higress-console) 主页右侧的 Fork 按钮。然后你将在 
-   中得到你的存储库`https://github.com/<your-username>/higress-console`，其中`your-username`是你的 GitHub 用户名。
+1. **FORK** AIGateway Console 到您的代码仓库。要完成这项工作，您只需单击 [wooveep/aigateway-console](https://github.com/wooveep/aigateway-console) 主页右侧的 Fork 按钮。然后你将在 
+   中得到你的存储库`https://github.com/<your-username>/aigateway-console`，其中`your-username`是你的 GitHub 用户名。
 
-2. **克隆** 您自己的代码仓库到本地并进行开发。使用 `git clone git@github.com:<your-username>/higress=console.git` 命令将代码仓库克隆到本地计算机。 然后您可以创建新分支来完成您希望进行的更改。
+2. **克隆** 您自己的代码仓库到本地并进行开发。使用 `git clone git@github.com:<your-username>/aigateway-console.git` 命令将代码仓库克隆到本地计算机。 然后您可以创建新分支来完成您希望进行的更改。
 
-3. **设置远程** 使用以下两个命令将仓库上游设置为 `git@github.com:higress-group/higress-console.git`：
+3. **设置远程** 使用以下两个命令将仓库上游设置为 `git@github.com:wooveep/aigateway-console.git`：
 
 ```bash
-git remote add upstream git@github.com:higress-group/higress-console.git
+git remote add upstream git@github.com:wooveep/aigateway-console.git
 git remote set-url --push upstream no-pushing
 ```
 
@@ -95,9 +95,9 @@ git remote set-url --push upstream no-pushing
 
 ```shell
 $ git remote -v
-origin     git@github.com:\<your-username\>/higress-console.git (fetch)
-origin     git@github.com:\<your-username\>/higress-console.git (push)
-upstream   git@github.com:higress-group/higress-console.git (fetch)
+origin     git@github.com:\<your-username\>/aigateway-console.git (fetch)
+origin     git@github.com:\<your-username\>/aigateway-console.git (push)
+upstream   git@github.com:wooveep/aigateway-console.git (fetch)
 upstream   no-pushing (push)
 ```
 
@@ -105,9 +105,9 @@ upstream   no-pushing (push)
 
 ### 分支定义
 
-现在我们假设通过拉取请求进行的每个贡献都是针对 Higress Console 中的 [主分支](https://github.com/higress-group/higress-console/tree/main) 。在贡献之前，请注意分支定义会很有帮助。
+现在我们假设通过拉取请求进行的每个贡献都是针对 AIGateway Console 中的 [主分支](https://github.com/wooveep/aigateway-console/tree/main) 。在贡献之前，请注意分支定义会很有帮助。
 
-作为贡献者，请再次记住，通过拉取请求的每个贡献都是针对主分支的。而在 Higress Console 项目中，还有其他几种分支，我们一般称它们为 release 分支（如0.6.0、0.6.1）、feature 分支、hotfix 分支。
+作为贡献者，请再次记住，通过拉取请求的每个贡献都是针对主分支的。而在 AIGateway Console 项目中，还有其他几种分支，我们一般称它们为 release 分支（如0.6.0、0.6.1）、feature 分支、hotfix 分支。
 
 当正式发布一个版本时，我们将会创建一个发布分支并以版本号命名。
 
@@ -119,7 +119,7 @@ upstream   no-pushing (push)
 
 ### 提交规则
 
-实际上，在 Higress Console 中，我们在提交时会认真对待两条规则：
+实际上，在 AIGateway Console 中，我们在提交时会认真对待两条规则：
 
 * [提交消息](#提交消息)
 * [提交内容](#提交内容)
@@ -156,29 +156,29 @@ git config --get user.name
 git config --get user.email
 ```
 
-另外，在代码变更部分，我们建议所有贡献者阅读 Higress Console 的 [代码风格](#代码风格)。
+另外，在代码变更部分，我们建议所有贡献者阅读 AIGateway Console 的 [代码风格](#代码风格)。
 
 无论是提交信息，还是提交内容，我们都非常的重视代码审查过程。
 
 ### PR 说明
 
-PR 是更改 Higress Console 项目文件的唯一方法。为了帮助审查人更好地理解你的目的，PR 描述不应过于详细。我们鼓励贡献者遵循 [PR 模板](./.github/PULL_REQUEST_TEMPLATE.md) 来完成拉取请求。
+PR 是更改 AIGateway Console 项目文件的唯一方法。为了帮助审查人更好地理解你的目的，PR 描述不应过于详细。我们鼓励贡献者遵循 [PR 模板](./.github/PULL_REQUEST_TEMPLATE.md) 来完成拉取请求。
 
 ## 测试用例贡献
 
-任何测试用例都会受到欢迎。目前，Higress Console 功能测试用例是高优先级的。
+任何测试用例都会受到欢迎。目前，AIGateway Console 功能测试用例是高优先级的。
 
 //TBD
 
 ## 参与帮助任何事情
 
-我们选择 GitHub 作为 Higress Console 协作的主要场所。所以 Higress Console 的最新更新总是在这里。尽管通过 PR 贡献是一种明确的帮助方式，但我们仍然呼吁其他方式为项目做出贡献：
+我们选择 GitHub 作为 AIGateway Console 协作的主要场所。所以 AIGateway Console 的最新更新总是在这里。尽管通过 PR 贡献是一种明确的帮助方式，但我们仍然呼吁其他方式为项目做出贡献：
 
 * 如果可以的话，回复别人的问题；
 * 帮助解决其他用户的问题；
 * 帮助审查他人的 PR 设计；
 * 帮助审查其他人在 PR 中的代码；
-* 讨论 Higress Console 以使事情更清楚；
+* 讨论 AIGateway Console 以使事情更清楚；
 * 在 Github 之外宣传 Higress 技术；
 * 写关于 Higress 的博客等等。
 
@@ -198,7 +198,7 @@ PR 是更改 Higress Console 项目文件的唯一方法。为了帮助审查人
 
 ## 项目结构
 
-Higress Console 采用了前后端分离的架构设计，所以项目由前端和后端两部分组成，
+AIGateway Console 采用了前后端分离的架构设计，所以项目由前端和后端两部分组成，
 
 ### 前端部分
 

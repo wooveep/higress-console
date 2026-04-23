@@ -1,4 +1,5 @@
 import request from '@/services/request';
+import type { PageResult } from '@/interfaces/common';
 import {
   McpServer,
   McpServerPageQuery,
@@ -9,8 +10,8 @@ import {
 const BASE_URL = '/v1/mcpServer';
 const MCP_TEMPLATE_BASE_URL = '/mcp-templates';
 
-export const listMcpServers = (query: McpServerPageQuery): Promise<McpServer[]> => {
-  return request.get<any, McpServer[]>(BASE_URL, { params: query });
+export const listMcpServers = (query: McpServerPageQuery): Promise<PageResult<McpServer>> => {
+  return request.get<any, PageResult<McpServer>>(BASE_URL, { params: query });
 };
 
 export const getMcpServer = (name: string): Promise<McpServer> => {
@@ -19,7 +20,7 @@ export const getMcpServer = (name: string): Promise<McpServer> => {
 
 export const createOrUpdateMcpServer = (payload: McpServer): Promise<McpServer> => {
   return payload.name ?
-    request.put<any, McpServer>(BASE_URL, payload) :
+    request.put<any, McpServer>(`${BASE_URL}/${payload.name}`, payload) :
     request.post<any, McpServer>(BASE_URL, payload);
 };
 
@@ -29,8 +30,8 @@ export const deleteMcpServer = (name: string): Promise<any> => {
 
 export const listMcpConsumers = (
   query: any,
-): Promise<McpServerConsumerDetail[]> => {
-  return request.get<any, McpServerConsumerDetail[]>(`${BASE_URL}/consumers`, {
+): Promise<PageResult<McpServerConsumerDetail>> => {
+  return request.get<any, PageResult<McpServerConsumerDetail>>(`${BASE_URL}/consumers`, {
     params: query,
   });
 };

@@ -2,15 +2,16 @@
 {{- $pluginImageRegistry := .Values.pluginServer.imageRegistry | default .Values.global.hub }}
 {{- $pluginImageNamespace := .Values.pluginServer.imageNamespace | default .Values.global.pluginNamespace }}
 {{- $portalDB := .Values.portalDatabase }}
-{{- $portalDBHost := $portalDB.host | default (printf "%s-aigateway-core-mysql" .Release.Name) }}
+{{- $portalDBDriver := $portalDB.driver | default "postgres" }}
+{{- $portalDBHost := $portalDB.host | default (printf "%s-aigateway-core-postgresql-pgpool" .Release.Name) }}
 {{- $portalDBSecretName := $portalDB.secretName | default (printf "%s-aigateway-core-db" .Release.Name) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "higress-console.name" . }}
+  name: {{ include "aigateway-console.name" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "higress-console.labels" . | nindent 4 }}
+    {{- include "aigateway-console.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   {{- if or .Values.global.local .Values.global.kind }}
@@ -19,7 +20,7 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      {{- include "higress-console.selectorLabels" . | nindent 6 }}
+      {{- include "aigateway-console.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       {{- with .Values.podAnnotations }}
@@ -27,13 +28,13 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "higress-console.selectorLabels" . | nindent 8 }}
+        {{- include "aigateway-console.selectorLabels" . | nindent 8 }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "higress-console.name" . }}
+      serviceAccountName: {{ include "aigateway-console.name" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -43,25 +44,57 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
+            - name: AIGATEWAY_CONSOLE_NAMESPACE
+              value: {{ .Release.Namespace }}
+            - name: AIGATEWAY_CONSOLE_CLUSTER_DOMAIN
+              value: {{ include "aigateway-console.clusterDomain" . }}
+            - name: AIGATEWAY_CONSOLE_CONTROLLER_SERVICE
+              value: {{ .Values.controller.serviceName }}
+            - name: AIGATEWAY_CONSOLE_PLUGIN_SERVER_SERVICE
+              value: {{ .Values.pluginServer.serviceName }}
             - name: HIGRESS_CONSOLE_NS
               value: {{ .Release.Namespace }}
             - name: HIGRESS_CONSOLE_SECRET_NAME
-              value: {{ include "higress-console.name" . }}
+              value: {{ include "aigateway-console.name" . }}
             - name: HIGRESS_CONSOLE_CONFIG_MAP_NAME
-              value: {{ include "higress-console.name" . }}
+              value: {{ include "aigateway-console.name" . }}
             - name: HIGRESS_CONSOLE_SERVICE_HOST
-              value: {{ include "higress-console.name" . }}.{{ .Release.Namespace }}.svc.{{ .Values.global.proxy.clusterDomain }}
+              value: {{ include "aigateway-console.serviceHost" (dict "context" . "service" (include "aigateway-console.name" .)) }}
             - name: HIGRESS_CONSOLE_SERVICE_PORT
               value: {{ .Values.service.port | quote }}
             - name: HIGRESS_CONSOLE_CONTROLLER_SERVICE_NAME
               value: {{ .Values.controller.serviceName }}
             - name: HIGRESS_CONSOLE_CONTROLLER_JWT_POLICY
-              value: {{ include "higress-console.controller.jwtPolicy" . }}
+              value: {{ include "aigateway-console.controller.jwtPolicy" . }}
             - name: CLUSTER_DOMAIN_SUFFIX
-              value: {{ .Values.global.proxy.clusterDomain }}
+              value: {{ include "aigateway-console.clusterDomain" . }}
+            - name: AIGATEWAY_CONSOLE_PORTALDB_ENABLED
+              value: {{ ternary "true" "false" $portalDB.enabled | quote }}
             {{- if $portalDB.enabled }}
+            - name: AIGATEWAY_CONSOLE_PORTALDB_DRIVER
+              value: {{ $portalDBDriver | quote }}
+            - name: PORTAL_DB_DRIVER
+              value: {{ $portalDBDriver | quote }}
+            - name: PORTAL_DB_HOST
+              value: {{ $portalDBHost | quote }}
+            - name: PORTAL_DB_PORT
+              value: {{ $portalDB.port | quote }}
+            - name: PORTAL_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $portalDBSecretName }}
+                  key: {{ $portalDB.usernameKey }}
+            - name: PORTAL_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $portalDBSecretName }}
+                  key: {{ $portalDB.passwordKey }}
+            - name: PORTAL_DB_NAME
+              value: {{ $portalDB.database | quote }}
+            - name: PORTAL_DB_PARAMS
+              value: {{ $portalDB.params | default "sslmode=disable" | quote }}
             - name: HIGRESS_PORTAL_DB_URL
-              value: "jdbc:mysql://{{ $portalDBHost }}:{{ $portalDB.port }}/{{ $portalDB.database }}?{{ $portalDB.jdbcParams }}"
+              value: {{ printf "jdbc:postgresql://%s:%v/%s?%s" $portalDBHost $portalDB.port $portalDB.database ($portalDB.jdbcParams | default "sslmode=disable") | quote }}
             - name: HIGRESS_PORTAL_DB_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -73,13 +106,37 @@ spec:
                   name: {{ $portalDBSecretName }}
                   key: {{ $portalDB.passwordKey }}
             {{- end }}
+            - name: AIGATEWAY_CONSOLE_GRAFANA_ENABLED
+              value: {{ ternary "true" "false" $o11y.enabled | quote }}
             {{- if $o11y.enabled }}
+            - name: AIGATEWAY_CONSOLE_GRAFANA_SCHEME
+              value: "http"
+            - name: AIGATEWAY_CONSOLE_GRAFANA_SERVICE
+              value: {{ include "aigateway-console-grafana.name" . }}
+            - name: AIGATEWAY_CONSOLE_GRAFANA_PORT
+              value: {{ $o11y.grafana.port | quote }}
+            - name: AIGATEWAY_CONSOLE_GRAFANA_PATH
+              value: {{ include "aigateway-console-grafana.path" . | quote }}
+            - name: AIGATEWAY_CONSOLE_PROMETHEUS_SCHEME
+              value: "http"
+            - name: AIGATEWAY_CONSOLE_PROMETHEUS_SERVICE
+              value: {{ include "aigateway-console-prometheus.name" . }}
+            - name: AIGATEWAY_CONSOLE_PROMETHEUS_PORT
+              value: {{ $o11y.prometheus.port | quote }}
+            - name: AIGATEWAY_CONSOLE_PROMETHEUS_PATH
+              value: {{ include "aigateway-console-prometheus.path" . | quote }}
+            - name: AIGATEWAY_CONSOLE_LOKI_SCHEME
+              value: "http"
+            - name: AIGATEWAY_CONSOLE_LOKI_SERVICE
+              value: {{ include "aigateway-console-loki.name" . }}
+            - name: AIGATEWAY_CONSOLE_LOKI_PORT
+              value: {{ $o11y.loki.ports.http | quote }}
             - name: HIGRESS_CONSOLE_DASHBOARD_BASE_URL
-              value: http://{{ include "higress-console-grafana.name" . }}.{{ .Release.Namespace }}:{{ $o11y.grafana.port }}{{ include "higress-console-grafana.path" . }}
+              value: http://{{ include "aigateway-console.serviceHost" (dict "context" . "service" (include "aigateway-console-grafana.name" .)) }}:{{ $o11y.grafana.port }}{{ include "aigateway-console-grafana.path" . }}
             - name: HIGRESS_CONSOLE_DASHBOARD_DATASOURCE_PROM_URL
-              value: http://{{ include "higress-console-prometheus.name" . }}.{{ .Release.Namespace }}:{{ $o11y.prometheus.port }}{{ include "higress-console-prometheus.path" . }}
+              value: http://{{ include "aigateway-console.serviceHost" (dict "context" . "service" (include "aigateway-console-prometheus.name" .)) }}:{{ $o11y.prometheus.port }}{{ include "aigateway-console-prometheus.path" . }}
             - name: HIGRESS_CONSOLE_DASHBOARD_DATASOURCE_LOKI_URL
-              value: http://{{ include "higress-console-loki.name" . }}.{{ .Release.Namespace }}:{{ $o11y.loki.ports.http }}
+              value: http://{{ include "aigateway-console.serviceHost" (dict "context" . "service" (include "aigateway-console-loki.name" .)) }}:{{ $o11y.loki.ports.http }}
             {{- end }}
             {{- if .Values.global.ingressClass }}
             - name: HIGRESS_CONSOLE_CONTROLLER_INGRESS_CLASS_NAME
@@ -95,7 +152,7 @@ spec:
               value: "{{ .Values.swagger.enabled }}"
             {{- if and .Values.global.enablePluginServer (not (hasKey .Values.podEnvs "HIGRESS_ADMIN_WASM_PLUGIN_CUSTOM_IMAGE_URL_PATTERN"))}}
             - name: HIGRESS_ADMIN_WASM_PLUGIN_CUSTOM_IMAGE_URL_PATTERN
-              value: "{{ include "higress-console.pluginServer.urlPattern" . }}"
+              value: "{{ include "aigateway-console.pluginServer.urlPattern" . }}"
             {{- end }}
             {{- if and .Values.pluginServer.imageRegistry (not (hasKey .Values.podEnvs "HIGRESS_ADMIN_WASM_PLUGIN_IMAGE_REGISTRY")) }}
             - name: HIGRESS_ADMIN_WASM_PLUGIN_IMAGE_REGISTRY
@@ -123,12 +180,12 @@ spec:
               protocol: TCP
           readinessProbe:
             httpGet:
-              path: /
+              path: /healthz/ready
               port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
-          {{- if eq (include "higress-console.controller.jwtPolicy" .) "third-party-jwt" }}
+          {{- if eq (include "aigateway-console.controller.jwtPolicy" .) "third-party-jwt" }}
             - mountPath: /var/run/secrets/access-token
               name: access-token
           {{- end }}
@@ -143,12 +200,16 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       volumes:
-      {{- if eq (include "higress-console.controller.jwtPolicy" .) "third-party-jwt" }}
+      {{- if eq (include "aigateway-console.controller.jwtPolicy" .) "third-party-jwt" }}
         - name: access-token
           projected:
             defaultMode: 420

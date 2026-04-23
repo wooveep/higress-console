@@ -6,6 +6,7 @@ export interface AiRoute {
   version?: string;
   domains: string[];
   pathPredicate: RoutePredicate;
+  methods?: string[];
   headerPredicates?: KeyedRoutePredicate[];
   urlParamPredicates?: KeyedRoutePredicate[];
   modelPredicates?: RoutePredicate[];

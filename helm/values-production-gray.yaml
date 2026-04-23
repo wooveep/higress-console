@@ -1,4 +1,4 @@
-# Production gray deployment values for the standalone higress-console chart.
+# Production gray deployment values for the standalone aigateway-console chart.
 # Update tag values if your release pipeline publishes a different version.
 
 global:
@@ -22,7 +22,7 @@ global:
 image:
   repository: aigateway/console
   pullPolicy: IfNotPresent
-  tag: "2.2.0-dev-20260327030541"
+  tag: "1.0.0"
 
 controller:
   serviceName: aigateway-controller
@@ -33,7 +33,7 @@ pluginServer:
 certmanager:
   image:
     repository: aigateway
-    tag: v1.11.0
+    tag: "1.0.0"
 
 portalDatabase:
   enabled: false

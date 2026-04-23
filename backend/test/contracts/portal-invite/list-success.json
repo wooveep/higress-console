@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/portal/invite-codes"
+  },
+  "response": {
+    "success": true,
+    "data": [
+      {
+        "inviteCode": "INVITE001",
+        "status": "active",
+        "expiresAt": "2026-04-21T10:00:00Z",
+        "createdAt": "2026-04-14T10:00:00Z"
+      }
+    ]
+  }
+}

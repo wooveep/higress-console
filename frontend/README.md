@@ -1,4 +1,4 @@
-# higress console
+# aigateway console
 
 ## Usage
 

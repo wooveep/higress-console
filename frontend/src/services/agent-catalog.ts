@@ -1,8 +1,12 @@
 import { AgentCatalogOptions, AgentCatalogRecord } from '@/interfaces/agent-catalog';
-import request from './request';
+import request, { RequestOptions } from './request';
+
+const QUIET_PORTAL_REQUEST_OPTIONS: RequestOptions = {
+  skipErrorModal: true,
+};
 
 export const getAgentCatalogs = (): Promise<AgentCatalogRecord[]> => {
-  return request.get<any, AgentCatalogRecord[]>('/v1/ai/agent-catalog');
+  return request.get<any, AgentCatalogRecord[]>('/v1/ai/agent-catalog', QUIET_PORTAL_REQUEST_OPTIONS);
 };
 
 export const getAgentCatalog = (agentId: string): Promise<AgentCatalogRecord> => {
@@ -10,7 +14,9 @@ export const getAgentCatalog = (agentId: string): Promise<AgentCatalogRecord> =>
 };
 
 export const getAgentCatalogOptions = (): Promise<AgentCatalogOptions> => {
-  return request.get<any, AgentCatalogOptions>('/v1/ai/agent-catalog/options');
+  return request.get<any, AgentCatalogOptions>('/v1/ai/agent-catalog/options', {
+    skipErrorModal: true,
+  });
 };
 
 export const createAgentCatalog = (payload: AgentCatalogRecord): Promise<AgentCatalogRecord> => {

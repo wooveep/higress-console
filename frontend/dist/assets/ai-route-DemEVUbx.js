@@ -1,0 +1,1 @@
+import{r as e}from"./index-DMIyz7sm.js";const s=()=>e.get("/v1/ai/routes"),u=t=>e.get(`/v1/ai/routes/${t}`),o=t=>e.post("/v1/ai/routes",t),a=t=>e.delete(`/v1/ai/routes/${t}`),i=t=>e.put(`/v1/ai/routes/${t.name}`,t);export{s as a,o as b,a as d,u as g,i as u};

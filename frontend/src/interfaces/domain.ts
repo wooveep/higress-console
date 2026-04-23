@@ -24,4 +24,4 @@ export interface DomainResponse {
   total: number;
 }
 
-export const DEFAULT_DOMAIN = "higress-default-domain";
+export const DEFAULT_DOMAIN = "aigateway-default-domain";

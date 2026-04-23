@@ -1,6 +1,6 @@
 {{- $o11y := merge (dict) .Values.o11y .Values.global.o11y  }}
 {{- if $o11y.enabled }}
-{{- $appName := (include "higress-console-grafana.name" .) }}
+{{- $appName := (include "aigateway-console-grafana.name" .) }}
 {{- $config := $o11y.grafana }}
 {{- $port := $config.port -}}
 {{- $storageClassName := $config.pvc.storageClassName }}
@@ -24,7 +24,7 @@ data:
     [server]
     protocol=http
     domain=localhost
-    root_url="%(protocol)s://%(domain)s{{ include "higress-console-grafana.path" . }}"
+    root_url="%(protocol)s://%(domain)s{{ include "aigateway-console-grafana.path" . }}"
     serve_from_sub_path=true
 
     [auth]

@@ -118,7 +118,7 @@
     },
     "create": "Create AI Route",
     "edit": "Edit AI Route",
-    "deleteConfirmation": "Are you sure you want to delete <1>{{currentRouteName}}</1>?",
+    "deleteConfirmation": "Are you sure you want to delete <1>{currentRouteName}</1>?",
     "authNotEnabled": "Not enabled",
     "authEnabledWithoutConsumer": "Nobody authorized",
     "usage": "Usage",
@@ -133,7 +133,8 @@
     "tabs": {
       "detect": "Detect Rules",
       "replace": "Replace Rules",
-      "audit": "Block Audits"
+      "audit": "Block Audits",
+      "runtime": "Plugin Config"
     },
     "status": {
       "detectRuleCount": "Detect Rules",
@@ -142,6 +143,7 @@
       "systemDenyEnabled": "System Dictionary Enabled",
       "systemDictionaryWordCount": "System Dictionary Words",
       "systemDictionaryUpdatedAt": "System Dictionary Updated At",
+      "enabledRouteCount": "Bound AI Routes",
       "projectedInstanceCount": "Projected Instances",
       "lastReconciledAt": "Last Reconciled At",
       "lastMigratedAt": "Last Migrated At"
@@ -153,6 +155,8 @@
       "addReplaceRule": "Add Replace Rule",
       "editSystemDictionary": "Edit System Dictionary",
       "selectReplacePreset": "Select Preset",
+      "selectDetectPreset": "Select Detect Preset",
+      "saveRuntimeConfig": "Save Plugin Config",
       "search": "Search",
       "reset": "Reset"
     },
@@ -178,13 +182,26 @@
       "blockedBy": "Blocked By",
       "blockedReason": "Blocked Reason",
       "startTime": "Start Time",
-      "endTime": "End Time"
+      "endTime": "End Time",
+      "denyOpenai": "Intercept OpenAI conversations",
+      "denyJsonpath": "Intercept JSONPath fields",
+      "denyRaw": "Intercept raw body",
+      "denyCode": "HTTP status code",
+      "denyMessage": "OpenAI denial message",
+      "denyRawMessage": "Raw denial response body",
+      "denyContentType": "Raw response Content-Type"
     },
     "placeholders": {
       "consumerName": "Input consumer_name",
       "displayName": "Input display_name",
       "routeName": "Input route_name",
-      "replacePreset": "Select a preset to prefill the rule"
+      "replacePreset": "Select a preset to prefill the rule",
+      "detectPreset": "Select a preset to prefill the detect rule",
+      "jsonpathPreset": "Select common field presets",
+      "denyJsonpath": "One JSONPath per line, for example $.messages[*].content",
+      "denyMessage": "The question or answer contains sensitive content and has been blocked.",
+      "denyRawMessage": "{\"errmsg\":\"The request contains sensitive content and has been blocked.\"}",
+      "denyContentType": "application/json"
     },
     "matchTypes": {
       "contains": "Contains",
@@ -202,9 +219,28 @@
       "replaceDeleted": "Replace rule deleted",
       "reconciled": "Rules reconciled to plugin instances",
       "systemConfigSaved": "System dictionary settings saved",
+      "runtimeConfigSaved": "Plugin configuration saved",
       "auditQueryFailed": "Failed to query audit records. Please check your login status or the backend service.",
       "deleteDetectConfirm": "Delete this detect rule?",
       "deleteReplaceConfirm": "Delete this replace rule?"
+    },
+    "detectPreset": {
+      "apiKey": {
+        "label": "API Key Detect",
+        "description": "Detect OpenAI style keys prefixed with sk-."
+      },
+      "mobilePhone": {
+        "label": "Mobile Detect",
+        "description": "Detect mobile phone numbers with a GROK pattern."
+      },
+      "email": {
+        "label": "Email Detect",
+        "description": "Detect email addresses with a GROK pattern."
+      },
+      "idCard": {
+        "label": "ID Card Detect",
+        "description": "Detect ID card numbers with a GROK pattern."
+      }
     },
     "replacePreset": {
       "help": "Selecting a preset prefills the recommended matching rule. For numeric data, a single-character replace value keeps the first 3 digits and the last 1 digit while filling the middle digits with that character.",
@@ -220,6 +256,36 @@
       "bankCard": {
         "label": "Bank Card Masking",
         "description": "Matches 16 to 19 digit bank card numbers and masks the middle digits."
+      },
+      "ip": {
+        "label": "IP Masking",
+        "description": "Matches IPv4 addresses and restores the original value in the response."
+      },
+      "idCard": {
+        "label": "ID Card Masking",
+        "description": "Matches ID card numbers and replaces them with a fixed placeholder."
+      },
+      "apiKey": {
+        "label": "API Key Hash",
+        "description": "Matches sk- prefixed keys and replaces them with a recoverable hash."
+      }
+    },
+    "jsonpathPreset": {
+      "messagesContent": {
+        "label": "User Request Content",
+        "description": "Matches every `content` field in OpenAI `messages`, which works well for multi-turn chat requests."
+      },
+      "userMessages": {
+        "label": "User Message Content",
+        "description": "Matches only messages with `role=user`, which is useful when you only want to inspect user input."
+      },
+      "systemPrompt": {
+        "label": "System Prompt",
+        "description": "Matches system messages in `messages` and the root-level `system` field."
+      },
+      "responsesInput": {
+        "label": "Responses API Input",
+        "description": "Matches `input[].content[].text` in the Responses API. AI response content is handled by OpenAI conversation interception instead of JSONPath."
       }
     },
     "modals": {
@@ -232,16 +298,33 @@
     "rules": {
       "patternRequired": "Please input the pattern",
       "matchTypeRequired": "Please select a match type",
-      "replaceTypeRequired": "Please select a replace type"
+      "replaceTypeRequired": "Please select a replace type",
+      "replaceValueRequired": "Please input the replacement value"
     },
     "systemConfig": {
       "title": "System Dictionary",
       "enabled": "Enable system dictionary interception",
-      "wordCount": "Word count: {{count}}",
+      "wordCount": "Word count: {count}",
       "currentStatus": "Current Status",
       "updatedBy": "Updated By",
       "updatedAt": "Updated At",
-      "dictionaryHelp": "One word per line. Empty lines are removed, surrounding spaces are trimmed, and duplicate entries are deduplicated on save."
+      "dictionaryHelp": "The system dictionary comes from the plugin's built-in file. This page no longer expands the full dictionary and only supports keyword lookup.",
+      "searchLabel": "Dictionary Keyword Lookup",
+      "searchPlaceholder": "Enter a keyword to check whether it exists in the system dictionary",
+      "searchHint": "This section only performs lookup and does not render the full dictionary content.",
+      "searchMatched": "The system dictionary contains entries related to \"{keyword}\"",
+      "searchNotFound": "No entries related to \"{keyword}\" were found in the system dictionary",
+      "searchResultCount": "{count} entries matched",
+      "searchResultTruncated": "Only the first {count} matched entries are shown."
+    },
+    "runtime": {
+      "bindingTitle": "Route Binding",
+      "bindingHelp": "This section shows which AI routes are currently bound to `ai-data-masking`. Plugin enablement follows the AI route policy binding instead of a separate global switch on this page.",
+      "bindingCount": "{count} AI routes are currently bound",
+      "scopeTitle": "Processing Scope",
+      "scopeHelp": "OpenAI mode processes conversation content by default. JSONPath and raw body interception can be enabled as needed.",
+      "responseTitle": "Deny Response",
+      "responseHelp": "When sensitive content is found in the selected processing scope, the request is blocked and the configured response is returned."
     }
   },
   "aiQuota": {
@@ -249,6 +332,7 @@
     "search": "User Search",
     "searchPlaceholder": "Please input user name",
     "empty": "No AI routes have ai-quota enabled yet",
+    "amountOnlyEmpty": "No AI routes are currently running AI quota in amount mode",
     "mode": {
       "amountTitle": "Wallet Balance Management",
       "amountDescription": "This route is running in amount mode. The page shows user wallet balances, the form accepts RMB, and values are converted to micro_yuan before syncing to the Portal wallet and Redis runtime cache.",
@@ -366,10 +450,13 @@
     }
   },
   "consumer": {
+    "departmentTree": "Organization Tree",
+    "notAssigned": "Unassigned",
     "columns": {
       "organization": "Organization Node",
       "department": "Department",
       "name": "User Name",
+      "displayName": "Display Name",
       "type": "Type",
       "authMethods": "Auth Methods",
       "portalStatus": "Portal Status",
@@ -382,14 +469,16 @@
     "createDepartment": "Add Department",
     "create": "Add User",
     "edit": "Edit User",
-    "deleteConfirmation": "Are you sure you want to delete <1>{{currentConsumerName}}</1>?",
-    "departmentSummary": "{{count}} users",
+    "deleteConfirmation": "Are you sure you want to delete <1>{currentConsumerName}</1>?",
+    "departmentSummary": "{count} users",
     "departmentCreateSuccess": "Department created successfully.",
     "ungrouped": "Ungrouped",
     "departmentForm": {
       "name": "Department Name",
       "nameRequired": "Please input department name",
-      "namePlaceholder": "Please input department name"
+      "namePlaceholder": "Please input department name",
+      "parentDepartment": "Parent Department",
+      "parentDepartmentPlaceholder": "Leave empty to create a top-level department"
     },
     "consumerForm": {
       "department": "Department",
@@ -397,9 +486,14 @@
       "name": "User Name",
       "namePlaceholder": "Please input user name",
       "nameRequired": "Please input user name",
+      "displayName": "Display Name",
+      "displayNameRequired": "Please input the display name",
+      "email": "Email",
       "portalUserLevel": "Portal User Level",
       "portalUserLevelRequired": "Please select portal user level",
       "portalUserLevelPlaceholder": "Please select portal user level",
+      "password": "Initial Password",
+      "passwordPlaceholder": "Leave empty to let the system use its default policy",
       "tokenSourceRequired": "Please choose a token source",
       "authTokenRequired": "Please input auth token",
       "headerNameRequired": "Please input header name",
@@ -431,11 +525,11 @@
     },
     "resetPassword": "Reset Password",
     "resetPasswordTitle": "Temporary Password",
-    "resetPasswordHint": "Temporary password for user {{name}} (store it safely):",
+    "resetPasswordHint": "Temporary password for user {name} (store it safely):",
     "resetPasswordSuccess": "Password reset successfully.",
     "resetPasswordFailed": "Failed to reset password.",
     "noActiveKeys": "No active API keys",
-    "keyCount": "{{count}} key(s)",
+    "keyCount": "{count} key(s)",
     "inviteCode": {
       "manage": "Invite Codes",
       "create": "Generate Invite Code",
@@ -474,7 +568,7 @@
     "defaultDomain": "Default Domain",
     "createDomain": "Create Domain",
     "editDomain": "Edit Domain",
-    "deleteConfirmation": "Are you sure you want to delete <1>{{currentDomainName}}</1>?",
+    "deleteConfirmation": "Are you sure you want to delete <1>{currentDomainName}</1>?",
     "domainForm": {
       "name": "Domain",
       "nameTooltip": "Both full domain (e.g.: hello.com) and wildcard domain (e.g.: *.hello.com) are supported. Manage the protocol and certificates for a given domain independently here. And route configurations can isolate with each other by different domains.",
@@ -496,7 +590,7 @@
     "loadFailed": "Error occurs when loading dashboard data. Please refresh the page later.",
     "uninitialized": "Built-in dashboard is not intialized automatically.Click the button below to initialize it manually.",
     "initDashboard": "Initialize Dashboard",
-    "noBuiltInDashboard": "Aigateway Console built-in dashboard is not installed. Please configure one manually.",
+    "noBuiltInDashboard": "Built-in native monitoring is not enabled. This page no longer embeds external Grafana.",
     "configureDashboard": "Please configure the dashboard URL.",
     "reconfigure": "Reconfigure",
     "openInNewPage": "Open dashboard in new page",
@@ -504,16 +598,27 @@
       "gateway": "Gateway",
       "namespace": "Namespace",
       "range": "Time range",
+      "quickRange": "Quick range",
+      "quickRangeHint": "Use presets to fill the start time while keeping the current end time.",
+      "endTimeMode": "End time",
+      "startTime": "Start time",
+      "endTime": "End time",
       "refreshEvery": "Auto refresh",
       "refresh": "Refresh now",
-      "lastUpdated": "Last updated: {{time}}",
+      "lastUpdated": "Last updated: {time}",
       "noData": "No monitoring data",
+      "invalidTimeRange": "Please choose a valid start time and end time.",
+      "endTimeModes": {
+        "now": "Now",
+        "fixed": "Fixed time"
+      },
       "rangeOptions": {
         "300000": "Last 5 minutes",
         "900000": "Last 15 minutes",
         "3600000": "Last 1 hour",
         "21600000": "Last 6 hours",
-        "86400000": "Last 24 hours"
+        "86400000": "Last 24 hours",
+        "604800000": "Last 7 days"
       },
       "refreshOptions": {
         "0": "Off",
@@ -522,7 +627,18 @@
         "60000": "1 minute"
       },
       "rows": {
+        "Platform": "Platform",
+        "Gateway Request": "Gateway Request",
+        "Upstream Health": "Upstream Health",
+        "Resource Scale": "Resource Scale",
         "General": "General",
+        "AI Overview": "AI Overview",
+        "Token Runtime": "Token Runtime",
+        "AI Request": "AI Request",
+        "AI Exceptions": "AI Exceptions",
+        "API Request": "API Request",
+        "Exceptions": "Exceptions",
+        "Detailed Token": "Detailed Token",
         "Workload": "Workload",
         "Request": "Request",
         "WAF": "WAF",
@@ -533,6 +649,37 @@
       "titles": {
         "Higress Dashboard": "Gateway Dashboard",
         "Higress AI Gateway Dashboard": "AI Gateway Dashboard",
+        "Current CPU Usage": "Current CPU Usage",
+        "Current Memory Usage": "Current Memory Usage",
+        "Current Active Connections": "Current Active Connections",
+        "Gateway Pod Count": "Gateway Pod Count",
+        "Total API Requests": "Total API Requests",
+        "AI Request Count": "AI Request Count",
+        "AI Request Success Rate": "AI Request Success Rate",
+        "Request Success Rate": "Request Success Rate",
+        "Downstream Request Count": "Downstream Request Count",
+        "Downstream Success Rate": "Downstream Success Rate",
+        "Downstream QPS Trend": "Downstream QPS Trend",
+        "Downstream Latency": "Downstream Latency",
+        "Upstream Request Count": "Upstream Request Count",
+        "Upstream Request Success Rate": "Upstream Request Success Rate",
+        "Upstream Attempt Success Rate": "Upstream Attempt Success Rate",
+        "Upstream QPS Trend": "Upstream QPS Trend",
+        "Upstream Latency": "Upstream Latency",
+        "Downstream 5xx Count": "Downstream 5xx Count",
+        "Upstream 5xx/Timeout Count": "Upstream 5xx/Timeout Count",
+        "Failure Route TopN": "Failure Route TopN",
+        "Slow Route TopN": "Slow Route TopN",
+        "Estimated Cost": "Estimated Cost",
+        "Downstream AI Route Request Trend": "Downstream AI Route Request Trend",
+        "Upstream Provider/Service Request Trend": "Upstream Provider/Service Request Trend",
+        "Upstream API Request Trend": "Upstream API Request Trend",
+        "Downstream API Request Trend": "Downstream API Request Trend",
+        "Upstream API Request Latency": "Upstream API Request Latency",
+        "Downstream API Request Latency": "Downstream API Request Latency",
+        "Failed Requests": "Failed Requests",
+        "Slow Requests": "Slow Requests",
+        "Error Code TopN": "Error Code TopN",
         "Downstream Request Volume": "Downstream Request Volume",
         "Downstream Success Rate (non-5xx responses)": "Downstream Success Rate (non-5xx responses)",
         "Downstream Request Duration": "Downstream Request Duration",
@@ -541,10 +688,25 @@
         "Upstream Success Rate (non-5xx responses)": "Upstream Success Rate (non-5xx responses)",
         "Upstream Request Duration": "Upstream Request Duration",
         "TCP Sent Bytes": "TCP Sent Bytes",
+        "Requests": "Requests",
+        "Total Tokens": "Total Tokens",
+        "Active Consumers": "Active Consumers",
+        "Routes": "Routes",
+        "Domains": "Domains",
+        "Plugins": "Plugins",
+        "AI Routes": "AI Routes",
+        "Providers": "Providers",
+        "MCP Servers": "MCP Servers",
+        "Requests Trend": "Requests Trend",
+        "Tokens Trend": "Tokens Trend",
+        "Recent Usage Events": "Recent Usage Events",
         "CPU": "CPU Usage",
         "Memory": "Memory Usage",
         "Downstream QPS": "Downstream QPS",
         "Upstream QPS": "Upstream QPS",
+        "Cache Token Per Second": "Cache Token Per Second",
+        "Image Token Per Second": "Image Token Per Second",
+        "Request And Image Count": "Request And Image Count",
         "WAF Processed": "WAF Processed",
         "WAF Denied by Phase": "WAF Denied by Phase",
         "WAF Denied by RuleID": "WAF Denied by Rule ID",
@@ -566,6 +728,9 @@
       },
       "series": {
         "Avg": "Average",
+        "P50": "P50",
+        "P90": "P90",
+        "P99": "P99",
         "Envoy Restarts": "Envoy Restarts",
         "XDS Active Connections": "XDS Active Connections",
         "XDS Connection Failures": "XDS Connection Failures",
@@ -574,8 +739,18 @@
         "XDS Request Bytes Max": "XDS Request Bytes Max",
         "XDS Response Bytes Average": "XDS Response Bytes Average",
         "XDS Response Bytes Max": "XDS Response Bytes Max",
+        "Cache Creation Token": "Cache Creation Token",
+        "Cache Read Token": "Cache Read Token",
+        "Input Image Token": "Input Image Token",
+        "Output Image Token": "Output Image Token",
+        "Request Count": "Request Count",
+        "Input Image Count": "Input Image Count",
+        "Output Image Count": "Output Image Count",
         "input token": "Input Token",
+        "Input Token": "Input Token",
         "output token": "Output Token",
+        "Output Token": "Output Token",
+        "Total Token": "Total Token",
         "qps": "QPS",
         "response_code_class=2xx": "2xx"
       },
@@ -584,15 +759,35 @@
         "Provider": "Provider",
         "Model": "Model",
         "Consumer": "User",
+        "Occurred At": "Occurred At",
+        "Route": "Route",
+        "Request Status": "Request Status",
+        "Cost (micro yuan)": "Cost (micro yuan)",
         "Input Token": "Input Token",
         "Output Token": "Output Token",
+        "Total Tokens": "Total Tokens",
         "Total Token": "Total Token",
         "QPS": "QPS",
         "RT": "RT",
+        "Latency": "Latency",
+        "Request Count": "Request Count",
         "Connections": "Connections",
         "cluster_name": "Upstream Cluster",
         "service": "Service",
-        "port": "Port"
+        "port": "Port",
+        "Request ID": "Request ID",
+        "Trace ID": "Trace ID",
+        "Request Path": "Request Path",
+        "HTTP Status": "HTTP Status",
+        "Service Duration": "Service Duration",
+        "Error Code": "Error Code",
+        "Error Message": "Error Message"
+      },
+      "values": {
+        "success": "Success",
+        "rejected": "Rejected",
+        "failed": "Failed",
+        "unknown": "Unknown"
       }
     },
     "setForm": {
@@ -617,6 +812,9 @@
       "item4": "Input the HTTPS URL of Grafana is highly recommended to ensure the dashboard can be shown with in this page correctly."
     }
   },
+  "agentCatalog": {
+    "optionsLoadFailed": "Failed to load MCP server options. Existing catalog entries are still available."
+  },
   "llmProvider": {
     "columns": {
       "type": "Type",
@@ -637,14 +835,16 @@
       "coze": "Coze",
       "deepl": "DeepL",
       "deepseek": "DeepSeek",
-      "doubao": "Doubao",
       "gemini": "Google Gemini",
       "github": "GitHub Models",
       "groq": "Groq",
       "grok": "Grok",
+      "vertex": "Vertex AI / Gemini",
+      "volcengine": "Volcengine Ark",
       "hunyuan": "Tencent Hunyuan",
       "minimax": "MiniMax",
       "mistral": "Mistral",
+      "bedrock": "AWS Bedrock",
       "ollama": "Ollama",
       "openrouter": "OpenRouter",
       "together-ai": "Together AI",
@@ -658,7 +858,8 @@
         "portalModelMeta": "Model Metadata (Portal Display)",
         "modelPricing": "Model Pricing",
         "cachePricing": "Cache Pricing",
-        "imagePricing": "Image Pricing"
+        "imagePricing": "Image Pricing",
+        "retryOnFailure": "Request Retry"
       },
       "actions": {
         "addTag": "Add Tag",
@@ -710,6 +911,14 @@
         "serviceName": "Service Name",
         "successThreshold": "Min Consecuitive Sucesses to Mark Up a Token",
         "azureServiceUrl": "Azure Service URL",
+        "volcengineBaseUrl": "Ark Base URL",
+        "volcengineClientRequestId": "X-Client-Request-Id",
+        "volcengineEnableEncryption": "Enable Session Encryption",
+        "volcengineEnableTrace": "Enable Fornax Trace Reporting",
+        "retryOnFailureEnabled": "Enable Request Retry",
+        "retryOnFailureMaxRetries": "Max Retries",
+        "retryOnFailureTimeout": "Retry Timeout (ms)",
+        "retryOnFailureStatusText": "Retry Status Rules",
         "ollamaServerHost": "Ollama Service Host",
         "ollamaServerPort": "Ollama Service Port",
         "openaiServerType": "OpenAI Service Type",
@@ -754,6 +963,11 @@
         "protocol": "Please select a request protocol",
         "successThresholdRequired": "Please input min consecuitive sucesses to mark up a token",
         "azureServiceUrlRequired": "Please input Azure service URL",
+        "volcengineBaseUrlRequired": "Please input a valid Ark base URL",
+        "volcengineBaseUrlNoPort": "Ark base URL must not include a custom port",
+        "volcengineBaseUrlNoQuery": "Ark base URL must not contain query parameters or fragments",
+        "retryOnFailureMaxRetriesRequired": "Please input a valid max retry count",
+        "retryOnFailureTimeoutRequired": "Please input a valid retry timeout (ms)",
         "ollamaServerHostRequired": "Please input Ollama service host",
         "ollamaServerPortRequired": "Please input Ollama service port",
         "openaiCustomUrlRequired": "Please input a valid custom OpenAI service base URL",
@@ -772,7 +986,7 @@
         "vertexProjectIdRequired": "Please input Google Cloud Product ID",
         "vertexAuthKeyRequired": "Please input  Google Cloud Service Account Key",
         "vertexAuthKeyBadFormat": "Invalid Google Cloud service account key format, which must be a JSON string.",
-        "vertexAuthKeyBadRequiredProperty": "Required property is missing in the Google Cloud service account key: {{key}}",
+        "vertexAuthKeyBadRequiredProperty": "Required property is missing in the Google Cloud service account key: {key}",
         "geminiSafetyCategoryRequired": "Please input harm category",
         "geminiSafetyCategoryDuplicated": "Found duplicated harm categories",
         "geminiSafetyThresholdRequired": "Please input block threshold"
@@ -784,7 +998,8 @@
         "zhipuDomainTooltip": "Custom domain for Zhipu AI service. Leave empty to use the default domain (open.bigmodel.cn). Use 'api.z.ai' for international service.",
         "zhipuCodePlanModeTooltip": "Enable Code Plan mode for optimized code generation capabilities.",
         "claudeVersionTooltip": "Anthropic API version header. Default: 2023-06-01",
-        "claudeCodeModeTooltip": "Enable Claude Code mode to use OAuth token authentication instead of API key. Run 'claude setup-token' to get your OAuth token."
+        "claudeCodeModeTooltip": "Enable Claude Code mode to use OAuth token authentication instead of API key. Run 'claude setup-token' to get your OAuth token.",
+        "retryOnFailureStatusTextTooltip": "Use comma-separated status match rules such as 4.*,5.*. Leave blank to use Higress defaults."
       },
       "placeholder": {
         "modelIntro": "Describe the positioning, target workload, and recommended scenarios of this model",
@@ -796,6 +1011,9 @@
         "openaiCustomUrlPlaceholder": "Sample: https://api.openai.com/v1",
         "openaiCustomServiceHostPlaceholder": "Sample: api.openai.com",
         "openaiCustomServicePathPlaceholder": "Sample: /v1",
+        "volcengineBaseUrlPlaceholder": "Sample: https://ark.cn-beijing.volces.com/api/v3",
+        "volcengineClientRequestIdPlaceholder": "Sample: my-request-id",
+        "retryOnFailureStatusTextPlaceholder": "Sample: 4.*, 5.*",
         "qwenDomainPlaceholder": "Sample: dashscope-finance.aliyuncs.com",
         "qwenFileIdsPlaceholder": "Sample: file-fe-xxx",
         "zhipuDomainPlaceholder": "Sample: api.z.ai (for international service)"
@@ -825,7 +1043,7 @@
     },
     "create": "Create AI Service Provider",
     "edit": "Edit AI Service Provider",
-    "deleteConfirmation": "Are you sure you want to delete <1>{{currentLlmProviderName}}</1>?"
+    "deleteConfirmation": "Are you sure you want to delete <1>{currentLlmProviderName}</1>?"
   },
   "plugins": {
     "title": "Strategy Configuration",
@@ -857,67 +1075,42 @@
     "configForm": {
       "targetDomain": "Target Domain: ",
       "targetRoute": "Target Route: ",
-      "enableStatus": "Enabled",
+      "routeEnableStatus": "Enabled on Current Route",
+      "routeEnableHint": "This drawer only controls whether the capability is enabled on the current route. Existing detailed settings are preserved and are not edited here.",
       "globalConfigWarning": "Note: Configurations above will be applied to all domains the routes. Please edit with caution."
     },
     "builtIns": {
       "rewrite": {
         "missingParamError": "At least one of rewritten path and host shall be provided.",
         "path": "Path",
-        "originalPath": "Original Path",
-        "rewritePath": "Rewritten Path",
-        "rewritePathPlaceholder": "e.g.: /a",
         "rewriteType": {
           "PRE": "Prefix Rewrite",
           "EQUAL": "Exact Rewrite",
           "REGULAR": "Regex Rewrite"
         },
-        "host": "Host",
-        "originalHost": "Original Host",
-        "rewriteHost": "Rewritten Host",
-        "rewriteHostPlaceholder": "e.g.: example.com"
+        "host": "Host"
       },
       "headerControl": {
         "headerType": "Header Type",
-        "request": "Request",
-        "response": "Response",
         "actionType": "Operation Type",
-        "add": "Add",
-        "set": "Set",
-        "remove": "Remove",
         "action": "Action",
-        "addNewRule": "Add New Rule",
         "headerTypeRequired": "Please select header type",
         "actionTypeRequired": "Please select action type",
         "keyRequired": "Please input header key",
         "valueRequired": "Please input header value"
       },
       "cors": {
-        "allowOrigins": "Allow Origins",
         "allowOriginsRequired": "Please input allow origins",
-        "allowMethods": "Allow Methods",
         "allowMethodsRequired": "Please select allow methods",
-        "allowHeaders": "Allow Headers",
         "allowHeadersRequired": "Please input allow headers",
-        "exposeHeaders": "Expose Headers",
         "exposeHeadersRequired": "Please input expose headers",
-        "allowCredentials": "Allow Credentials",
         "allow": "Allow",
         "disallow": "Disallow",
-        "maxAge": "Max Age of Pre-flight Requests",
         "maxAgeRequired": "Please input the max cache age of pre-flight requests"
       },
       "retries": {
-        "attempts": "Retry Attempts",
         "attemptsRequired": "Please input retry attempts",
-        "conditions": "Retry Conditions",
         "conditionsRequired": "Please select retry conditions",
-        "condition": {
-          "error": "error: Unable to establish connections",
-          "timeout": "timeout: Timeout when trying to establish connections",
-          "non_idempotent": "non_idempotent: Retry when a non-idempotent request fails"
-        },
-        "timeout": "Timeout",
         "timeoutRequired": "Please input timeout value"
       }
     },
@@ -989,7 +1182,7 @@
     "createServiceSource": "Create Service Source",
     "editServiceSource": "Edit Service Source",
     "manageProxyServers": "Manage Proxy Servers",
-    "deleteConfirmation": "Are you sure you want to delete <1>{{currentServiceSourceName}}</1>?",
+    "deleteConfirmation": "Are you sure you want to delete <1>{currentServiceSourceName}</1>?",
     "serviceSourceForm": {
       "type": "Type",
       "typeTooltip": "Following service source types are not supported: Nacos 1.x, Nacos2.x, Zookeeper, static addresses and domains.",
@@ -1112,7 +1305,7 @@
     "unsupported": "Note: Route management feature doesn't support Kubenetes with version < 1.19.0 at the moment.",
     "createRoute": "Create Route",
     "editRoute": "Edit Route",
-    "deleteConfirmation": "Are you sure you want to delete <1>{{currentRouteName}}</1>?",
+    "deleteConfirmation": "Are you sure you want to delete <1>{currentRouteName}</1>?",
     "noCustomIngresses": "Note: Only routes created from the console are listed above.",
     "routeSearchPlaceholder": "Search routes by route name, domain, routing conditions and target service.",
     "factorGroup": {
@@ -1169,10 +1362,10 @@
     }
   },
   "system": {
-    "higress-config": {
-      "title": "Edit Global Configuration: higress-config",
-      "note_k8s": "Note: Changes to \"mesh\" or \"meshNetworks\" won't come effective until Higress Gateway is restarted.",
-      "note_standalone": "Note: Changes to \"mesh\" or \"meshNetworks\" won't come effective until Higress is completely restarted."
+    "aigateway-config": {
+      "title": "Edit Global Configuration: aigateway-config",
+      "note_k8s": "Note: Changes to \"mesh\" or \"meshNetworks\" won't come effective until AIGateway Gateway is restarted.",
+      "note_standalone": "Note: Changes to \"mesh\" or \"meshNetworks\" won't come effective until AIGateway is completely restarted."
     }
   },
   "tlsCertificate": {
@@ -1185,7 +1378,7 @@
     },
     "createTlsCertificate": "Create Certificate",
     "editTlsCertificate": "Edit Certificate",
-    "deleteConfirmation": "Are you sure you want to delete <1>{{currentTlsCertificateName}}</1>?",
+    "deleteConfirmation": "Are you sure you want to delete <1>{currentTlsCertificateName}</1>?",
     "tlsCertificateForm": {
       "name": "Certificate Name",
       "nameTooltip": "Globally unique",
@@ -1201,7 +1394,7 @@
     }
   },
   "exception": {
-    "info": "Error details (Error code: <1>{{code}}</1>)"
+    "info": "Error details (Error code: <1>{code}</1>)"
   },
   "error": {
     "404": {
@@ -1250,6 +1443,9 @@
     "close": "Close",
     "save": "Save",
     "create": "Create",
+    "copy": "Copy",
+    "copySuccess": "Copied successfully.",
+    "copyError": "Copy failed. Please copy it manually.",
     "refresh": "Refresh",
     "strategy": "Strategy",
     "strategyList": "Strategy List",
@@ -1366,11 +1562,11 @@
       "presetTemplatesLoadFailed": "Failed to load preset template list",
       "presetTemplateContentLoadFailed": "Failed to load preset template content",
       "presetTemplateApplyFailed": "Failed to apply preset template",
-      "ssePathRule": "Path (SSE): /mcp-servers/<1>{{currentMcpServerName}}</1>/sse",
-      "httpPathRule": "Path (Streamable HTTP): /mcp-servers/<1>{{currentMcpServerName}}</1>",
+      "ssePathRule": "Path (SSE): /mcp-servers/<1>{currentMcpServerName}</1>/sse",
+      "httpPathRule": "Path (Streamable HTTP): /mcp-servers/<1>{currentMcpServerName}</1>",
       "nameDefault": "MCP Service Name"
     },
-    "deleteConfirm": "Are you sure you want to delete <1>{{currentMcpServerName}}</1>?",
+    "deleteConfirm": "Are you sure you want to delete <1>{currentMcpServerName}</1>?",
     "detail": {
       "titlePrefix": "MCP Service",
       "basicInfo": "Basic Information",
@@ -1397,7 +1593,7 @@
       "copyError": "Copy failed, please copy manually",
       "dnsDesc": "Aigateway does not provide domain resolution capabilities. Users need to configure business domains in DNS services themselves. You can choose appropriate record types (such as CNAME records, A records, etc.) according to actual scenarios and point them to the gateway access entry address to achieve traffic forwarding",
       "gatewayAddress": "Gateway Access Address:",
-      "commandDesc": "Please run the following command to install <1>{{client}}</1> MCP Server:",
+      "commandDesc": "Please run the following command to install <1>{client}</1> MCP Server:",
       "authStatus": "Enable Request Authentication",
       "enabled": "Enabled",
       "disabled": "Disabled",
@@ -1417,7 +1613,7 @@
       "apiKeyTooltip": "API Key is a simple authentication method. When clients access, they need to add credentials to requests in a specified way. The gateway will verify the validity and permissions of the API Key upon receiving requests. API Key is commonly used in simple scenarios that don't involve sensitive operations. Security is lower compared to JWT and AK/SK. Please pay attention to credential management and protection.",
       "addConsumerAuth": "Add User Authorization",
       "authScope": "Authorization Scope",
-      "authScopeMcpService": "MCP Service: {{name}}",
+      "authScopeMcpService": "MCP Service: {name}",
       "consumer": "User",
       "selectConsumer": "Please select user",
       "fetchConsumerListError": "Failed to fetch user list",

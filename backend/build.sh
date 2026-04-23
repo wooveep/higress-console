@@ -1,27 +1,17 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
-IMAGE_NAME="${IMAGE_NAME:-aigateway-console:0.0.1}"
-BUILD_ARGS=""
-MAVEN_ARGS="${MAVEN_ARGS:-}"
-SKIP_TESTS="${SKIP_TESTS:-true}"
-SKIP_STATIC_CHECKS="${SKIP_STATIC_CHECKS:-true}"
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT_DIR"
 
-if [ -n "${VERSION:-}" ]; then
-    BUILD_ARGS="$BUILD_ARGS -Dapp.build.version=$VERSION"
-fi
+GOOS_VALUE="${GOOS:-linux}"
+GOARCH_VALUE="${GOARCH:-amd64}"
+OUTPUT_DIR="temp/${GOOS_VALUE}_${GOARCH_VALUE}"
 
-if [ -n "${DEV:-}" ]; then
-    BUILD_ARGS="$BUILD_ARGS -Dapp.build.dev=$DEV"
-fi
+go mod tidy
+go test ./...
 
-if [ "$SKIP_TESTS" = "true" ]; then
-    MAVEN_ARGS="$MAVEN_ARGS -Dmaven.test.skip=true"
-fi
+mkdir -p "$OUTPUT_DIR"
+CGO_ENABLED=0 GOOS="$GOOS_VALUE" GOARCH="$GOARCH_VALUE" go build -o "${OUTPUT_DIR}/main" main.go
 
-if [ "$SKIP_STATIC_CHECKS" = "true" ]; then
-    MAVEN_ARGS="$MAVEN_ARGS -Dpmd.skip=true -Dcheckstyle.skip=true"
-fi
-
-./mvnw clean package -Dpmd.language=en $MAVEN_ARGS $BUILD_ARGS
-docker build -t "$IMAGE_NAME" -f Dockerfile .
+echo "built ${OUTPUT_DIR}/main"

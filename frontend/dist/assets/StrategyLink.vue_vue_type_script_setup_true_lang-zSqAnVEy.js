@@ -1,0 +1,1 @@
+import{d as r,N as p,W as c,X as u,G as i,U as m}from"./vendor-vue-CFYpOOJB.js";import{B as _}from"./index-DMIyz7sm.js";const d=r({__name:"StrategyLink",props:{path:{}},setup(o){const e=o,n=p();function s(){n.push(e.path)}return(l,t)=>{const a=_;return m(),c(a,{type:"link",size:"small",onClick:s},{default:u(()=>[...t[0]||(t[0]=[i(" 策略 ",-1)])]),_:1})}}});export{d as _};

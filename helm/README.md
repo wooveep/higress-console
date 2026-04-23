@@ -1,5 +1,5 @@
-# Higress Console Helm Chart
+# AIGateway Console Helm Chart
 
-Installs the console components of cloud-native gateway [Higress](http://higress.io/)
+Installs the console components of the AIGateway platform.
 
-**Note:** It is highly recommended to install the whole package of Higress. Please visit https://higress.io/docs/user/quickstart/ for details.
+**Note:** It is recommended to install it through the parent platform chart to keep service names, images, and values aligned.

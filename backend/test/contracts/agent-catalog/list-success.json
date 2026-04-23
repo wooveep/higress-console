@@ -1,0 +1,34 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/ai/agent-catalog"
+  },
+  "response": {
+    "success": true,
+    "data": [
+      {
+        "agentId": "agent-researcher",
+        "canonicalName": "researcher",
+        "displayName": "Research Assistant",
+        "intro": "research",
+        "description": "multi-step agent",
+        "iconUrl": "https://example.com/icon.png",
+        "tags": [
+          "research"
+        ],
+        "mcpServerName": "research-mcp",
+        "status": "published",
+        "toolCount": 3,
+        "transportTypes": [
+          "http",
+          "sse"
+        ],
+        "resourceSummary": "knowledge base",
+        "promptSummary": "3 tools exposed",
+        "publishedAt": "2026-04-14T10:00:00Z",
+        "createdAt": "2026-04-14T10:00:00Z",
+        "updatedAt": "2026-04-14T10:00:00Z"
+      }
+    ]
+  }
+}

@@ -3,4 +3,4 @@
 
 echo "[PRE_COMMIT_INFO] start lint check ..."
 
-cd frontend && npm run lint:lint-staged
+cd frontend && npm run pre-commit
