@@ -9,7 +9,7 @@ global:
     # cluster domain. Default value is "cluster.local".
     clusterDomain: "cluster.local"
 
-  # -- Default hub (registry) for Higress images, passed from parent chart.
+  # -- Default hub (registry) for console-related images, passed from parent chart.
   # Used for plugin image registry when pluginServer.imageRegistry is not set.
   hub: ""
   # -- Plugin image namespace for built-in plugins, passed from parent chart.
@@ -53,6 +53,7 @@ global:
         grpc: 9095
       storage: 1Gi
       pvc:
+        enabled: true
         storageClassName: ""
       securityContext: {}
 
@@ -62,7 +63,7 @@ global:
 replicaCount: 1
 
 image:
-  repository: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/console
+  repository: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/aigateway-console
   pullPolicy: IfNotPresent
   tag: ""
 
@@ -70,6 +71,8 @@ imagePullSecrets: []
 name: "aigateway-console"
 
 podEnvs:
+  AIGATEWAY_CONSOLE_K8S_ENABLED: "true"
+  AIGATEWAY_CONSOLE_PORTALDB_AUTO_MIGRATE: "true"
   HIGRESS_PORTAL_CONSUMER_PROJECTION_WRITE_ENABLED: "false"
 
 podAnnotations: {}
@@ -107,7 +110,12 @@ resources:
 
 nodeSelector: {}
 affinity: {}
+topologySpreadConstraints: []
 tolerations: {}
+
+pdb:
+  enabled: false
+  minAvailable: 1
 
 web:
   login:
@@ -155,11 +163,13 @@ pluginServer:
 
 portalDatabase:
   enabled: false
-  # Default host is "<release>-aigateway-core-mysql" when empty.
+  driver: postgres
+  # Default host is "<release>-aigateway-core-postgresql-pgpool" when empty.
   host: ""
-  port: 3306
+  port: 5432
   database: aigateway_portal
-  jdbcParams: "useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai"
+  params: "sslmode=disable"
+  jdbcParams: "sslmode=disable"
   # Default secret is "<release>-aigateway-core-db" when empty.
   secretName: ""
   usernameKey: username

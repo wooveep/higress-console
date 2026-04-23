@@ -1,0 +1,1 @@
+import{n as e}from"./index-C3g_U5z6.js";const s=()=>e.get("/v1/ai/routes"),u=t=>e.get(`/v1/ai/routes/${t}`),o=t=>e.post("/v1/ai/routes",t),a=t=>e.delete(`/v1/ai/routes/${t}`),n=t=>e.put(`/v1/ai/routes/${t.name}`,t);export{s as a,o as b,a as d,u as g,n as u};

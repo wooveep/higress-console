@@ -8,3 +8,10 @@ export interface PageQuery {
   pageNum?: number;
   pageSize?: number;
 }
+
+export interface PageResult<T> {
+  data: T[];
+  pageNum?: number;
+  pageSize?: number;
+  total?: number;
+}

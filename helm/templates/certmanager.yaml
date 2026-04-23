@@ -1,5 +1,5 @@
 {{- if .Values.certmanager.enabled }}
-{{- $appName := (include "higress-console-cert-manager.name" .) }}
+{{- $appName := (include "aigateway-console-cert-manager.name" .) }}
 {{- $config := .Values.certmanager }}
 ---
 # Source: cert-manager/templates/cainjector-serviceaccount.yaml

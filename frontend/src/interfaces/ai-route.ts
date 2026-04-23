@@ -6,12 +6,15 @@ export interface AiRoute {
   version?: string;
   domains: string[];
   pathPredicate: RoutePredicate;
+  methods?: string[];
   headerPredicates?: KeyedRoutePredicate[];
   urlParamPredicates?: KeyedRoutePredicate[];
   modelPredicates?: RoutePredicate[];
   upstreams: AiUpstream[];
   authConfig?: AuthConfig;
   fallbackConfig: AiRouteFallbackConfig;
+  customConfigs?: Record<string, string>;
+  customLabels?: Record<string, string>;
 }
 
 export interface AiRouteFallbackConfig {

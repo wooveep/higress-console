@@ -1,7 +1,7 @@
 export interface Consumer {
   name: string;
   department?: string;
-  credentials?: Credential[];
+  credentials?: Credential[] | string[];
   portalStatus?: 'active' | 'disabled' | 'pending' | string;
   portalDisplayName?: string;
   portalEmail?: string;
@@ -11,6 +11,14 @@ export interface Consumer {
   portalPassword?: string;
   version?: number;
   key?: string;
+}
+
+export interface ConsumerDetail extends Consumer {
+  departmentId?: string;
+  departmentPath?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  lastLoginAt?: string;
 }
 
 export interface ResetPasswordResponse {

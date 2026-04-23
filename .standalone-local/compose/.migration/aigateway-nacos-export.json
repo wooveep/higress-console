@@ -62,7 +62,7 @@
         "kind": "ConfigMap",
         "apiVersion": "v1",
         "metadata": {
-          "name": "domain-higress-default-domain",
+          "name": "domain-aigateway-default-domain",
           "namespace": "aigateway-system",
           "labels": {
             "higress.io/config-map-type": "domain",
@@ -71,7 +71,7 @@
         },
         "data": {
           "cert": "default",
-          "domain": "higress-default-domain",
+          "domain": "aigateway-default-domain",
           "enableHttps": "on"
         }
       },
@@ -649,7 +649,7 @@
           "name": "default",
           "namespace": "aigateway-system",
           "labels": {
-            "higress.io/domain_higress-default-domain": "true",
+            "higress.io/domain_aigateway-default-domain": "true",
             "higress.io/resource-definer": "higress"
           },
           "annotations": {

@@ -1,0 +1,1 @@
+import{r}from"./index-DMIyz7sm.js";const t="/v1/mcpServer",c=e=>r.get(t,{params:e}),n=e=>r.get(`${t}/${e}`),p=e=>e.name?r.put(t,e):r.post(t,e),a=e=>r.delete(`${t}/${e}`),o=e=>r.get(`${t}/consumers`,{params:e});export{o as a,p as c,a as d,n as g,c as l};

@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/session/login",
+    "body": {
+      "username": "admin",
+      "password": "admin"
+    }
+  },
+  "response": {
+    "success": true,
+    "data": {
+      "name": "admin",
+      "username": "admin",
+      "displayName": "Admin",
+      "type": "admin"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+
+# CLI tool, only in development environment.
+# https://goframe.org/docs/cli
+gfcli:
+  gen:
+    dao:
+      - link: "pgsql:postgres:postgres@tcp(127.0.0.1:5432)/test?sslmode=disable"
+        descriptionTag: true
+
+  docker:
+    build: "-a amd64 -s linux -p temp -ew"
+    tagPrefixes:
+      - my.image.pub/my-app
+
+server:
+  address: ":8080"
+
+clients:
+  k8s:
+    enabled: true
+    namespace: "aigateway-system"
+    kubectlBin: "kubectl"
+    kubeconfig: ""
+    resourcePrefix: "aigw-console"
+    ingressClass: "aigateway"
+  portaldb:
+    enabled: false
+    driver: "postgres"
+    dsn: ""
+    autoMigrate: false
+  grafana:
+    enabled: true
+    baseURL: "http://127.0.0.1:3000"
+    username: ""
+    password: ""

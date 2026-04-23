@@ -1,0 +1,242 @@
+apiVersion: 1.0.0
+info:
+  gatewayMinVersion: "2.0.0"
+  type: enterprise
+  category: ai
+  image: platform_wasm/ai-security-guard
+  name: ai-security-guard
+  title: AI Security Guard
+  x-title-i18n:
+    zh-CN: AI 内容安全
+  description: Securely check the input and output of large models based on Alibaba Cloud Content Moderation Service.
+  x-description-i18n:
+    zh-CN: 基于阿里云内容安全服务对大模型的输入输出进行安全检测。
+  iconUrl: https://img.alicdn.com/imgextra/i1/O1CN018iKKih1iVx287RltL_!!6000000004419-2-tps-42-42.png
+  version: 2.0.0
+  contact:
+    name: rinfx
+spec:
+  phase: default
+  priority: 300
+  configSchema:
+    openAPIV3Schema:
+      type: object
+      required:
+        - serviceName
+        - servicePort
+        - serviceHost
+        - accessKey
+        - secretKey
+        - action
+      properties:
+        serviceName:
+          type: string
+          title: 服务名
+          x-title-i18n:
+            en-US: Service Name
+        servicePort:
+          type: string
+          title: 服务端口
+          x-title-i18n:
+            en-US: Service Port
+        serviceHost:
+          type: string
+          title: 服务域名
+          x-title-i18n:
+            en-US: Service Host
+        accessKey:
+          type: string
+          title: 访问密钥
+          x-title-i18n:
+            en-US: Access Key
+        secretKey:
+          type: string
+          title: 访问密钥密文
+          x-title-i18n:
+            en-US: Secret Key
+        action:
+          type: string
+          title: 风险检测动作
+          x-title-i18n:
+            en-US: Guard Action
+          default: MultiModalGuard
+        checkRequest:
+          type: boolean
+          title: 检查请求内容
+          x-title-i18n:
+            en-US: Check Request
+          default: false
+        checkResponse:
+          type: boolean
+          title: 检查响应内容
+          x-title-i18n:
+            en-US: Check Response
+          default: false
+        requestCheckService:
+          type: string
+          title: 请求检查服务
+          x-title-i18n:
+            en-US: Request Check Service
+          default: llm_query_moderation
+        responseCheckService:
+          type: string
+          title: 响应检查服务
+          x-title-i18n:
+            en-US: Response Check Service
+          default: llm_response_moderation
+        requestContentJsonPath:
+          type: string
+          title: 请求内容路径
+          x-title-i18n:
+            en-US: Request Content Path
+          default: messages.@reverse.0.content
+        responseContentJsonPath:
+          type: string
+          title: 响应内容路径
+          x-title-i18n:
+            en-US: Response Content Path
+          default: choices.0.message.content
+        responseStreamContentJsonPath:
+          type: string
+          title: 流式响应内容路径
+          x-title-i18n:
+            en-US: Stream Response Content Path
+          default: choices.0.delta.content
+        denyCode:
+          type: integer
+          title: 拒绝状态码
+          x-title-i18n:
+            en-US: Deny Status Code
+          default: 200
+        denyMessage:
+          type: string
+          title: 拒绝响应内容
+          x-title-i18n:
+            en-US: Deny Message
+        protocol:
+          type: string
+          title: 协议类型
+          x-title-i18n:
+            en-US: Protocol Type
+          default: openai
+        contentModerationLevelBar:
+          type: string
+          title: 内容安全拦截阈值
+          x-title-i18n:
+            en-US: Content Moderation Level
+          default: max
+        promptAttackLevelBar:
+          type: string
+          title: Prompt Attack 拦截阈值
+          x-title-i18n:
+            en-US: Prompt Attack Level
+          default: max
+        sensitiveDataLevelBar:
+          type: string
+          title: 敏感数据拦截阈值
+          x-title-i18n:
+            en-US: Sensitive Data Level
+          default: S4
+        timeout:
+          type: integer
+          title: 超时时间
+          x-title-i18n:
+            en-US: Timeout
+          default: 2000
+        bufferLimit:
+          type: integer
+          title: 单次内容检测长度上限
+          x-title-i18n:
+            en-US: Buffer Limit
+          default: 1000
+        consumerRequestCheckService:
+          type: object
+          title: 消费者请求检查服务映射
+          x-title-i18n:
+            en-US: Consumer Request Check Service
+          additionalProperties:
+            type: string
+        consumerResponseCheckService:
+          type: object
+          title: 消费者响应检查服务映射
+          x-title-i18n:
+            en-US: Consumer Response Check Service
+          additionalProperties:
+            type: string
+        consumerRiskLevel:
+          type: object
+          title: 消费者风险等级映射
+          x-title-i18n:
+            en-US: Consumer Risk Level
+          additionalProperties:
+            type: object
+      example:
+        serviceName: safecheck.dns
+        servicePort: "443"
+        serviceHost: green-cip.cn-shanghai.aliyuncs.com
+        accessKey: XXXXX
+        secretKey: XXXXX
+        action: MultiModalGuard
+        checkRequest: true
+        checkResponse: true
+  routeConfigSchema:
+    openAPIV3Schema:
+      type: object
+      properties:
+        serviceName:
+          type: string
+        servicePort:
+          type: string
+        serviceHost:
+          type: string
+        accessKey:
+          type: string
+        secretKey:
+          type: string
+        action:
+          type: string
+          default: MultiModalGuard
+        checkRequest:
+          type: boolean
+          default: false
+        checkResponse:
+          type: boolean
+          default: false
+        requestCheckService:
+          type: string
+          default: llm_query_moderation
+        responseCheckService:
+          type: string
+          default: llm_response_moderation
+        requestContentJsonPath:
+          type: string
+          default: messages.@reverse.0.content
+        responseContentJsonPath:
+          type: string
+          default: choices.0.message.content
+        responseStreamContentJsonPath:
+          type: string
+          default: choices.0.delta.content
+        denyCode:
+          type: integer
+          default: 200
+        denyMessage:
+          type: string
+        protocol:
+          type: string
+          default: openai
+        contentModerationLevelBar:
+          type: string
+          default: max
+        promptAttackLevelBar:
+          type: string
+          default: max
+        sensitiveDataLevelBar:
+          type: string
+          default: S4
+        timeout:
+          type: integer
+          default: 2000
+        bufferLimit:
+          type: integer
+          default: 1000

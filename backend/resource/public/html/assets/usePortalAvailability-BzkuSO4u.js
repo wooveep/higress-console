@@ -1,0 +1,1 @@
+import{c as r,C as a}from"./index-C3g_U5z6.js";const s="Portal database is unavailable";function p(){const t=r(),o=a(()=>t.portalEnabled),l=a(()=>t.portalHealthy),e=a(()=>!l.value);return{portalEnabled:o,portalHealthy:l,portalUnavailable:e,portalUnavailableMessage:s}}export{s as P,p as u};

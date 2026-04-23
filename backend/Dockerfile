@@ -1,18 +1,30 @@
-FROM eclipse-temurin:21-jdk
+FROM golang:1.25-alpine AS builder
 
-RUN apt-get update && apt-get install -y \
-    curl \
- && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+
+RUN apk add --no-cache git ca-certificates tzdata
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath -ldflags='-s -w' -o /out/aigateway-console main.go
+
+FROM alpine:3.20
 
 WORKDIR /app
-COPY console/target/higress-console.jar /app
-COPY start.sh /app
 
-ARG TARGETARCH
-COPY tools/mcp/${TARGETARCH}/main /app/tools/mcp/
-COPY tools/mcp/openapiToMcpserver.sh /app/tools/mcp/
-RUN chmod +x /app/tools/mcp/openapiToMcpserver.sh \
-    && chmod +x /app/tools/mcp/main
+RUN apk add --no-cache ca-certificates tzdata kubectl && \
+    addgroup -S app && adduser -S -G app app
+
+COPY --from=builder /out/aigateway-console /app/aigateway-console
+COPY resource /app/resource
+COPY manifest/config /app/manifest/config
 
 EXPOSE 8080
-CMD ["/app/start.sh"]
+USER app
+
+CMD ["/app/aigateway-console"]

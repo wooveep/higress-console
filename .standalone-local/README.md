@@ -32,7 +32,7 @@ docker compose
 
 依照命令行提示输入所需要的配置参数。脚本会自动写入配置并启动 Higress。
 
-在浏览器中打开 [http://localhost:8080/](http://localhost:8080/) ，并使用 admin 作为用户名和密码进行登录，即可正常通过 Higress Console 操作 Higress 的路由配置。所有配置的域名均需要先通过 hosts 文件将其强制解析至 127.0.0.1 再进行访问。
+在浏览器中打开 [http://localhost:8080/](http://localhost:8080/) ，并使用 admin 作为用户名和密码进行登录，即可正常通过 AIGateway Console 操作 Higress 的路由配置。所有配置的域名均需要先通过 hosts 文件将其强制解析至 127.0.0.1 再进行访问。
 
 有关 Higress 自身的详细使用方法，请查看 [Higress 官网](http://higress.io/)。
 
@@ -97,7 +97,7 @@ docker compose
 
   * --console-port=CONSOLE-PORT
 
-    Higress Console 在服务器本地监听的端口。默认值为 8080。
+    AIGateway Console 在服务器本地监听的端口。默认值为 8080。
 
   * -r, --rerun
 
@@ -129,7 +129,7 @@ docker compose
 $ ./bin/status.sh
 NAME                   COMMAND                  SERVICE             STATUS              PORTS
 higress-apiserver-1    "/apiserver --secure…"   apiserver           running (healthy)
-higress-console-1      "/app/start.sh"          console             running             0.0.0.0:8080->8080/tcp, :::8080->8080/tcp
+aigateway-console-1      "/app/start.sh"          console             running             0.0.0.0:8080->8080/tcp, :::8080->8080/tcp
 higress-controller-1   "/usr/local/bin/higr…"   controller          running (healthy)
 higress-gateway-1      "/usr/local/bin/pilo…"   gateway             running (healthy)   0.0.0.0:80->80/tcp, :::80->80/tcp, 0.0.0.0:443->443/tcp, :::443->443/tcp
 higress-nacos-1        "bin/docker-startup.…"   nacos               running (healthy)   0.0.0.0:8848->8848/tcp, :::8848->8848/tcp, 0.0.0.0:9848->9848/tcp, :::9848->9848/tcp

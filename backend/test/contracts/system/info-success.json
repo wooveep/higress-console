@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/system/info"
+  },
+  "response": {
+    "code": 0,
+    "message": "OK",
+    "data": {
+      "service": "aigateway-console",
+      "phase": "P3-gateway-resource-domain"
+    }
+  }
+}

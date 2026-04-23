@@ -92,6 +92,17 @@ export function formatTimeDisplay(
 }
 
 export function formatChartTimeLabel(value: DateTimeValue, rangeMs?: number, fallback = '-'): string {
+  const structured = parseStructuredDateTime(value);
+  if (structured) {
+    if (rangeMs && rangeMs > 24 * 60 * 60 * 1000) {
+      return `${pad(structured.month)}-${pad(structured.day)} ${pad(structured.hour)}:${pad(structured.minute)}`;
+    }
+    if (rangeMs && rangeMs > 6 * 60 * 60 * 1000) {
+      return formatStructuredTime(structured, true);
+    }
+    return formatStructuredTime(structured, false);
+  }
+
   const timestamp = normalizeTimestamp(value);
   if (timestamp === null) {
     return fallback;

@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/ai/sensitive-words/status"
+  },
+  "response": {
+    "success": true,
+    "data": {
+      "dbEnabled": true,
+      "detectRuleCount": 2,
+      "replaceRuleCount": 1,
+      "auditRecordCount": 5,
+      "enabledRouteCount": 0,
+      "systemDenyEnabled": true,
+      "systemDictionaryWordCount": 2,
+      "systemDictionaryUpdatedAt": "2026-04-14T10:00:00Z",
+      "projectedInstanceCount": 0,
+      "lastMigratedAt": "2026-04-14T10:00:00Z"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/org/departments/tree"
+  },
+  "response": {
+    "success": true,
+    "data": [
+      {
+        "departmentId": "dept-a",
+        "name": "AI Team",
+        "adminConsumerName": "alice",
+        "level": 1,
+        "memberCount": 2,
+        "children": [
+          {
+            "departmentId": "dept-b",
+            "name": "Agents",
+            "parentDepartmentId": "dept-a",
+            "level": 2,
+            "memberCount": 1
+          }
+        ]
+      }
+    ]
+  }
+}

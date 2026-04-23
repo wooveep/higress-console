@@ -1,8 +1,16 @@
-import request from './request';
-import { Consumer, InviteCodeRecord, ResetPasswordResponse } from '@/interfaces/consumer';
+import request, { RequestOptions } from './request';
+import { Consumer, ConsumerDetail, InviteCodeRecord, ResetPasswordResponse } from '@/interfaces/consumer';
+
+const QUIET_PORTAL_REQUEST_OPTIONS: RequestOptions = {
+  skipErrorModal: true,
+};
 
 export const getConsumers = (): Promise<Consumer[]> => {
   return request.get<any, Consumer[]>('/v1/consumers');
+};
+
+export const getConsumerDetail = (name: string): Promise<ConsumerDetail> => {
+  return request.get<any, ConsumerDetail>(`/v1/consumers/${name}`, QUIET_PORTAL_REQUEST_OPTIONS);
 };
 
 export const getConsumerDepartments = (): Promise<string[]> => {
@@ -42,7 +50,10 @@ export const listInviteCodes = (params?: {
   pageSize?: number;
   status?: string;
 }): Promise<InviteCodeRecord[]> => {
-  return request.get<any, InviteCodeRecord[]>('/v1/portal/invite-codes', { params });
+  return request.get<any, InviteCodeRecord[]>('/v1/portal/invite-codes', {
+    ...QUIET_PORTAL_REQUEST_OPTIONS,
+    params,
+  });
 };
 
 export const updateInviteCodeStatus = (inviteCode: string, status: 'active' | 'disabled'): Promise<InviteCodeRecord> => {

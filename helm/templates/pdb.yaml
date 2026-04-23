@@ -1,0 +1,14 @@
+{{- if .Values.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "aigateway-console.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aigateway-console.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "aigateway-console.selectorLabels" . | nindent 6 }}
+{{- end }}
