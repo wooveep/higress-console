@@ -1,0 +1,1 @@
+import{n as e}from"./index-KthySKg6.js";const t=()=>e.get("/v1/proxy-servers"),o=r=>e.post("/v1/proxy-servers",r),v=r=>e.delete(`/v1/proxy-servers/${r}`),n=r=>e.put(`/v1/proxy-servers/${r.name}`,r);export{o as a,v as d,t as g,n as u};

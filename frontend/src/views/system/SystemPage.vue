@@ -13,6 +13,7 @@ const router = useRouter();
 const { t } = useI18n();
 const systemInfoLoading = shallowRef(false);
 const systemInfo = shallowRef<Record<string, any>>({});
+const hiddenSystemInfoKeys = new Set(['legacyNaming', 'legacyBackend', 'phase']);
 const configState = useHigressGlobalConfig();
 const portalSSOLoading = shallowRef(false);
 const portalSSOSaving = shallowRef(false);
@@ -85,6 +86,10 @@ const portalSSODiscoveryURL = computed(() => {
   return issuer ? `${issuer}/.well-known/openid-configuration` : '';
 });
 
+const visibleSystemInfoEntries = computed(() =>
+  Object.entries(systemInfo.value).filter(([key]) => !hiddenSystemInfoKeys.has(key)),
+);
+
 async function loadPortalSSOConfig() {
   portalSSOLoading.value = true;
   try {
@@ -144,7 +149,7 @@ onMounted(load);
       <a-skeleton v-if="systemInfoLoading" active />
       <div v-else class="system-page__overview">
         <article
-          v-for="(value, key) in systemInfo"
+          v-for="[key, value] in visibleSystemInfoEntries"
           :key="key"
           class="system-page__stat"
         >
@@ -154,7 +159,7 @@ onMounted(load);
       </div>
     </PageSection>
 
-    <PageSection title="Higress Config">
+    <PageSection title="AIGateway 配置">
       <HigressGlobalConfigForm
         :loading="configState.loading.value"
         :saving="configState.saving.value"

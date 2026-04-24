@@ -427,7 +427,7 @@ func (s *Service) DeleteConsumer(ctx context.Context, consumerName string) error
 	}
 
 	result, err := db.ExecContext(ctx, `
-		UPDATE portal_user SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+		UPDATE portal_user SET is_deleted = TRUE, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
 		WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE`, name)
 	if err != nil {
 		return portaldbclient.WrapExecError("delete consumer", err)
@@ -1164,8 +1164,8 @@ func (s *Service) RebindAccountSSOIdentity(ctx context.Context, consumerName, ta
 	if sourceAccount.Source != "sso" {
 		return nil, fmt.Errorf("consumer is not an sso account: %s", sourceConsumerName)
 	}
-	if sourceAccount.Status != "pending" {
-		return nil, fmt.Errorf("consumer is not pending: %s", sourceConsumerName)
+	if !isRebindableSSOAccountStatus(sourceAccount.Status) {
+		return nil, fmt.Errorf("consumer is not in rebindable sso status: %s", sourceConsumerName)
 	}
 
 	targetAccount, err := s.lookupAccountState(ctx, tx, targetName)
@@ -1205,7 +1205,7 @@ func (s *Service) RebindAccountSSOIdentity(ctx context.Context, consumerName, ta
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE portal_user
-		SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+		SET is_deleted = TRUE, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
 		WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE`,
 		sourceConsumerName,
 	); err != nil {
@@ -1222,6 +1222,15 @@ func (s *Service) RebindAccountSSOIdentity(ctx context.Context, consumerName, ta
 		SourceConsumerName: sourceConsumerName,
 		TargetConsumerName: targetName,
 	}, nil
+}
+
+func isRebindableSSOAccountStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "pending", "disabled":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) CreateInviteCode(ctx context.Context, expiresInDays int) (*InviteCodeRecord, error) {

@@ -541,7 +541,7 @@
     "deleteSuccess": "Deleted successfully.",
     "ssoRebind": "Bind Existing Account",
     "ssoRebindTitle": "Bind SSO to Existing Account",
-    "ssoRebindHint": "After rebinding pending SSO account {name} to an existing account, the original pending account will be soft deleted and hidden.",
+    "ssoRebindHint": "After rebinding inactive SSO account {name} to an existing account, the original SSO account will be soft deleted and hidden.",
     "ssoRebindTarget": "Target Account",
     "ssoRebindTargetRequired": "Please select a target account.",
     "ssoRebindTargetPlaceholder": "Search by user name, display name, or email",

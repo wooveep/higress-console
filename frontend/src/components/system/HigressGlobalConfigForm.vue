@@ -28,8 +28,7 @@ const emit = defineEmits<{
   <div class="higress-config-form">
     <div class="higress-config-form__toolbar">
       <div class="higress-config-form__summary">
-        <h2 class="higress-config-form__title">Higress 全局配置</h2>
-        <p class="higress-config-form__description">编辑 `ConfigMap/higress-config` 的 `data.higress`，表单保存会保留未知字段。</p>
+        <h2 class="higress-config-form__title">AIGateway 配置</h2>
       </div>
       <div class="higress-config-form__actions">
         <a-tag v-if="dirty" color="gold">有未保存修改</a-tag>
@@ -95,12 +94,6 @@ const emit = defineEmits<{
   margin: 0;
   font-size: 18px;
   font-weight: 700;
-}
-
-.higress-config-form__description {
-  margin: 0;
-  color: var(--portal-text-soft);
-  font-size: 13px;
 }
 
 .higress-config-form__actions {

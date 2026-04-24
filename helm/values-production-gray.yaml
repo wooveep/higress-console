@@ -22,7 +22,7 @@ global:
 image:
   repository: aigateway/console
   pullPolicy: IfNotPresent
-  tag: "1.0.0-dev-20260424103206"
+  tag: "1.0.0-dev-20260424135639"
 
 controller:
   serviceName: aigateway-controller

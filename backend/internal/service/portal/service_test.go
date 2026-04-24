@@ -265,7 +265,69 @@ func TestRebindAccountSSOIdentity(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`
 		UPDATE portal_user
-		SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+		SET is_deleted = TRUE, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+		WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE`)).
+		WithArgs("sso-user").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	svc := New(portaldbclient.NewFromDB(portaldbclient.Config{Enabled: true, Driver: "postgres", AutoMigrate: true}, db))
+	result, err := svc.RebindAccountSSOIdentity(context.Background(), "sso-user", "alice")
+	require.NoError(t, err)
+	require.Equal(t, "sso-user", result.SourceConsumerName)
+	require.Equal(t, "alice", result.TargetConsumerName)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRebindAccountSSOIdentityAllowsDisabledSSOAccount(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	expectSchema(mock)
+	mock.ExpectQuery(regexp.QuoteMeta(`
+			SELECT COUNT(1) FROM org_department
+			WHERE admin_consumer_name = ? AND status = 'active'`)).
+		WithArgs("sso-user").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT consumer_name, source, status
+		FROM portal_user
+		WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE
+		LIMIT 1`)).
+		WithArgs("sso-user").
+		WillReturnRows(sqlmock.NewRows([]string{"consumer_name", "source", "status"}).AddRow("sso-user", "sso", "disabled"))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT consumer_name, source, status
+		FROM portal_user
+		WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE
+		LIMIT 1`)).
+		WithArgs("alice").
+		WillReturnRows(sqlmock.NewRows([]string{"consumer_name", "source", "status"}).AddRow("alice", "console", "active"))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT provider_key, issuer, subject
+		FROM portal_user_sso_identity
+		WHERE consumer_name = ?
+		ORDER BY linked_at DESC
+		LIMIT 1`)).
+		WithArgs("sso-user").
+		WillReturnRows(sqlmock.NewRows([]string{"provider_key", "issuer", "subject"}).AddRow("portal-oidc", "https://issuer.example.com", "sub-1"))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT COUNT(1)
+		FROM portal_user_sso_identity
+		WHERE provider_key = ? AND consumer_name = ?`)).
+		WithArgs("portal-oidc", "alice").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE portal_user_sso_identity
+		SET consumer_name = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE provider_key = ? AND issuer = ? AND subject = ?`)).
+		WithArgs("alice", "portal-oidc", "https://issuer.example.com", "sub-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE portal_user
+		SET is_deleted = TRUE, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
 		WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE`)).
 		WithArgs("sso-user").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -291,7 +353,7 @@ func TestDeleteAccountSoftDeletesPortalUser(t *testing.T) {
 		WithArgs("demo").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectExec(regexp.QuoteMeta(`
-		UPDATE portal_user SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+		UPDATE portal_user SET is_deleted = TRUE, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
 		WHERE consumer_name = ? AND COALESCE(is_deleted, FALSE) = FALSE`)).
 		WithArgs("demo").
 		WillReturnResult(sqlmock.NewResult(0, 1))

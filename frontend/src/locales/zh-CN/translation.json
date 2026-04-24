@@ -541,7 +541,7 @@
     "deleteSuccess": "删除成功",
     "ssoRebind": "绑定已有账号",
     "ssoRebindTitle": "绑定 SSO 到已有账号",
-    "ssoRebindHint": "将待启用的 SSO 账号 {name} 绑定到已有账号后，原账号会被软删除并隐藏。",
+    "ssoRebindHint": "将未启用的 SSO 账号 {name} 绑定到已有账号后，原账号会被软删除并隐藏。",
     "ssoRebindTarget": "目标账号",
     "ssoRebindTargetRequired": "请选择目标账号",
     "ssoRebindTargetPlaceholder": "请输入用户名称、显示名或邮箱搜索",

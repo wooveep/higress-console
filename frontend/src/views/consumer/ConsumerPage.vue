@@ -127,6 +127,12 @@ const ssoRebindTargetOptions = computed(() => {
     }));
 });
 
+function isRebindableSSOAccount(record: OrgAccountRecord) {
+  const source = String(record.source || '').toLowerCase();
+  const status = String(record.status || '').toLowerCase();
+  return source === 'sso' && ['pending', 'disabled'].includes(status);
+}
+
 function toDepartmentTree(nodes: OrgDepartmentNode[]): any[] {
   return (nodes || []).map((node) => ({
     key: node.departmentId,
@@ -574,7 +580,7 @@ onMounted(load);
                 <a-button type="link" size="small" @click="openEditAccount(record)">{{ t('misc.edit') }}</a-button>
                 <a-button type="link" size="small" @click="handleResetPassword(record)">{{ t('consumer.resetPassword') }}</a-button>
                 <a-button
-                  v-if="String(record.source || '').toLowerCase() === 'sso' && String(record.status || '').toLowerCase() === 'pending'"
+                  v-if="isRebindableSSOAccount(record)"
                   type="link"
                   size="small"
                   @click="openSSORebind(record)"
