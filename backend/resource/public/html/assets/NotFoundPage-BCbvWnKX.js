@@ -1,1 +1,0 @@
-import{_ as e,o,e as s,g as a}from"./index-KthySKg6.js";import{R as n}from"./index-C42FNFWJ.js";const c={},_={class:"not-found-page"};function r(d,f){const t=n;return o(),s("div",_,[a(t,{status:"404",title:"404","sub-title":"Page not found"})])}const i=e(c,[["render",r],["__scopeId","data-v-979652f7"]]);export{i as default};
